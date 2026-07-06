@@ -18,7 +18,7 @@
 		"typecheck": "tsc --noEmit --emitDeclarationOnly false"
 	},
 	"dependencies": {
-		"@linear/sdk": "^68.1.0",
+		"@linear/sdk": "^88.0.0",
 		"@superset/auth": "workspace:*",
 		"@superset/db": "workspace:*",
 		"@superset/shared": "workspace:*",
