@@ -24,7 +24,7 @@
 	},
 	"dependencies": {
 		"drizzle-orm": "0.45.1",
-		"uuid": "^13.0.0",
+		"uuid": "^14.0.1",
 		"zod": "^4.3.5"
 	},
 	"devDependencies": {
