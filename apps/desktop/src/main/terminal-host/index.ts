@@ -58,7 +58,13 @@ const DAEMON_VERSION = "1.0.0";
 const SUPERSET_HOME_DIR = join(homedir(), SUPERSET_DIR_NAME);
 
 // Socket and token paths
-const SOCKET_PATH = join(SUPERSET_HOME_DIR, "terminal-host.sock");
+// Windows has no Unix domain sockets at a filesystem path (net.Server.listen on a
+// plain path there throws EACCES); use a named pipe instead. Must match the client's
+// computation in main/lib/terminal-host/client.ts exactly, since both derive the same path.
+const SOCKET_PATH =
+	process.platform === "win32"
+		? `\\\\.\\pipe\\${SUPERSET_DIR_NAME}-terminal-host`
+		: join(SUPERSET_HOME_DIR, "terminal-host.sock");
 const TOKEN_PATH = join(SUPERSET_HOME_DIR, "terminal-host.token");
 const PID_PATH = join(SUPERSET_HOME_DIR, "terminal-host.pid");
 

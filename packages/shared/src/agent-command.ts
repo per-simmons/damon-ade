@@ -24,6 +24,29 @@ export const AGENT_LABELS: Record<AgentType, string> = {
 	glm: "GLM 5.2",
 };
 
+/** OpenRouter model slugs for the Claude-Code-proxied runtimes. */
+const OPENROUTER_MODELS = {
+	kimi: "moonshotai/kimi-k2.7-code",
+	minimax: "minimax/minimax-m3",
+	glm: "z-ai/glm-5.2",
+} as const;
+
+/**
+ * Launch command for an OpenRouter-proxied runtime (Claude Code pointed at
+ * OpenRouter). The env-var prefix is shell-syntax-specific: POSIX inline
+ * assignments don't parse in cmd/PowerShell, so the Windows variant routes
+ * through `cmd /c` (which PowerShell can also run) and uses cmd's `set`.
+ * The no-space `&&` chaining is deliberate — `set VAR=value && next` would
+ * store a trailing space in the value.
+ */
+function buildOpenRouterCommand(model: string, windows: boolean): string {
+	const claudeArgs = `claude --model ${model} --dangerously-skip-permissions`;
+	if (windows) {
+		return `cmd /c "set ANTHROPIC_BASE_URL=https://openrouter.ai/api&&set ANTHROPIC_AUTH_TOKEN=%OPENROUTER_API_KEY%&&set ANTHROPIC_API_KEY=&&${claudeArgs}"`;
+	}
+	return `ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" ${claudeArgs}`;
+}
+
 export const AGENT_PRESET_COMMANDS: Record<AgentType, string[]> = {
 	claude: ["claude --dangerously-skip-permissions"],
 	codex: [
@@ -33,10 +56,29 @@ export const AGENT_PRESET_COMMANDS: Record<AgentType, string[]> = {
 	opencode: ["opencode"],
 	copilot: ["copilot --allow-all"],
 	"cursor-agent": ["cursor-agent"],
-	kimi: ['ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model moonshotai/kimi-k2.7-code --dangerously-skip-permissions'],
-	minimax: ['ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model minimax/minimax-m3 --dangerously-skip-permissions'],
-	glm: ['ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model z-ai/glm-5.2 --dangerously-skip-permissions'],
+	kimi: [buildOpenRouterCommand(OPENROUTER_MODELS.kimi, false)],
+	minimax: [buildOpenRouterCommand(OPENROUTER_MODELS.minimax, false)],
+	glm: [buildOpenRouterCommand(OPENROUTER_MODELS.glm, false)],
 };
+
+/**
+ * Platform-aware variant of AGENT_PRESET_COMMANDS. Identical except the
+ * OpenRouter-proxied runtimes, whose env-var prefix must match the shell.
+ * Renderer callers should pass the platform from `window.getPlatform`.
+ */
+export function getAgentPresetCommands({
+	windows,
+}: {
+	windows: boolean;
+}): Record<AgentType, string[]> {
+	if (!windows) return AGENT_PRESET_COMMANDS;
+	return {
+		...AGENT_PRESET_COMMANDS,
+		kimi: [buildOpenRouterCommand(OPENROUTER_MODELS.kimi, true)],
+		minimax: [buildOpenRouterCommand(OPENROUTER_MODELS.minimax, true)],
+		glm: [buildOpenRouterCommand(OPENROUTER_MODELS.glm, true)],
+	};
+}
 
 export const AGENT_PRESET_DESCRIPTIONS: Record<AgentType, string> = {
 	claude: "Danger mode: All permissions auto-approved",

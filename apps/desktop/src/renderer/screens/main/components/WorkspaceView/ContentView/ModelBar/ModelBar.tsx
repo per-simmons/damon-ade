@@ -59,7 +59,7 @@ export function ModelBar() {
 	const ready = !!worktreePath;
 
 	const spawn = (model: ModelDescriptor) => {
-		spawnAgentSession({
+		void spawnAgentSession({
 			id: workspaceId,
 			runtime: model.runtime,
 			worktreePath,

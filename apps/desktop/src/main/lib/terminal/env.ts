@@ -1,4 +1,4 @@
-import { exec } from "node:child_process";
+import { exec, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
@@ -6,6 +6,7 @@ import type { AgentRuntime } from "@superset/local-db";
 import defaultShell from "default-shell";
 import { env } from "shared/env.shared";
 import { getAgentCodexHome } from "../agent-home";
+import { BIN_DIR } from "../agent-setup/paths";
 import { getShellEnv } from "../agent-setup/shell-wrappers";
 
 const MACOS_SYSTEM_CERT_FILE = "/etc/ssl/cert.pem";
@@ -40,15 +41,45 @@ export const HOOK_PROTOCOL_VERSION = "2";
 export const FALLBACK_SHELL = os.platform() === "win32" ? "cmd.exe" : "/bin/sh";
 export const SHELL_CRASH_THRESHOLD_MS = 1000;
 
-export function getDefaultShell(): string {
-	if (defaultShell) {
-		return defaultShell;
+let cachedWindowsShell: string | null = null;
+
+/**
+ * Picks the best available shell on Windows: PowerShell 7 (pwsh), then
+ * Windows PowerShell, then cmd. The default-shell package just returns
+ * COMSPEC (cmd.exe) on Windows, which is a much worse experience for both
+ * users and agents. Probed once and cached.
+ */
+function getWindowsDefaultShell(): string {
+	if (cachedWindowsShell) return cachedWindowsShell;
+
+	for (const candidate of ["pwsh.exe", "powershell.exe"]) {
+		try {
+			const found = execFileSync("where.exe", [candidate], {
+				encoding: "utf-8",
+				stdio: ["pipe", "pipe", "ignore"],
+			})
+				.trim()
+				.split("\r\n")[0];
+			if (found) {
+				cachedWindowsShell = found;
+				return found;
+			}
+		} catch {
+			// Not installed — try the next candidate.
+		}
 	}
 
-	const platform = os.platform();
+	cachedWindowsShell = process.env.COMSPEC || "cmd.exe";
+	return cachedWindowsShell;
+}
 
-	if (platform === "win32") {
-		return process.env.COMSPEC || "powershell.exe";
+export function getDefaultShell(): string {
+	if (os.platform() === "win32") {
+		return getWindowsDefaultShell();
+	}
+
+	if (defaultShell) {
+		return defaultShell;
 	}
 
 	if (process.env.SHELL) {
@@ -502,6 +533,24 @@ export function buildTerminalEnv(params: {
 		fs.existsSync(MACOS_SYSTEM_CERT_FILE)
 	) {
 		terminalEnv.SSL_CERT_FILE = MACOS_SYSTEM_CERT_FILE;
+	}
+
+	// On Unix the agent-wrapper bin dir is prepended to PATH by the shell rc
+	// wrappers (zsh/bash/fish). cmd and PowerShell have no such hook, so prepend
+	// it directly here — this is what makes `claude` resolve to ADE's .cmd shim
+	// (which injects --settings and with it the lifecycle hooks).
+	if (os.platform() === "win32") {
+		const pathKey =
+			Object.keys(terminalEnv).find((k) => k.toUpperCase() === "PATH") ?? "Path";
+		const currentPath = terminalEnv[pathKey] ?? "";
+		const alreadyPresent = currentPath
+			.split(";")
+			.some((entry) => entry.toLowerCase() === BIN_DIR.toLowerCase());
+		if (!alreadyPresent) {
+			terminalEnv[pathKey] = currentPath
+				? `${BIN_DIR};${currentPath}`
+				: BIN_DIR;
+		}
 	}
 
 	return terminalEnv;

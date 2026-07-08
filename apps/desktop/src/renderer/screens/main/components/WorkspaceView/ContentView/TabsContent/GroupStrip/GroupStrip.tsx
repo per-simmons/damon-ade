@@ -152,9 +152,9 @@ export function GroupStrip() {
 
 	// The "+" defaults to spawning the agent's runtime CLI session (falls back to
 	// a plain shell when the workspace has no runtime).
-	const handleAddGroup = () => {
+	const handleAddGroup = async () => {
 		if (!activeWorkspaceId) return;
-		const result = spawnAgentSession({
+		const result = await spawnAgentSession({
 			id: activeWorkspaceId,
 			runtime: workspace?.runtime ?? null,
 			worktreePath: workspace?.worktreePath ?? null,

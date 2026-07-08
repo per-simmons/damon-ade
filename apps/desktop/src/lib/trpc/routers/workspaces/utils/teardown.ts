@@ -39,18 +39,30 @@ export async function runTeardown({
 	console.log(`[teardown] Running for "${workspaceName}": ${command}`);
 
 	try {
-		const shell =
-			process.env.SHELL ||
-			(process.platform === "darwin" ? "/bin/zsh" : "/bin/bash");
+		// Windows has no /bin/bash; run teardown commands through cmd, which
+		// also understands the " && " joining used above.
+		const isWindows = process.platform === "win32";
+		const shell = isWindows
+			? process.env.COMSPEC || "cmd.exe"
+			: process.env.SHELL ||
+				(process.platform === "darwin" ? "/bin/zsh" : "/bin/bash");
 
 		const baseEnv = buildSafeEnv(sanitizeEnv(process.env) || {});
 		const wrapperEnv = getShellEnv(shell);
-		const args = getCommandShellArgs(shell, command);
+		// On Windows the command must reach cmd.exe verbatim: libuv's default
+		// argument quoting backslash-escapes embedded double quotes, which cmd
+		// does not parse as escapes and would mangle any quoted argument. With
+		// verbatim args we quote the whole command ourselves; cmd's /s rule
+		// strips exactly those outer quotes.
+		const args = isWindows
+			? ["/d", "/s", "/c", `"${command}"`]
+			: getCommandShellArgs(shell, command);
 
 		const output = await new Promise<string>((resolve, reject) => {
 			const child = spawn(shell, args, {
 				cwd: worktreePath,
-				detached: true,
+				detached: !isWindows,
+				windowsVerbatimArguments: isWindows,
 				stdio: ["ignore", "pipe", "pipe"],
 				env: {
 					...baseEnv,
@@ -104,7 +116,20 @@ export async function runTeardown({
 						`[teardown] Timed out after ${TEARDOWN_TIMEOUT_MS}ms, killing process group`,
 					);
 					try {
-						if (child.pid) process.kill(-child.pid, "SIGKILL");
+						if (child.pid) {
+							if (isWindows) {
+								// Negative-PID group kill is POSIX-only; taskkill /t
+								// terminates the whole cmd.exe process tree instead.
+								spawn("taskkill", [
+									"/pid",
+									String(child.pid),
+									"/t",
+									"/f",
+								]).on("error", () => {});
+							} else {
+								process.kill(-child.pid, "SIGKILL");
+							}
+						}
 					} catch {}
 					reject(
 						new Error(`Teardown timed out after ${TEARDOWN_TIMEOUT_MS}ms`),

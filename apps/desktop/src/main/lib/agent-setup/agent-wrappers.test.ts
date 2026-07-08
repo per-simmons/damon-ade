@@ -33,6 +33,7 @@ mock.module("./notify-hook", () => ({
 	NOTIFY_SCRIPT_NAME: "notify.sh",
 	NOTIFY_SCRIPT_MARKER: "# Superset agent notification hook",
 	getNotifyScriptPath: () => path.join(TEST_HOOKS_DIR, "notify.sh"),
+	getNotifyHookCommand: () => path.join(TEST_HOOKS_DIR, "notify.sh"),
 	getNotifyScriptContent: () => "#!/bin/bash\nexit 0\n",
 	createNotifyScript: () => {},
 }));

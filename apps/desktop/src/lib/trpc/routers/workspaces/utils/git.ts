@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, rename } from "node:fs/promises";
+import { mkdir, rename, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -648,6 +648,72 @@ export async function deleteLocalBranch({
 	}
 }
 
+/**
+ * Renames a directory, retrying on Windows EBUSY/EPERM errors.
+ *
+ * On Windows, a just-killed process (e.g. a terminal's cmd.exe/ConPTY pair)
+ * can hold a directory handle open for a brief grace period after exit, which
+ * makes `rename()` fail transiently. macOS/Linux don't have this issue, but
+ * the retry is harmless there too since the error codes won't match.
+ */
+async function renameWithRetry(
+	source: string,
+	dest: string,
+	{ attempts = 10, delayMs = 300 } = {},
+): Promise<void> {
+	for (let attempt = 1; attempt <= attempts; attempt++) {
+		try {
+			await rename(source, dest);
+			return;
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			const isRetryable = code === "EBUSY" || code === "EPERM";
+			if (!isRetryable || attempt === attempts) {
+				throw error;
+			}
+			await new Promise((resolve) => setTimeout(resolve, delayMs));
+		}
+	}
+}
+
+/**
+ * Recursively deletes a directory in the background, without blocking the caller.
+ *
+ * On macOS/Linux, shells out to `rm -rf` — Node's fs.rm can hang there when
+ * encountering .app bundles with extended attributes. Windows has no such
+ * bundles and no `/bin/rm`, so it uses fs.rm directly instead.
+ */
+function deleteDirectoryInBackground(targetPath: string): void {
+	if (process.platform === "win32") {
+		rm(targetPath, { recursive: true, force: true }).catch((error) => {
+			console.error(
+				`[removeWorktree] Background cleanup of ${targetPath} failed:`,
+				error instanceof Error ? error.message : String(error),
+			);
+		});
+		return;
+	}
+
+	const child = spawn("/bin/rm", ["-rf", targetPath], {
+		detached: true,
+		stdio: "ignore",
+	});
+	child.unref();
+	child.on("error", (err) => {
+		console.error(
+			`[removeWorktree] Failed to spawn rm for ${targetPath}:`,
+			err.message,
+		);
+	});
+	child.on("exit", (code: number | null) => {
+		if (code !== 0) {
+			console.error(
+				`[removeWorktree] Background cleanup of ${targetPath} failed (exit ${code})`,
+			);
+		}
+	});
+}
+
 export async function removeWorktree(
 	mainRepoPath: string,
 	worktreePath: string,
@@ -661,7 +727,7 @@ export async function removeWorktree(
 			dirname(worktreePath),
 			`.ade-delete-${randomUUID()}`,
 		);
-		await rename(worktreePath, tempPath);
+		await renameWithRetry(worktreePath, tempPath);
 
 		await execFileAsync("git", ["-C", mainRepoPath, "worktree", "prune"], {
 			env,
@@ -669,26 +735,7 @@ export async function removeWorktree(
 		});
 
 		// Delete the moved directory in the background — don't block the caller.
-		// Use spawned `rm -rf` instead of Node's fs.rm which can hang on macOS
-		// when encountering .app bundles with extended attributes.
-		const child = spawn("/bin/rm", ["-rf", tempPath], {
-			detached: true,
-			stdio: "ignore",
-		});
-		child.unref();
-		child.on("error", (err) => {
-			console.error(
-				`[removeWorktree] Failed to spawn rm for ${tempPath}:`,
-				err.message,
-			);
-		});
-		child.on("exit", (code: number | null) => {
-			if (code !== 0) {
-				console.error(
-					`[removeWorktree] Background cleanup of ${tempPath} failed (exit ${code})`,
-				);
-			}
-		});
+		deleteDirectoryInBackground(tempPath);
 	} catch (error) {
 		const code = (error as NodeJS.ErrnoException).code;
 		// If the worktree directory is already gone, just prune metadata
