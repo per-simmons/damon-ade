@@ -199,7 +199,7 @@ function WorkspacePage() {
 		if (tabs.length > 0) return;
 		if (autoSpawnedRef.current.has(workspaceId)) return;
 		autoSpawnedRef.current.add(workspaceId);
-		spawnSession();
+		void spawnSession();
 	}, [tabsHydrated, workspace, showInitView, tabs.length, workspaceId, spawnSession]);
 
 	const { presets } = usePresets();

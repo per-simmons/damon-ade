@@ -3,10 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import {
 	buildWrapperScript,
+	createWindowsCmdWrapper,
 	createWrapper,
 	writeFileIfChanged,
 } from "./agent-wrappers-common";
-import { getNotifyScriptPath } from "./notify-hook";
+import { getNotifyHookCommand, getNotifyScriptPath } from "./notify-hook";
 import { HOOKS_DIR, OPENCODE_CONFIG_DIR, OPENCODE_PLUGIN_DIR } from "./paths";
 
 export const CLAUDE_SETTINGS_FILE = "claude-settings.json";
@@ -44,19 +45,27 @@ export function getOpenCodeGlobalPluginPath(): string {
 	return path.join(configHome, "opencode", "plugin", OPENCODE_PLUGIN_FILE);
 }
 
-export function getClaudeSettingsContent(notifyPath: string): string {
+export function getClaudeSettingsContent(notifyCommand: string | null): string {
+	// No runnable hook command (Windows without Node): write empty hooks so the
+	// --settings injection stays harmless instead of pointing at a broken command.
+	if (!notifyCommand) {
+		return JSON.stringify({ hooks: {} });
+	}
+
 	const settings = {
 		hooks: {
-			UserPromptSubmit: [{ hooks: [{ type: "command", command: notifyPath }] }],
-			Stop: [{ hooks: [{ type: "command", command: notifyPath }] }],
+			UserPromptSubmit: [
+				{ hooks: [{ type: "command", command: notifyCommand }] },
+			],
+			Stop: [{ hooks: [{ type: "command", command: notifyCommand }] }],
 			PostToolUse: [
-				{ matcher: "*", hooks: [{ type: "command", command: notifyPath }] },
+				{ matcher: "*", hooks: [{ type: "command", command: notifyCommand }] },
 			],
 			PostToolUseFailure: [
-				{ matcher: "*", hooks: [{ type: "command", command: notifyPath }] },
+				{ matcher: "*", hooks: [{ type: "command", command: notifyCommand }] },
 			],
 			PermissionRequest: [
-				{ matcher: "*", hooks: [{ type: "command", command: notifyPath }] },
+				{ matcher: "*", hooks: [{ type: "command", command: notifyCommand }] },
 			],
 		},
 	};
@@ -66,15 +75,18 @@ export function getClaudeSettingsContent(notifyPath: string): string {
 
 export function getOpenCodePluginContent(notifyPath: string): string {
 	const template = fs.readFileSync(OPENCODE_PLUGIN_TEMPLATE_PATH, "utf-8");
+	// The path lands inside a JS double-quoted string literal in the template;
+	// Windows backslashes must be escaped or they're consumed as JS escapes
+	// (C:\Users\... would become C:Users...).
+	const escapedPath = notifyPath.replaceAll("\\", "\\\\");
 	return template
 		.replace("{{MARKER}}", OPENCODE_PLUGIN_MARKER)
-		.replace("{{NOTIFY_PATH}}", notifyPath);
+		.replace("{{NOTIFY_PATH}}", escapedPath);
 }
 
 function createClaudeSettings(): string {
 	const settingsPath = getClaudeSettingsPath();
-	const notifyPath = getNotifyScriptPath();
-	const settings = getClaudeSettingsContent(notifyPath);
+	const settings = getClaudeSettingsContent(getNotifyHookCommand());
 
 	writeFileIfChanged(settingsPath, settings, 0o644);
 	return settingsPath;
@@ -87,6 +99,35 @@ export function createClaudeWrapper(): void {
 		`exec "$REAL_BIN" --settings "${settingsPath}" "$@"`,
 	);
 	createWrapper("claude", script);
+
+	// cmd/PowerShell can't execute the extensionless bash wrapper; give them a
+	// .cmd shim so `claude` typed in a Windows terminal still gets --settings
+	// (and with it, the lifecycle hooks that drive agent status + memory flows).
+	if (process.platform === "win32") {
+		createWindowsCmdWrapper("claude", {
+			extraArgsLine: `--settings "${settingsPath}"`,
+		});
+	}
+}
+
+/**
+ * Windows codex notify config. codex spawns the notify argv directly (no
+ * shell), so we can point it straight at node + the .mjs port. Forward
+ * slashes keep the paths clean through both TOML string parsing and MSVC
+ * argv quoting (\" for the embedded quotes). The bash wrapper's session-log
+ * Start-event watcher has no cmd equivalent and is intentionally omitted —
+ * completion (Stop) notifications are the load-bearing part.
+ */
+function buildCodexWindowsArgsLine(): string | undefined {
+	const notifyCommand = getNotifyHookCommand();
+	if (!notifyCommand) return undefined;
+
+	// getNotifyHookCommand returns `"<node>" "<script>"` on Windows; re-split it.
+	const parts = notifyCommand.match(/"([^"]+)" "([^"]+)"/);
+	if (!parts) return undefined;
+	const [, node, script] = parts;
+	const toSlash = (p: string) => p.replaceAll("\\", "/");
+	return `-c "notify=[\\"${toSlash(node)}\\",\\"${toSlash(script)}\\"]"`;
 }
 
 export function createCodexWrapper(): void {
@@ -96,6 +137,12 @@ export function createCodexWrapper(): void {
 		buildCodexWrapperExecLine(notifyPath),
 	);
 	createWrapper("codex", script);
+
+	if (process.platform === "win32") {
+		createWindowsCmdWrapper("codex", {
+			extraArgsLine: buildCodexWindowsArgsLine(),
+		});
+	}
 }
 
 export function buildCodexWrapperExecLine(notifyPath: string): string {
@@ -147,4 +194,10 @@ export function createOpenCodeWrapper(): void {
 		`export OPENCODE_CONFIG_DIR="${OPENCODE_CONFIG_DIR}"\nexec "$REAL_BIN" "$@"`,
 	);
 	createWrapper("opencode", script);
+
+	if (process.platform === "win32") {
+		createWindowsCmdWrapper("opencode", {
+			preludeLines: [`set "OPENCODE_CONFIG_DIR=${OPENCODE_CONFIG_DIR}"`],
+		});
+	}
 }

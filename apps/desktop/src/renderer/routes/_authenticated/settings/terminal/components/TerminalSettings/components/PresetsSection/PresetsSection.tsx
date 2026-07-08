@@ -4,6 +4,7 @@ import { Label } from "@superset/ui/label";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HiOutlinePlus } from "react-icons/hi2";
 import { useIsDarkTheme } from "renderer/assets/app-icons/preset-icons";
+import { electronTrpc } from "renderer/lib/electron-trpc";
 import { usePresets } from "renderer/react-query/presets";
 import type { PresetColumnKey } from "renderer/routes/_authenticated/settings/presets/types";
 import { PresetEditorSheet } from "./components/PresetEditorSheet";
@@ -11,7 +12,7 @@ import { PresetsTable } from "./components/PresetsTable";
 import { QuickAddPresets } from "./components/QuickAddPresets";
 import {
 	type AutoApplyField,
-	PRESET_TEMPLATES,
+	getPresetTemplates,
 	type PresetTemplate,
 } from "./constants";
 
@@ -29,6 +30,11 @@ export function PresetsSection({
 	onEditingPresetIdChange,
 }: PresetsSectionProps) {
 	const isDark = useIsDarkTheme();
+	const { data: platform } = electronTrpc.window.getPlatform.useQuery();
+	const presetTemplates = useMemo(
+		() => getPresetTemplates(platform === "win32"),
+		[platform],
+	);
 	const {
 		presets: serverPresets,
 		isLoading: isLoadingPresets,
@@ -381,7 +387,7 @@ export function PresetsSection({
 
 			{showQuickAdd && (
 				<QuickAddPresets
-					templates={PRESET_TEMPLATES}
+					templates={presetTemplates}
 					isDark={isDark}
 					isCreatePending={createPreset.isPending}
 					isTemplateAdded={isTemplateAdded}

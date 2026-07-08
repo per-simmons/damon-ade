@@ -5,6 +5,7 @@ import {
 	BINARY_INSTALL,
 } from "@superset/shared/agent-binaries";
 import { BIN_DIR } from "./paths";
+import { findRealBinary } from "./utils";
 
 export const WRAPPER_MARKER = "# ADE agent-wrapper v2";
 
@@ -120,5 +121,53 @@ export function createWrapper(binaryName: string, script: string): void {
 	const changed = writeFileIfChanged(getWrapperPath(binaryName), script, 0o755);
 	console.log(
 		`[agent-setup] ${changed ? "Updated" : "Verified"} ${binaryName} wrapper`,
+	);
+}
+
+/**
+ * Builds a Windows .cmd shim for an agent binary.
+ *
+ * Unlike the bash wrappers (which resolve the real binary at run time), the
+ * real binary path is resolved once at setup time via where.exe and embedded
+ * as an absolute path — batch has no sane equivalent of find_real_binary, and
+ * an absolute path also rules out shim-recursion. setupAgentHooks runs on
+ * every app boot, so a CLI installed after ADE is picked up on next launch.
+ *
+ * `extraArgsLine` is inserted verbatim before the user's arguments (%*),
+ * e.g. `--settings "C:\...\claude-settings.json"`. `preludeLines` are emitted
+ * before the exec line (e.g. `set "VAR=value"`).
+ */
+export function buildWindowsCmdWrapperScript(
+	binaryName: string,
+	options: { extraArgsLine?: string; preludeLines?: string[] } = {},
+): string {
+	const realBinary = findRealBinary(binaryName);
+	const header = `@echo off\r\nrem ${WRAPPER_MARKER}\r\nrem ADE wrapper for ${binaryName}\r\n`;
+
+	if (!realBinary) {
+		// echo the same guidance the bash wrapper gives; keep it ASCII for cmd.
+		const message = getMissingBinaryMessage(binaryName).replaceAll("—", "-");
+		return `${header}echo ${message} 1>&2\r\nexit /b 127\r\n`;
+	}
+
+	const prelude = (options.preludeLines ?? [])
+		.map((line) => `${line}\r\n`)
+		.join("");
+	const args = options.extraArgsLine ? `${options.extraArgsLine} ` : "";
+	return `${header}${prelude}"${realBinary}" ${args}%*\r\n`;
+}
+
+export function createWindowsCmdWrapper(
+	binaryName: string,
+	options: { extraArgsLine?: string; preludeLines?: string[] } = {},
+): void {
+	const script = buildWindowsCmdWrapperScript(binaryName, options);
+	const changed = writeFileIfChanged(
+		getWrapperPath(`${binaryName}.cmd`),
+		script,
+		0o755,
+	);
+	console.log(
+		`[agent-setup] ${changed ? "Updated" : "Verified"} ${binaryName}.cmd wrapper`,
 	);
 }
