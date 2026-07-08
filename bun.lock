@@ -108,7 +108,7 @@
     },
     "apps/desktop": {
       "name": "@ade/desktop",
-      "version": "1.0.3",
+      "version": "0.1.0",
       "dependencies": {
         "@ai-sdk/react": "^3.0.0",
         "@ast-grep/napi": "^0.41.0",
@@ -825,6 +825,9 @@
       "name": "@superset/typescript",
       "version": "0.1.0",
     },
+  },
+  "patchedDependencies": {
+    "node-pty@1.1.0": "patches/node-pty@1.1.0.patch",
   },
   "overrides": {
     "mastracode": "https://github.com/superset-sh/mastra/releases/download/mastracode-v0.4.0-superset.7/mastracode-0.4.0-superset.7.tgz",

@@ -29,7 +29,7 @@
 		"format:check": "biome format .",
 		"typecheck": "turbo typecheck",
 		"ui-add": "turbo run ui-add",
-		"postinstall": "./scripts/postinstall.sh",
+		"postinstall": "bun run scripts/postinstall.ts",
 		"clean": "git clean -xdf node_modules",
 		"clean:workspaces": "turbo clean",
 		"release:desktop": "./apps/desktop/create-release.sh",
@@ -48,6 +48,7 @@
 		"mastracode": "https://github.com/superset-sh/mastra/releases/download/mastracode-v0.4.0-superset.7/mastracode-0.4.0-superset.7.tgz"
 	},
 	"patchedDependencies": {
-		"@durable-streams/state@0.2.1": "patches/@durable-streams%2Fstate@0.2.1.patch"
+		"@durable-streams/state@0.2.1": "patches/@durable-streams%2Fstate@0.2.1.patch",
+		"node-pty@1.1.0": "patches/node-pty@1.1.0.patch"
 	}
 }
