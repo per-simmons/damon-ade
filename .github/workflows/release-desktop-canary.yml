@@ -106,6 +106,13 @@ jobs:
               echo "Created canary copy: ADE-Canary-${arch}.AppImage"
             fi
           done
+          for file in *.exe; do
+            if [[ -f "$file" && "$file" != *.__uninstaller.exe ]]; then
+              arch=$(echo "$file" | sed -E 's/.*-([^-]+)\.exe$/\1/')
+              cp "$file" "ADE-Canary-${arch}.exe"
+              echo "Created canary copy: ADE-Canary-${arch}.exe"
+            fi
+          done
           # Prerelease builds may request canary-linux.yml; keep latest-linux.yml as fallback.
           for file in *-linux.yml; do
             if [[ -f "$file" && "$file" != "canary-linux.yml" && "$file" != "latest-linux.yml" ]]; then
@@ -115,6 +122,11 @@ jobs:
               break
             fi
           done
+          # Windows generic provider uses latest.yml by default and may request canary.yml for prereleases.
+          if [[ -f latest.yml && ! -f canary.yml ]]; then
+            cp latest.yml canary.yml
+            echo "Created Windows canary manifest: canary.yml"
+          fi
 
       - name: List artifacts
         run: |

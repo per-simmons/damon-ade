@@ -30,6 +30,7 @@ export const SupersetNotifyPlugin = async ({ $, client }) => {
   if (!process?.env?.SUPERSET_TAB_ID) return {};
 
   const notifyPath = "{{NOTIFY_PATH}}";
+  const notifyBin = process.platform === "win32" ? "node" : "bash";
   const debug = process?.env?.SUPERSET_DEBUG === '1';
 
   // State tracking for deduplication and session-scoping
@@ -49,7 +50,7 @@ export const SupersetNotifyPlugin = async ({ $, client }) => {
     const payload = JSON.stringify({ hook_event_name: hookEventName });
     log('Sending notification:', hookEventName);
     try {
-      await $`bash ${notifyPath} ${payload}`;
+      await $`${notifyBin} ${notifyPath} ${payload}`;
       log('Notification sent successfully');
     } catch (err) {
       log('Notification failed:', err?.message || err);

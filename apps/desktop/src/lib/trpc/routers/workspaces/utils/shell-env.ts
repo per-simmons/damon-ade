@@ -18,6 +18,16 @@ const FALLBACK_CACHE_TTL_MS = 10_000; // 10 second cache for fallback (retry soo
 let pathFixAttempted = false;
 let pathFixSucceeded = false;
 
+function getProcessEnvSnapshot(): Record<string, string> {
+	const fallback: Record<string, string> = {};
+	for (const [key, value] of Object.entries(process.env)) {
+		if (typeof value === "string") {
+			fallback[key] = value;
+		}
+	}
+	return fallback;
+}
+
 /**
  * Gets the full shell environment by spawning a login shell.
  * This captures PATH and other environment variables set in shell profiles
@@ -34,6 +44,14 @@ export async function getShellEnvironment(): Promise<Record<string, string>> {
 	if (cachedEnv && now - cacheTime < ttl) {
 		// Return a copy to prevent caller mutations from corrupting cache
 		return { ...cachedEnv };
+	}
+
+	if (process.platform === "win32") {
+		const env = getProcessEnvSnapshot();
+		cachedEnv = env;
+		cacheTime = now;
+		isFallbackCache = false;
+		return { ...env };
 	}
 
 	const shell =
@@ -73,12 +91,7 @@ export async function getShellEnvironment(): Promise<Record<string, string>> {
 		);
 		// Fall back to process.env if shell spawn fails
 		// Cache with shorter TTL so we retry sooner
-		const fallback: Record<string, string> = {};
-		for (const [key, value] of Object.entries(process.env)) {
-			if (typeof value === "string") {
-				fallback[key] = value;
-			}
-		}
+		const fallback = getProcessEnvSnapshot();
 		cachedEnv = fallback;
 		cacheTime = now;
 		isFallbackCache = true;

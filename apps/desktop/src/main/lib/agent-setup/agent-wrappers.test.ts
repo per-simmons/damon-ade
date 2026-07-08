@@ -30,9 +30,12 @@ mock.module("shared/env.shared", () => ({
 }));
 
 mock.module("./notify-hook", () => ({
+	NOTIFY_NODE_SCRIPT_NAME: "notify.cjs",
 	NOTIFY_SCRIPT_NAME: "notify.sh",
 	NOTIFY_SCRIPT_MARKER: "# Superset agent notification hook",
 	getNotifyScriptPath: () => path.join(TEST_HOOKS_DIR, "notify.sh"),
+	getNotifyShellScriptPath: () => path.join(TEST_HOOKS_DIR, "notify.sh"),
+	getNotifyNodeScriptPath: () => path.join(TEST_HOOKS_DIR, "notify.cjs"),
 	getNotifyScriptContent: () => "#!/bin/bash\nexit 0\n",
 	createNotifyScript: () => {},
 }));
@@ -58,6 +61,7 @@ mock.module("node:os", () => ({
 const {
 	buildCodexWrapperExecLine,
 	buildCopilotWrapperExecLine,
+	buildWindowsCopilotWrapperScript,
 	buildWrapperScript,
 	createCodexWrapper,
 	createMastraWrapper,
@@ -84,8 +88,14 @@ describe("agent-wrappers copilot", () => {
 		const hookFile = path.join(hooksDir, "superset-notify.json");
 		const gitInfoDir = path.join(projectDir, ".git", "info");
 		const realBinDir = path.join(TEST_ROOT, "real-bin");
-		const realCopilot = path.join(realBinDir, "copilot");
-		const wrapperPath = path.join(TEST_BIN_DIR, "copilot");
+		const realCopilot =
+			process.platform === "win32"
+				? path.join(realBinDir, "copilot.cmd")
+				: path.join(realBinDir, "copilot");
+		const wrapperPath =
+			process.platform === "win32"
+				? path.join(TEST_BIN_DIR, "copilot.cjs")
+				: path.join(TEST_BIN_DIR, "copilot");
 		const hookScriptPath = getCopilotHookScriptPath();
 
 		mkdirSync(hooksDir, { recursive: true });
@@ -95,30 +105,38 @@ describe("agent-wrappers copilot", () => {
 		writeFileSync(hookScriptPath, "#!/bin/bash\nexit 0\n", { mode: 0o755 });
 		writeFileSync(hookFile, '{"superset":"old","bash":"/tmp/old-hook.sh"}');
 
-		writeFileSync(realCopilot, "#!/bin/bash\necho real-copilot\n", {
-			mode: 0o755,
-		});
+		writeFileSync(
+			realCopilot,
+			process.platform === "win32"
+				? "@echo off\r\necho real-copilot\r\n"
+				: "#!/bin/bash\necho real-copilot\n",
+			{ mode: 0o755 },
+		);
 		chmodSync(realCopilot, 0o755);
 
-		const wrapperScript = buildWrapperScript(
-			"copilot",
-			buildCopilotWrapperExecLine(),
-		);
+		const wrapperScript =
+			process.platform === "win32"
+				? buildWindowsCopilotWrapperScript()
+				: buildWrapperScript("copilot", buildCopilotWrapperExecLine());
 		writeFileSync(wrapperPath, wrapperScript, { mode: 0o755 });
 		chmodSync(wrapperPath, 0o755);
 
-		execFileSync(wrapperPath, [], {
+		const command =
+			process.platform === "win32" ? process.execPath : wrapperPath;
+		const args = process.platform === "win32" ? [wrapperPath] : [];
+
+		execFileSync(command, args, {
 			cwd: projectDir,
 			env: {
 				...process.env,
-				PATH: `${TEST_BIN_DIR}:${realBinDir}:${process.env.PATH || ""}`,
+				PATH: `${TEST_BIN_DIR}${path.delimiter}${realBinDir}${path.delimiter}${process.env.PATH || ""}`,
 				SUPERSET_TAB_ID: "tab-1",
 			},
 			encoding: "utf-8",
 		});
 
 		const updated = readFileSync(hookFile, "utf-8");
-		expect(updated).toContain(hookScriptPath);
+		expect(updated.replaceAll("\\\\", "\\")).toContain(hookScriptPath);
 		expect(updated).not.toContain("/tmp/old-hook.sh");
 	});
 
@@ -153,15 +171,15 @@ describe("agent-wrappers copilot", () => {
 		const wrapperPath = path.join(TEST_BIN_DIR, "mastracode");
 		const wrapper = readFileSync(wrapperPath, "utf-8");
 
-		expect(wrapper).toContain("# Superset wrapper for mastracode");
+		expect(wrapper).toContain("# ADE wrapper for mastracode");
 		expect(wrapper).toContain('REAL_BIN="$(find_real_binary "mastracode")"');
 		expect(wrapper).toContain('exec "$REAL_BIN" "$@"');
 	});
 
 	it("replaces stale Cursor hook commands from old superset paths", () => {
 		const cursorHooksPath = path.join(mockedHomeDir, ".cursor", "hooks.json");
-		const staleHookPath = "/tmp/.superset-old/hooks/cursor-hook.sh";
-		const currentHookPath = "/tmp/.superset-new/hooks/cursor-hook.sh";
+		const staleHookPath = "/tmp/.ade-old/hooks/cursor-hook.sh";
+		const currentHookPath = "/tmp/.ade-new/hooks/cursor-hook.sh";
 
 		mkdirSync(path.dirname(cursorHooksPath), { recursive: true });
 		writeFileSync(
@@ -215,8 +233,8 @@ describe("agent-wrappers copilot", () => {
 			".gemini",
 			"settings.json",
 		);
-		const staleHookPath = "/tmp/.superset-old/hooks/gemini-hook.sh";
-		const currentHookPath = "/tmp/.superset-new/hooks/gemini-hook.sh";
+		const staleHookPath = "/tmp/.ade-old/hooks/gemini-hook.sh";
+		const currentHookPath = "/tmp/.ade-new/hooks/gemini-hook.sh";
 
 		mkdirSync(path.dirname(geminiSettingsPath), { recursive: true });
 		writeFileSync(
@@ -322,8 +340,12 @@ describe("agent-wrappers copilot", () => {
 			".mastracode",
 			"hooks.json",
 		);
-		const staleHookPath = "/tmp/.superset-old/hooks/notify.sh";
-		const currentHookPath = "/tmp/.superset-new/hooks/notify.sh";
+		const staleHookPath = "/tmp/.ade-old/hooks/notify.sh";
+		const currentHookPath = "/tmp/.ade-new/hooks/notify.sh";
+		const expectedCommand =
+			process.platform === "win32"
+				? `node "${currentHookPath}"`
+				: `bash '${currentHookPath}'`;
 
 		mkdirSync(path.dirname(mastraHooksPath), { recursive: true });
 		writeFileSync(
@@ -360,8 +382,7 @@ describe("agent-wrappers copilot", () => {
 			expect(
 				hooks.some(
 					(entry) =>
-						entry.type === "command" &&
-						entry.command === `bash '${currentHookPath}'`,
+						entry.type === "command" && entry.command === expectedCommand,
 				),
 			).toBe(true);
 			expect(hooks.some((entry) => entry.command.includes(staleHookPath))).toBe(

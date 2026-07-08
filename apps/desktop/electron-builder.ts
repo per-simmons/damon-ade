@@ -25,6 +25,15 @@ const RELEASE_REPO_NAME = "damon-ade"; // TODO(release): set public repo name
 // notarytool. Unsigned local smoke-test builds leave APPLE_TEAM_ID unset and
 // skip notarization automatically.
 const notarize = Boolean(process.env.APPLE_TEAM_ID);
+const hasWindowsSigningConfig = Boolean(
+	process.env.WIN_CSC_LINK ||
+		process.env.CSC_LINK ||
+		process.env.WIN_CSC_NAME ||
+		process.env.CSC_NAME ||
+		process.env.AZURE_TENANT_ID,
+);
+const shouldSignAndEditWindowsExecutable =
+	hasWindowsSigningConfig || process.env.ADE_WIN_EDIT_EXECUTABLE === "true";
 const macIconPath = join(pkg.resources, "build/icons/icon.icns");
 const linuxIconPath = join(pkg.resources, "build/icons");
 const winIconPath = join(pkg.resources, "build/icons/icon.ico");
@@ -151,8 +160,10 @@ const config: Configuration = {
 		"!**/.DS_Store",
 	],
 
-	// Rebuild native modules for Electron's Node.js version
-	npmRebuild: true,
+	// Native modules are prepared by scripts/copy-native-modules.ts and
+	// validated before packaging. Rebuilding here forces node-gyp for node-pty
+	// on Windows even though node-pty ships prebuilds for win32-x64/win32-arm64.
+	npmRebuild: false,
 
 	// macOS
 	mac: {
@@ -211,6 +222,7 @@ const config: Configuration = {
 	// Windows
 	win: {
 		...(existsSync(winIconPath) ? { icon: winIconPath } : {}),
+		signAndEditExecutable: shouldSignAndEditWindowsExecutable,
 		target: [
 			{
 				target: "nsis",

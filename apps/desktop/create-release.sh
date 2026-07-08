@@ -441,6 +441,7 @@ else
         echo -e "${BLUE}Direct download:${NC}"
         echo "  • ${LATEST_URL}/download/ADE-arm64.dmg"
         echo "  • ${LATEST_URL}/download/ADE-x64.AppImage"
+        echo "  • ${LATEST_URL}/download/ADE-x64.exe"
         echo ""
     else
         success "Draft release created!"

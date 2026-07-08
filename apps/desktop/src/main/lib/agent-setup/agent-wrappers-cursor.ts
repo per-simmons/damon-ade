@@ -8,9 +8,11 @@ import {
 	isSupersetManagedHookCommand,
 	writeFileIfChanged,
 } from "./agent-wrappers-common";
+import { NOTIFY_NODE_SCRIPT_NAME } from "./notify-hook";
 import { HOOKS_DIR } from "./paths";
 
 export const CURSOR_HOOK_SCRIPT_NAME = "cursor-hook.sh";
+export const CURSOR_CMD_HOOK_SCRIPT_NAME = "cursor-hook.cmd";
 
 const CURSOR_HOOK_SIGNATURE = "# Superset cursor hook";
 const CURSOR_HOOK_VERSION = "v1";
@@ -34,6 +36,9 @@ interface CursorHooksJson {
 }
 
 export function getCursorHookScriptPath(): string {
+	if (process.platform === "win32") {
+		return path.join(HOOKS_DIR, CURSOR_CMD_HOOK_SCRIPT_NAME);
+	}
 	return path.join(HOOKS_DIR, CURSOR_HOOK_SCRIPT_NAME);
 }
 
@@ -46,6 +51,10 @@ export function getCursorHookScriptContent(): string {
 	return template
 		.replace("{{MARKER}}", CURSOR_HOOK_MARKER)
 		.replace(/\{\{DEFAULT_PORT\}\}/g, String(env.DESKTOP_NOTIFICATIONS_PORT));
+}
+
+export function getCursorCmdHookScriptContent(): string {
+	return `@echo off\r\nnode "%~dp0${NOTIFY_NODE_SCRIPT_NAME}" --cursor %*\r\n`;
 }
 
 /**
@@ -106,7 +115,10 @@ export function getCursorHooksJsonContent(hookScriptPath: string): string {
 
 export function createCursorHookScript(): void {
 	const scriptPath = getCursorHookScriptPath();
-	const content = getCursorHookScriptContent();
+	const content =
+		process.platform === "win32"
+			? getCursorCmdHookScriptContent()
+			: getCursorHookScriptContent();
 	const changed = writeFileIfChanged(scriptPath, content, 0o755);
 	console.log(
 		`[agent-setup] ${changed ? "Updated" : "Verified"} Cursor hook script`,

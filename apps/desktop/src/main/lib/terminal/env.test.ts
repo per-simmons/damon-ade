@@ -5,9 +5,9 @@ import {
 	FALLBACK_SHELL,
 	getLocale,
 	removeAppEnvVars,
-	setOpenRouterKeyResolver,
 	SHELL_CRASH_THRESHOLD_MS,
 	sanitizeEnv,
+	setOpenRouterKeyResolver,
 } from "./env";
 
 describe("env", () => {
@@ -742,7 +742,7 @@ describe("env", () => {
 				const result = buildTerminalEnv({ ...baseParams, runtime: "codex" });
 				const expected = getAgentCodexHome(baseParams.workspaceId);
 				expect(result.CODEX_HOME).toBe(expected);
-				expect(result.CODEX_HOME).toContain("/.codex");
+				expect(result.CODEX_HOME).toMatch(/[\\/]\.codex/);
 				// The terminal-host daemon re-applies buildSafeEnv before the pty
 				// spawn; CODEX_HOME must survive it to reach the codex process.
 				expect(buildSafeEnv(result).CODEX_HOME).toBe(expected);

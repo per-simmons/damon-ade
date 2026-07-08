@@ -1,6 +1,6 @@
 # ADE
 
-An agentic development environment for macOS. ADE is a local-first, single-user desktop app where you build a roster of persistent coding agents and work alongside them in the terminal. Every agent is a durable identity — its own name, photo, git repository, runtime CLI, and long-lived memory — not a throwaway chat session. You come back to the same agent tomorrow and it remembers what it learned today.
+An agentic development environment for macOS, Windows, and Linux. ADE is a local-first, single-user desktop app where you build a roster of persistent coding agents and work alongside them in the terminal. Every agent is a durable identity — its own name, photo, git repository, runtime CLI, and long-lived memory — not a throwaway chat session. You come back to the same agent tomorrow and it remembers what it learned today.
 
 The interface is a two-level left rail. **Teams** group your work (a name and a square photo); inside each team live **Agents** (a name and a circular photo). Selecting an agent opens its workspace: a strip of **session** tabs, each a real terminal running the agent's coding CLI inside that agent's own git worktree. A **model bar** under the tabs lets you spawn a session on a different model without leaving the agent. On the right, the **Agent Files** panel shows the agent's memory growing as it works.
 
@@ -16,16 +16,19 @@ ADE runs whatever CLI coding agents you already have installed. Claude Code, Ope
 
 ### Download (recommended)
 
-Download the signed DMG from the [latest release](https://github.com/per-simmons/damon-ade/releases/latest), open it, and drag ADE to your Applications folder. macOS only.
+Download the installer for your platform from the [latest release](https://github.com/per-simmons/damon-ade/releases/latest):
 
+- macOS: signed `.dmg`
+- Windows: `ADE-<version>-x64.exe`
+- Linux: `.AppImage`
 
 ### Build from source
 
-Requires [Bun](https://bun.sh) 1.0+.
+Requires [Bun](https://bun.sh) 1.3.6+.
 
 ```bash
 git clone https://github.com/per-simmons/damon-ade.git
-cd REPO
+cd damon-ade
 bun install
 cd apps/desktop
 bun run compile:app        # builds main + preload + renderer into dist/
@@ -34,11 +37,19 @@ bunx electron .            # launches the built app
 
 `compile:app` runs the full production build; `bunx electron .` then launches it directly. (Avoid `electron-vite preview` for a full run — it can exhaust memory.)
 
+To package a desktop installer from `apps/desktop`, run:
+
+```bash
+bun run build
+```
+
+On Windows, the installer is written to `apps/desktop/release/ADE-<version>-x64.exe`.
+
 ## Prerequisites
 
 ADE orchestrates coding CLIs; it does not bundle them. You need:
 
-- **Git** — required. Each agent gets its own repository or worktree. Install Apple's command line tools with `xcode-select --install`.
+- **Git** — required. Each agent gets its own repository or worktree. On macOS, install Apple's command line tools with `xcode-select --install`; on Windows, install [Git for Windows](https://git-scm.com/download/win).
 - **At least one agent CLI.** Claude Code is recommended, because it also powers the Kimi, MiniMax, and GLM sessions from the model bar (they run Claude Code pointed at OpenRouter):
 
   ```bash
@@ -75,7 +86,7 @@ ADE orchestrates coding CLIs; it does not bundle them. You need:
 
 **6. Switch models from the model bar.** Below the session tabs is a quiet row of model logos: **Claude** (the default), **OpenAI** (Codex on GPT-5.5), **Kimi K2.7**, **MiniMax M3**, and **GLM 5.2**. Click any logo to open a new session in the current agent's worktree running that model — the same code, a different model, no context switch.
 
-**7. Connect OpenRouter (first open model only).** The first time you click Kimi, MiniMax, or GLM, ADE asks for your OpenRouter API key (get one at [openrouter.ai/keys](https://openrouter.ai/keys)). Paste it and choose **Save & Launch**. The key is encrypted with the macOS keychain, stored locally, and injected only into the agent's terminal — it never leaves your machine and is never shown back to the app's UI. You enter it once; later open-model sessions launch straight away.
+**7. Connect OpenRouter (first open model only).** The first time you click Kimi, MiniMax, or GLM, ADE asks for your OpenRouter API key (get one at [openrouter.ai/keys](https://openrouter.ai/keys)). Paste it and choose **Save & Launch**. The key is encrypted with the OS credential store, stored locally, and injected only into the agent's terminal — it never leaves your machine and is never shown back to the app's UI. You enter it once; later open-model sessions launch straight away.
 
 **8. Watch the memory grow.** The **Agent Files** panel on the right lists the agent's memory surface, grouped into **Memory**, **Skills**, and **Worktree**. It starts nearly empty and fills in as the agent learns — its identity, your profile, its notes, and any skills it writes for itself. Click a file to open it in a viewer tab.
 

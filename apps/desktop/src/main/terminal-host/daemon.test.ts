@@ -2,7 +2,7 @@
  * Terminal Host Daemon Integration Tests
  *
  * These tests verify the daemon can:
- * 1. Start and listen on a Unix socket
+ * 1. Start and listen on a local socket/named pipe
  * 2. Accept connections and handle NDJSON protocol
  * 3. Authenticate clients with token
  * 4. Respond to hello requests
@@ -23,9 +23,12 @@ import {
 } from "../lib/terminal-host/types";
 
 // Test uses a dedicated workspace name for isolation
-const SUPERSET_DIR_NAME = ".superset-test";
+const SUPERSET_DIR_NAME = ".ade-test";
 const SUPERSET_HOME_DIR = join(homedir(), SUPERSET_DIR_NAME);
-const SOCKET_PATH = join(SUPERSET_HOME_DIR, "terminal-host.sock");
+const SOCKET_PATH =
+	process.platform === "win32"
+		? `\\\\.\\pipe\\${SUPERSET_DIR_NAME}-terminal-host`
+		: join(SUPERSET_HOME_DIR, "terminal-host.sock");
 const TOKEN_PATH = join(SUPERSET_HOME_DIR, "terminal-host.token");
 const PID_PATH = join(SUPERSET_HOME_DIR, "terminal-host.pid");
 
@@ -57,8 +60,8 @@ describe("Terminal Host Daemon", () => {
 			}
 		}
 
-		// Remove socket file
-		if (existsSync(SOCKET_PATH)) {
+		// Remove socket file. Windows named pipes are not filesystem entries.
+		if (process.platform !== "win32" && existsSync(SOCKET_PATH)) {
 			try {
 				rmSync(SOCKET_PATH);
 			} catch {
@@ -97,7 +100,7 @@ describe("Terminal Host Daemon", () => {
 
 			// Start daemon with --preload to polyfill window for @xterm/headless in Bun
 			daemonProcess = spawn(
-				"bun",
+				process.execPath,
 				["run", "--preload", XTERM_POLYFILL_PATH, DAEMON_PATH],
 				{
 					env: {
