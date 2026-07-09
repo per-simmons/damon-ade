@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { PROJECTS_DIR_NAME, SUPERSET_DIR_NAME } from "shared/constants";
+import {
+	PROJECT_SUPERSET_DIR_NAME,
+	PROJECTS_DIR_NAME,
+	SUPERSET_DIR_NAME,
+} from "shared/constants";
 import { loadSetupConfig } from "./setup";
 
 const TEST_DIR = join(tmpdir(), `superset-test-setup-${process.pid}`);
@@ -18,7 +22,7 @@ const USER_CONFIG_DIR = join(
 
 describe("loadSetupConfig", () => {
 	beforeEach(() => {
-		mkdirSync(join(MAIN_REPO, ".superset"), { recursive: true });
+		mkdirSync(join(MAIN_REPO, PROJECT_SUPERSET_DIR_NAME), { recursive: true });
 	});
 
 	afterEach(() => {
@@ -43,7 +47,7 @@ describe("loadSetupConfig", () => {
 		};
 
 		writeFileSync(
-			join(MAIN_REPO, ".superset", "config.json"),
+			join(MAIN_REPO, PROJECT_SUPERSET_DIR_NAME, "config.json"),
 			JSON.stringify(setupConfig),
 		);
 
@@ -53,7 +57,7 @@ describe("loadSetupConfig", () => {
 
 	test("returns null for invalid JSON", () => {
 		writeFileSync(
-			join(MAIN_REPO, ".superset", "config.json"),
+			join(MAIN_REPO, PROJECT_SUPERSET_DIR_NAME, "config.json"),
 			"{ invalid json",
 		);
 
@@ -63,7 +67,7 @@ describe("loadSetupConfig", () => {
 
 	test("validates setup field must be an array", () => {
 		writeFileSync(
-			join(MAIN_REPO, ".superset", "config.json"),
+			join(MAIN_REPO, PROJECT_SUPERSET_DIR_NAME, "config.json"),
 			JSON.stringify({ setup: "not-an-array" }),
 		);
 
@@ -76,13 +80,13 @@ describe("loadSetupConfig", () => {
 		const worktreeConfig = { setup: ["scripts/setup-worktree.sh"] };
 
 		writeFileSync(
-			join(MAIN_REPO, ".superset", "config.json"),
+			join(MAIN_REPO, PROJECT_SUPERSET_DIR_NAME, "config.json"),
 			JSON.stringify(mainConfig),
 		);
 
-		mkdirSync(join(WORKTREE, ".superset"), { recursive: true });
+		mkdirSync(join(WORKTREE, PROJECT_SUPERSET_DIR_NAME), { recursive: true });
 		writeFileSync(
-			join(WORKTREE, ".superset", "config.json"),
+			join(WORKTREE, PROJECT_SUPERSET_DIR_NAME, "config.json"),
 			JSON.stringify(worktreeConfig),
 		);
 
@@ -97,7 +101,7 @@ describe("loadSetupConfig", () => {
 		const mainConfig = { setup: ["npm install"] };
 
 		writeFileSync(
-			join(MAIN_REPO, ".superset", "config.json"),
+			join(MAIN_REPO, PROJECT_SUPERSET_DIR_NAME, "config.json"),
 			JSON.stringify(mainConfig),
 		);
 
@@ -115,7 +119,7 @@ describe("loadSetupConfig", () => {
 		const userConfig = { setup: ["custom-setup.sh"] };
 
 		writeFileSync(
-			join(MAIN_REPO, ".superset", "config.json"),
+			join(MAIN_REPO, PROJECT_SUPERSET_DIR_NAME, "config.json"),
 			JSON.stringify(mainConfig),
 		);
 
@@ -136,9 +140,9 @@ describe("loadSetupConfig", () => {
 		const worktreeConfig = { setup: ["worktree-setup.sh"] };
 		const userConfig = { setup: ["user-override-setup.sh"] };
 
-		mkdirSync(join(WORKTREE, ".superset"), { recursive: true });
+		mkdirSync(join(WORKTREE, PROJECT_SUPERSET_DIR_NAME), { recursive: true });
 		writeFileSync(
-			join(WORKTREE, ".superset", "config.json"),
+			join(WORKTREE, PROJECT_SUPERSET_DIR_NAME, "config.json"),
 			JSON.stringify(worktreeConfig),
 		);
 
@@ -160,7 +164,7 @@ describe("loadSetupConfig", () => {
 		const mainConfig = { setup: ["npm install"] };
 
 		writeFileSync(
-			join(MAIN_REPO, ".superset", "config.json"),
+			join(MAIN_REPO, PROJECT_SUPERSET_DIR_NAME, "config.json"),
 			JSON.stringify(mainConfig),
 		);
 
@@ -175,7 +179,7 @@ describe("loadSetupConfig", () => {
 		const mainConfig = { setup: ["npm install"] };
 
 		writeFileSync(
-			join(MAIN_REPO, ".superset", "config.json"),
+			join(MAIN_REPO, PROJECT_SUPERSET_DIR_NAME, "config.json"),
 			JSON.stringify(mainConfig),
 		);
 
@@ -190,7 +194,7 @@ describe("loadSetupConfig", () => {
 		const userConfig = { setup: [], teardown: [] };
 
 		writeFileSync(
-			join(MAIN_REPO, ".superset", "config.json"),
+			join(MAIN_REPO, PROJECT_SUPERSET_DIR_NAME, "config.json"),
 			JSON.stringify(mainConfig),
 		);
 
@@ -212,7 +216,7 @@ describe("loadSetupConfig", () => {
 		const mainConfig = { setup: ["npm install"] };
 
 		writeFileSync(
-			join(MAIN_REPO, ".superset", "config.json"),
+			join(MAIN_REPO, PROJECT_SUPERSET_DIR_NAME, "config.json"),
 			JSON.stringify(mainConfig),
 		);
 
