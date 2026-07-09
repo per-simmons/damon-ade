@@ -10,6 +10,10 @@ import { eq } from "drizzle-orm";
 import { MEMORY_SCAFFOLD_ENABLED } from "main/lib/feature-flags";
 import { findRealBinary } from "main/lib/agent-setup/utils";
 import { localDb } from "main/lib/local-db";
+import {
+	CONFIG_FILE_NAME,
+	PROJECT_SUPERSET_DIR_NAME,
+} from "shared/constants";
 import type { SetupAction, SetupDetectionResult } from "shared/types/config";
 import { z } from "zod";
 import { publicProcedure, router } from "../..";
@@ -44,6 +48,10 @@ function getRuntimeAvailability(force: boolean): RuntimeAvailability {
 function hasConfiguredScripts(
 	project: Pick<SelectProject, "id" | "mainRepoPath">,
 ) {
+	if (!project.mainRepoPath) {
+		return false;
+	}
+
 	const config = loadSetupConfig({
 		mainRepoPath: project.mainRepoPath,
 		projectId: project.id,
@@ -365,12 +373,18 @@ async function detectSetupDefaults(
 }
 
 function getConfigPath(mainRepoPath: string): string {
-	return join(mainRepoPath, ".superset", "config.json");
+	return join(mainRepoPath, PROJECT_SUPERSET_DIR_NAME, CONFIG_FILE_NAME);
 }
 
 function ensureConfigExists(mainRepoPath: string): string {
+	if (!mainRepoPath) {
+		throw new Error(
+			"This project has no repo path, so it has no setup/teardown scripts.",
+		);
+	}
+
 	const configPath = getConfigPath(mainRepoPath);
-	const supersetDir = join(mainRepoPath, ".superset");
+	const supersetDir = join(mainRepoPath, PROJECT_SUPERSET_DIR_NAME);
 
 	if (!existsSync(configPath)) {
 		// Create .superset directory if it doesn't exist
@@ -441,7 +455,7 @@ export const createConfigRouter = () => {
 					.from(projects)
 					.where(eq(projects.id, input.projectId))
 					.get();
-				if (!project) {
+				if (!project || !project.mainRepoPath) {
 					return null;
 				}
 				return ensureConfigExists(project.mainRepoPath);
@@ -456,7 +470,7 @@ export const createConfigRouter = () => {
 					.from(projects)
 					.where(eq(projects.id, input.projectId))
 					.get();
-				if (!project) {
+				if (!project || !project.mainRepoPath) {
 					return { content: null, exists: false };
 				}
 
@@ -483,6 +497,14 @@ export const createConfigRouter = () => {
 					.get();
 				if (!project) {
 					throw new Error("Project not found");
+				}
+				if (!project.mainRepoPath) {
+					return {
+						projectSummary: "",
+						actions: [],
+						setupTemplate: [],
+						signals: {},
+					};
 				}
 
 				return await detectSetupDefaults(project.mainRepoPath);

@@ -1,4 +1,5 @@
 import { Button } from "@superset/ui/button";
+import { toast } from "@superset/ui/sonner";
 import { cn } from "@superset/ui/utils";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { HiArrowTopRightOnSquare, HiDocumentArrowUp } from "react-icons/hi2";
@@ -184,6 +185,9 @@ export function ScriptsEditor({ projectId, className }: ScriptsEditorProps) {
 			setHasChanges(false);
 			utils.config.getConfigContent.invalidate({ projectId });
 			utils.config.shouldShowSetupCard.invalidate({ projectId });
+		},
+		onError: (error) => {
+			toast.error(error.message || "Could not save scripts");
 		},
 	});
 
