@@ -86,7 +86,11 @@ export function createClaudeWrapper(): void {
 		"claude",
 		`exec "$REAL_BIN" --settings "${settingsPath}" "$@"`,
 	);
-	createWrapper("claude", script);
+	createWrapper(
+		"claude",
+		script,
+		`call "%REAL_BIN%" --settings "${settingsPath}" %*\r\nexit /b %ERRORLEVEL%`,
+	);
 }
 
 export function createCodexWrapper(): void {
@@ -95,6 +99,10 @@ export function createCodexWrapper(): void {
 		"codex",
 		buildCodexWrapperExecLine(notifyPath),
 	);
+	// ponytail: on Windows the .cmd is a plain passthrough — the bash wrapper's
+	// TUI-session-log Start watcher and `notify=[bash,...]` completion hook rely
+	// on bash + POSIX tooling and are not ported. Codex still runs; only its
+	// in-app notifications are absent on Windows.
 	createWrapper("codex", script);
 }
 
@@ -146,5 +154,9 @@ export function createOpenCodeWrapper(): void {
 		"opencode",
 		`export OPENCODE_CONFIG_DIR="${OPENCODE_CONFIG_DIR}"\nexec "$REAL_BIN" "$@"`,
 	);
-	createWrapper("opencode", script);
+	createWrapper(
+		"opencode",
+		script,
+		`set "OPENCODE_CONFIG_DIR=${OPENCODE_CONFIG_DIR}"\r\ncall "%REAL_BIN%" %*\r\nexit /b %ERRORLEVEL%`,
+	);
 }

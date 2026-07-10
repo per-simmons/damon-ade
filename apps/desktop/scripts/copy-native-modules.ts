@@ -21,6 +21,7 @@ import {
 	readdirSync,
 	readFileSync,
 	realpathSync,
+	rmdirSync,
 	rmSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -99,8 +100,14 @@ function copyModuleIfSymlink(
 		console.log(`  ${moduleName}: symlink -> replacing with real files`);
 		console.log(`    Real path: ${realPath}`);
 
-		// Remove the symlink
-		rmSync(modulePath);
+		// Remove the symlink. On Windows, Bun's isolated linker creates
+		// directory junctions, which Bun's rmSync fails on (EFAULT);
+		// rmdirSync removes the junction without touching its target.
+		try {
+			rmSync(modulePath);
+		} catch {
+			rmdirSync(modulePath);
+		}
 
 		// Copy the actual files
 		cpSync(realPath, modulePath, { recursive: true });

@@ -40,12 +40,19 @@ export async function runTeardown({
 
 	try {
 		const shell =
-			process.env.SHELL ||
-			(process.platform === "darwin" ? "/bin/zsh" : "/bin/bash");
+			process.platform === "win32"
+				? process.env.COMSPEC || "cmd.exe"
+				: process.env.SHELL ||
+					(process.platform === "darwin" ? "/bin/zsh" : "/bin/bash");
 
 		const baseEnv = buildSafeEnv(sanitizeEnv(process.env) || {});
 		const wrapperEnv = getShellEnv(shell);
-		const args = getCommandShellArgs(shell, command);
+		// getCommandShellArgs only knows zsh/bash/fish login-shell flags; cmd.exe
+		// needs its own /c invocation instead of the bash-style -lc fallback.
+		const args =
+			process.platform === "win32"
+				? ["/d", "/s", "/c", command]
+				: getCommandShellArgs(shell, command);
 
 		const output = await new Promise<string>((resolve, reject) => {
 			const child = spawn(shell, args, {

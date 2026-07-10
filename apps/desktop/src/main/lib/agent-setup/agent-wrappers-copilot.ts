@@ -104,5 +104,9 @@ exec "$REAL_BIN" "$@"`;
 
 export function createCopilotWrapper(): void {
 	const script = buildWrapperScript("copilot", buildCopilotWrapperExecLine());
+	// ponytail: on Windows the .cmd is a plain passthrough — the bash wrapper's
+	// per-project `.github/hooks/superset-notify.json` injection (and its
+	// `.git/info/exclude` bookkeeping) uses POSIX shell and points at a bash hook
+	// script, so it is not ported. Copilot still runs; notifications are absent.
 	createWrapper("copilot", script);
 }

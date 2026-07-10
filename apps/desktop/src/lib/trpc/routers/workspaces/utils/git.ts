@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, rename } from "node:fs/promises";
+import { mkdir, rename, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -671,24 +671,34 @@ export async function removeWorktree(
 		// Delete the moved directory in the background — don't block the caller.
 		// Use spawned `rm -rf` instead of Node's fs.rm which can hang on macOS
 		// when encountering .app bundles with extended attributes.
-		const child = spawn("/bin/rm", ["-rf", tempPath], {
-			detached: true,
-			stdio: "ignore",
-		});
-		child.unref();
-		child.on("error", (err) => {
-			console.error(
-				`[removeWorktree] Failed to spawn rm for ${tempPath}:`,
-				err.message,
-			);
-		});
-		child.on("exit", (code: number | null) => {
-			if (code !== 0) {
+		if (process.platform === "win32") {
+			// ponytail: fs.rm is fine on Windows; the xattr hang above is mac-only
+			void rm(tempPath, { recursive: true, force: true }).catch((err) => {
 				console.error(
-					`[removeWorktree] Background cleanup of ${tempPath} failed (exit ${code})`,
+					`[removeWorktree] Background cleanup of ${tempPath} failed:`,
+					(err as Error).message,
 				);
-			}
-		});
+			});
+		} else {
+			const child = spawn("/bin/rm", ["-rf", tempPath], {
+				detached: true,
+				stdio: "ignore",
+			});
+			child.unref();
+			child.on("error", (err) => {
+				console.error(
+					`[removeWorktree] Failed to spawn rm for ${tempPath}:`,
+					err.message,
+				);
+			});
+			child.on("exit", (code: number | null) => {
+				if (code !== 0) {
+					console.error(
+						`[removeWorktree] Background cleanup of ${tempPath} failed (exit ${code})`,
+					);
+				}
+			});
+		}
 	} catch (error) {
 		const code = (error as NodeJS.ErrnoException).code;
 		// If the worktree directory is already gone, just prune metadata

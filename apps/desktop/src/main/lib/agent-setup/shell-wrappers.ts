@@ -19,6 +19,15 @@ function getShellName(shell: string): string {
 	return shell.split("/").pop() || shell;
 }
 
+/**
+ * Basename of a Windows shell path, lower-cased with the .exe suffix stripped.
+ * Handles both separators (COMSPEC is like `C:\Windows\system32\cmd.exe`).
+ */
+function getWindowsShellName(shell: string): string {
+	const base = shell.split(/[/\\]/).pop() || shell;
+	return base.toLowerCase().replace(/\.exe$/, "");
+}
+
 function writeFileIfChanged(
 	filePath: string,
 	content: string,
@@ -183,6 +192,17 @@ export function getShellEnv(
 	shell: string,
 	paths: ShellWrapperPaths = DEFAULT_PATHS,
 ): Record<string, string> {
+	if (process.platform === "win32") {
+		// ponytail: Windows has no shell rc to run our PATH-prepend / function
+		// shims, so prepend BIN_DIR to PATH here — the .cmd wrappers then shadow
+		// the real CLIs (cmd.exe and PowerShell both resolve them via PATHEXT).
+		// Preserve the OS's existing PATH key casing (often "Path") so we override
+		// it instead of adding a duplicate key that node-pty could resolve either way.
+		const pathKey =
+			Object.keys(process.env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
+		const currentPath = process.env[pathKey] ?? "";
+		return { [pathKey]: `${paths.BIN_DIR}${path.delimiter}${currentPath}` };
+	}
 	const shellName = getShellName(shell);
 	if (shellName === "zsh") {
 		return {
@@ -198,6 +218,9 @@ export function getShellArgs(
 	paths: ShellWrapperPaths = DEFAULT_PATHS,
 ): string[] {
 	const shellName = getShellName(shell);
+	// Interactive cmd.exe / PowerShell need no init args — BIN_DIR is placed on
+	// PATH by getShellEnv and the .cmd wrappers resolve via PATHEXT, so they fall
+	// through to the empty-args default below (no rcfile/login-shell flag).
 	if (shellName === "bash") {
 		return ["--rcfile", path.join(paths.BASH_DIR, "rcfile")];
 	}
@@ -231,6 +254,18 @@ export function getCommandShellArgs(
 	command: string,
 	paths: ShellWrapperPaths = DEFAULT_PATHS,
 ): string[] {
+	// Detect Windows shells by name (not host platform) so the mapping is driven
+	// by the shell argument like the rest of this function.
+	const winShell = getWindowsShellName(shell);
+	if (winShell === "powershell" || winShell === "pwsh") {
+		return ["-NoProfile", "-Command", command];
+	}
+	if (winShell === "cmd") {
+		// cmd.exe (COMSPEC default): /d skips AutoRun, /s keeps the command's outer
+		// quotes intact, /c runs it then exits. BIN_DIR is on PATH via getShellEnv,
+		// so no profile sourcing is needed to reach the .cmd wrappers.
+		return ["/d", "/s", "/c", command];
+	}
 	const shellName = getShellName(shell);
 	const zshRc = path.join(paths.ZSH_DIR, ".zshrc");
 	const bashRcfile = path.join(paths.BASH_DIR, "rcfile");
