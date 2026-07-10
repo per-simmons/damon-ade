@@ -113,6 +113,30 @@ describe("shell-wrappers", () => {
 		expect(getShellArgs("powershell")).toEqual([]);
 	});
 
+	describe("windows shells", () => {
+		it("uses cmd.exe /c args for command execution", () => {
+			expect(
+				getCommandShellArgs(
+					"C:\\Windows\\system32\\cmd.exe",
+					"echo ok",
+					TEST_PATHS,
+				),
+			).toEqual(["/d", "/s", "/c", "echo ok"]);
+		});
+
+		it("uses PowerShell -Command args", () => {
+			expect(
+				getCommandShellArgs("powershell.exe", "echo ok", TEST_PATHS),
+			).toEqual(["-NoProfile", "-Command", "echo ok"]);
+		});
+
+		it("returns no init args for interactive win shells", () => {
+			expect(getShellArgs("C:\\Windows\\system32\\cmd.exe", TEST_PATHS)).toEqual(
+				[],
+			);
+		});
+	});
+
 	describe("fish shell", () => {
 		it("uses --init-command to prepend BIN_DIR to PATH for fish", () => {
 			const args = getShellArgs("/opt/homebrew/bin/fish", TEST_PATHS);

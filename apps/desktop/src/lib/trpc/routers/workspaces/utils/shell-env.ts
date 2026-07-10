@@ -36,6 +36,22 @@ export async function getShellEnvironment(): Promise<Record<string, string>> {
 		return { ...cachedEnv };
 	}
 
+	// On Windows there's no login-shell profile to harvest (cmd.exe has no
+	// .zprofile/.profile equivalent), so skip the shell spawn entirely and
+	// just use process.env.
+	if (process.platform === "win32") {
+		const winEnv: Record<string, string> = {};
+		for (const [key, value] of Object.entries(process.env)) {
+			if (typeof value === "string") {
+				winEnv[key] = value;
+			}
+		}
+		cachedEnv = winEnv;
+		cacheTime = now;
+		isFallbackCache = false;
+		return { ...winEnv };
+	}
+
 	const shell =
 		process.env.SHELL ||
 		(process.platform === "darwin" ? "/bin/zsh" : "/bin/bash");
