@@ -62,36 +62,12 @@ jobs:
         run: |
           cd release-artifacts
           # Create stable-named copies (without version) for /releases/latest/download/ URLs
-          for file in *.dmg; do
+          for file in *.exe; do
             if [[ -f "$file" ]]; then
-              # Extract architecture from filename (e.g., ADE-1.0.3-arm64.dmg -> arm64)
-              arch=$(echo "$file" | sed -E 's/.*-([^-]+)\.dmg$/\1/')
-              cp "$file" "ADE-${arch}.dmg"
-              echo "Created stable copy: ADE-${arch}.dmg"
-            fi
-          done
-          for file in *-mac.zip; do
-            if [[ -f "$file" ]]; then
-              # Extract architecture from filename (e.g., ADE-1.0.3-arm64-mac.zip -> arm64)
-              arch=$(echo "$file" | sed -E 's/.*-([^-]+)-mac\.zip$/\1/')
-              cp "$file" "ADE-${arch}-mac.zip"
-              echo "Created stable copy: ADE-${arch}-mac.zip"
-            fi
-          done
-          for file in *.AppImage; do
-            if [[ -f "$file" ]]; then
-              # Extract architecture from filename (e.g., ade-1.0.3-x64.AppImage -> x64)
-              arch=$(echo "$file" | sed -E 's/.*-([^-]+)\.AppImage$/\1/')
-              cp "$file" "ADE-${arch}.AppImage"
-              echo "Created stable copy: ADE-${arch}.AppImage"
-            fi
-          done
-          # Keep Linux updater manifest at a stable filename for generic provider lookups.
-          for file in *-linux.yml; do
-            if [[ -f "$file" && "$file" != "latest-linux.yml" ]]; then
-              cp "$file" "latest-linux.yml"
-              echo "Created stable copy: latest-linux.yml"
-              break
+              # Extract architecture from filename (e.g., ADE-1.0.3-x64.exe -> x64)
+              arch=$(echo "$file" | sed -E 's/.*-([^-]+)\.exe$/\1/')
+              cp "$file" "ADE-${arch}.exe"
+              echo "Created stable copy: ADE-${arch}.exe"
             fi
           done
           echo "Release artifacts:"
