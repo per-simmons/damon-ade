@@ -200,6 +200,9 @@ export const settings = sqliteTable("settings", {
 	providerApiKeys: text("provider_api_keys", { mode: "json" }).$type<
 		Record<string, string>
 	>(),
+	// User-curated pi model patterns (pi --model accepts "provider/id" and
+	// globs). Feeds the ModelBar pi picker; empty/null = launch pi's default.
+	piModels: text("pi_models", { mode: "json" }).$type<string[]>(),
 });
 
 export type InsertSettings = typeof settings.$inferInsert;

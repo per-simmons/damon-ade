@@ -17,6 +17,7 @@ import { useProviderKeys } from "renderer/stores/model-bar/useProviderKeys";
 import { useRuntimeAvailability } from "renderer/stores/model-bar/useRuntimeAvailability";
 import { useAgentSession } from "renderer/stores/tabs/useAgentSession";
 import { MODEL_BAR_MODELS, type ModelDescriptor } from "./models";
+import { PiModelMenu } from "./PiModelMenu";
 import {
 	ProviderKeyDialog,
 	type ProviderKeyDialogMode,
@@ -58,12 +59,18 @@ export function ModelBar() {
 	const worktreePath = workspace?.worktreePath ?? null;
 	const ready = !!worktreePath;
 
-	const spawn = (model: ModelDescriptor) => {
-		spawnAgentSession({
-			id: workspaceId,
-			runtime: model.runtime,
-			worktreePath,
-		});
+	const spawn = (
+		model: ModelDescriptor,
+		options?: { commands: string[]; label: string },
+	) => {
+		spawnAgentSession(
+			{
+				id: workspaceId,
+				runtime: model.runtime,
+				worktreePath,
+			},
+			options,
+		);
 	};
 
 	const handleModelClick = (model: ModelDescriptor) => {
@@ -94,6 +101,36 @@ export function ModelBar() {
 					const icon = getPresetIcon(model.iconName, isDark);
 					const binary = RUNTIME_BINARY[model.runtime];
 					const missing = !isAvailable(binary as CheckedBinary);
+					// pi is multi-provider: a healthy pi button opens a model menu
+					// instead of launching directly. Missing-binary pi falls through
+					// to the standard install-dialog button below.
+					if (model.runtime === "pi" && !missing) {
+						return (
+							<PiModelMenu
+								key={model.runtime}
+								onLaunch={(options) => spawn(model, options)}
+							>
+								<button
+									type="button"
+									aria-label="New pi session — pick a model"
+									disabled={!ready}
+									className="group relative flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-muted"
+								>
+									{icon ? (
+										<img
+											src={icon}
+											alt=""
+											className="h-4 w-4 object-contain opacity-55 transition-opacity group-hover:opacity-100"
+										/>
+									) : (
+										<span className="text-[10px] text-muted-foreground">
+											{model.label.slice(0, 2)}
+										</span>
+									)}
+								</button>
+							</PiModelMenu>
+						);
+					}
 					return (
 						<Tooltip key={model.runtime}>
 							<TooltipTrigger asChild>

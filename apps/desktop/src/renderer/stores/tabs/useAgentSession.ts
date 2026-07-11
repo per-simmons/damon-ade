@@ -13,6 +13,14 @@ export interface AgentSessionWorkspace {
 	worktreePath?: string | null;
 }
 
+/** Optional per-launch overrides (e.g. a specific pi model variant). */
+export interface AgentSessionOptions {
+	/** Replaces the runtime's preset launch commands. */
+	commands?: string[];
+	/** Tab label override (defaults to the runtime's AGENT_LABELS entry). */
+	label?: string;
+}
+
 /**
  * Spawns an agent's runtime CLI in a new terminal session tab.
  *
@@ -25,7 +33,7 @@ export function useAgentSession() {
 	const { openPreset, addTab } = useTabsWithPresets();
 
 	const spawnAgentSession = useCallback(
-		(workspace: AgentSessionWorkspace) => {
+		(workspace: AgentSessionWorkspace, options?: AgentSessionOptions) => {
 			const { id, runtime, worktreePath } = workspace;
 			const cwd = worktreePath || undefined;
 
@@ -36,9 +44,9 @@ export function useAgentSession() {
 
 			const preset: TerminalPreset = {
 				id: `agent-${runtime}`,
-				name: AGENT_LABELS[runtime] ?? runtime,
+				name: options?.label ?? AGENT_LABELS[runtime] ?? runtime,
 				cwd: worktreePath ?? "",
-				commands: AGENT_PRESET_COMMANDS[runtime],
+				commands: options?.commands ?? AGENT_PRESET_COMMANDS[runtime],
 				executionMode: "new-tab",
 			};
 

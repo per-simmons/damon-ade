@@ -713,6 +713,47 @@ export const createSettingsRouter = () => {
 				return { success: true };
 			}),
 
+		// User-curated pi model patterns for the ModelBar pi picker. Each entry is
+		// passed to `pi --model <pattern>` ("provider/id", globs, and an optional
+		// ":<thinking>" suffix). Restricted to shell-inert characters because the
+		// pattern is interpolated into the session launch command.
+		getPiModels: publicProcedure.query((): string[] => {
+			const row = getSettings();
+			return row.piModels ?? [];
+		}),
+
+		setPiModels: publicProcedure
+			.input(
+				z.object({
+					models: z
+						.array(
+							z
+								.string()
+								.trim()
+								.min(1)
+								.max(120)
+								.regex(
+									/^[A-Za-z0-9*][A-Za-z0-9._\-/:*]*$/,
+									"Model patterns may only contain letters, digits, and . _ - / : *",
+								),
+						)
+						.max(24),
+				}),
+			)
+			.mutation(({ input }) => {
+				const models = [...new Set(input.models)];
+				localDb
+					.insert(settings)
+					.values({ id: 1, piModels: models })
+					.onConflictDoUpdate({
+						target: settings.id,
+						set: { piModels: models },
+					})
+					.run();
+
+				return { success: true };
+			}),
+
 		// Provider API keys (OpenRouter today; designed for more). The renderer only
 		// ever learns presence — the key itself is never returned. Storage/encryption
 		// lives in main/lib/provider-keys (electron safeStorage + local sqlite).
