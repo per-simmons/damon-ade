@@ -1,7 +1,7 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@superset/ui/tooltip";
 import { Link } from "@tanstack/react-router";
 import { useMemo } from "react";
-import { LuKanban, LuPlus } from "react-icons/lu";
+import { LuClock, LuKanban, LuPlus } from "react-icons/lu";
 import { useWorkspaceShortcuts } from "renderer/hooks/useWorkspaceShortcuts";
 import { useOpenNewCategoryModal } from "renderer/stores/new-category-modal";
 import { PortsList } from "./PortsList";
@@ -88,14 +88,24 @@ export function WorkspaceSidebar({
 			</div>
 
 			{!isCollapsed && (
-				<Link
-					to="/board"
-					className="mx-2 mb-1 flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-					activeProps={{ className: "bg-muted text-foreground" }}
-				>
-					<LuKanban className="size-4" />
-					Task Board
-				</Link>
+				<>
+					<Link
+						to="/board"
+						className="mx-2 mb-1 flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+						activeProps={{ className: "bg-muted text-foreground" }}
+					>
+						<LuKanban className="size-4" />
+						Task Board
+					</Link>
+					<Link
+						to="/schedules"
+						className="mx-2 mb-1 flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+						activeProps={{ className: "bg-muted text-foreground" }}
+					>
+						<LuClock className="size-4" />
+						Schedules
+					</Link>
+				</>
 			)}
 			{!isCollapsed && <PortsList />}
 		</SidebarDropZone>

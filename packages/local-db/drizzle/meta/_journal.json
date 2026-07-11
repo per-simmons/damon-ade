@@ -288,6 +288,13 @@
       "when": 1783788343288,
       "tag": "0040_add_agent_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1783788964695,
+      "tag": "0041_add_agent_schedules",
+      "breakpoints": true
     }
   ]
 }

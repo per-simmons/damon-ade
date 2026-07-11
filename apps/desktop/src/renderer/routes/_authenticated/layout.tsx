@@ -3,6 +3,7 @@ import { DndProvider } from "react-dnd";
 import { NewAgentModal } from "renderer/components/NewAgentModal/NewAgentModal";
 import { NewCategoryModal } from "renderer/components/NewCategoryModal/NewCategoryModal";
 import { useUpdateListener } from "renderer/components/UpdateToast";
+import { useScheduleFireListener } from "renderer/hooks/useScheduleFireListener";
 import { dragDropManager } from "renderer/lib/dnd";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { InitGitDialog } from "renderer/react-query/projects/InitGitDialog";
@@ -28,6 +29,7 @@ function AuthenticatedLayout() {
 	const _activeOrganizationId = MOCK_ORG_ID;
 
 	useAgentHookListener();
+	useScheduleFireListener();
 	useUpdateListener();
 	useHotkeysSync();
 	useTabsSyncSubscription();

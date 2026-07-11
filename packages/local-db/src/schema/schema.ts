@@ -452,3 +452,35 @@ export const agentTasks = sqliteTable(
 
 export type InsertAgentTask = typeof agentTasks.$inferInsert;
 export type SelectAgentTask = typeof agentTasks.$inferSelect;
+
+/**
+ * Recurring agent dispatches. Each row is a cron schedule that launches an
+ * agent's CLI with a prompt on a timer (the main process runs the clock; the
+ * renderer performs the actual dispatch so the session appears as a normal
+ * tab). `enabled` gates registration; `lastRunAt` is stamped on every fire.
+ */
+export const agentSchedules = sqliteTable(
+	"agent_schedules",
+	{
+		id: text("id")
+			.primaryKey()
+			.$defaultFn(() => uuidv4()),
+		name: text("name").notNull(),
+		// Standard 5-field cron expression (croner syntax, local time).
+		cronExpression: text("cron_expression").notNull(),
+		workspaceId: text("workspace_id").notNull(),
+		prompt: text("prompt").notNull(),
+		enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+		lastRunAt: integer("last_run_at"),
+		createdAt: integer("created_at")
+			.notNull()
+			.$defaultFn(() => Date.now()),
+		updatedAt: integer("updated_at")
+			.notNull()
+			.$defaultFn(() => Date.now()),
+	},
+	(table) => [index("agent_schedules_workspace_id_idx").on(table.workspaceId)],
+);
+
+export type InsertAgentSchedule = typeof agentSchedules.$inferInsert;
+export type SelectAgentSchedule = typeof agentSchedules.$inferSelect;
