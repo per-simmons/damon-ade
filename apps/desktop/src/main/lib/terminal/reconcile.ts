@@ -25,7 +25,10 @@ export interface ReconcilableManager {
  * is unref'd so it can never keep the process alive and is cleared once `p`
  * settles.
  */
-async function settledWithin(p: Promise<unknown>, ms: number): Promise<boolean> {
+async function settledWithin(
+	p: Promise<unknown>,
+	ms: number,
+): Promise<boolean> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	const timeout = new Promise<false>((resolve) => {
 		timer = setTimeout(() => resolve(false), ms);
@@ -47,7 +50,10 @@ export async function reconcileWithTimeout(
 	timeoutMs: number = RECONCILE_STARTUP_TIMEOUT_MS,
 ): Promise<void> {
 	try {
-		const settled = await settledWithin(manager.reconcileOnStartup(), timeoutMs);
+		const settled = await settledWithin(
+			manager.reconcileOnStartup(),
+			timeoutMs,
+		);
 		if (!settled) {
 			console.warn(
 				`[TerminalManager] reconcileOnStartup timed out after ${timeoutMs}ms; ` +

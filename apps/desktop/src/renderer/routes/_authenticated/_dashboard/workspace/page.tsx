@@ -52,7 +52,7 @@ function WorkspaceIndexPage() {
 				replace: true,
 			});
 		}
-	}, [workspaces, isLoading, navigate, allWorkspaces]);
+	}, [workspaces, isLoading, navigate, allWorkspaces, groups.length]);
 
 	if (hasNoWorkspaces) {
 		return <LoadingSpinner />;

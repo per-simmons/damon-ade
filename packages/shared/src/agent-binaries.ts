@@ -1,4 +1,4 @@
-import { type AgentType } from "./agent-command";
+import type { AgentType } from "./agent-command";
 
 /**
  * The external CLIs ADE shells out to. Several agent runtimes share one binary:

@@ -64,7 +64,11 @@ const collectionsCache = new Map<string, OrgCollections>();
 
 export interface SyncWriter {
 	begin: () => void;
-	write: (op: { type: "insert" | "update" | "delete"; key?: string; value: any }) => void;
+	write: (op: {
+		type: "insert" | "update" | "delete";
+		key?: string;
+		value: any;
+	}) => void;
 	commit: () => void;
 	truncate: () => void;
 }
@@ -83,7 +87,11 @@ function writableSync(collectionId: string) {
 			syncWriters.set(collectionId, { begin, write, commit, truncate });
 			// Mark collection as ready immediately
 			markReady();
-			return { cleanup: () => { syncWriters.delete(collectionId); } };
+			return {
+				cleanup: () => {
+					syncWriters.delete(collectionId);
+				},
+			};
 		},
 	};
 }
@@ -103,26 +111,43 @@ function createLocalCollection<T extends Record<string, unknown>>(
 	} as any);
 }
 
-const organizationsCollection = createLocalCollection<SelectOrganization>("organizations");
+const organizationsCollection =
+	createLocalCollection<SelectOrganization>("organizations");
 
 function createOrgCollections(_organizationId: string): OrgCollections {
 	const prefix = _organizationId;
 
 	return {
 		tasks: createLocalCollection<SelectTask>(`tasks-${prefix}`),
-		taskStatuses: createLocalCollection<SelectTaskStatus>(`task_statuses-${prefix}`),
+		taskStatuses: createLocalCollection<SelectTaskStatus>(
+			`task_statuses-${prefix}`,
+		),
 		projects: createLocalCollection<SelectProject>(`projects-${prefix}`),
 		workspaces: createLocalCollection<SelectWorkspace>(`workspaces-${prefix}`),
 		members: createLocalCollection<SelectMember>(`members-${prefix}`),
 		users: createLocalCollection<SelectUser>(`users-${prefix}`),
-		invitations: createLocalCollection<SelectInvitation>(`invitations-${prefix}`),
-		agentCommands: createLocalCollection<SelectAgentCommand>(`agent_commands-${prefix}`),
-		devicePresence: createLocalCollection<SelectDevicePresence>(`device_presence-${prefix}`),
-		integrationConnections: createLocalCollection<IntegrationConnectionDisplay>(`integration_connections-${prefix}`),
-		subscriptions: createLocalCollection<SelectSubscription>(`subscriptions-${prefix}`),
+		invitations: createLocalCollection<SelectInvitation>(
+			`invitations-${prefix}`,
+		),
+		agentCommands: createLocalCollection<SelectAgentCommand>(
+			`agent_commands-${prefix}`,
+		),
+		devicePresence: createLocalCollection<SelectDevicePresence>(
+			`device_presence-${prefix}`,
+		),
+		integrationConnections: createLocalCollection<IntegrationConnectionDisplay>(
+			`integration_connections-${prefix}`,
+		),
+		subscriptions: createLocalCollection<SelectSubscription>(
+			`subscriptions-${prefix}`,
+		),
 		apiKeys: createLocalCollection<ApiKeyDisplay>(`apikeys-${prefix}`),
-		chatSessions: createLocalCollection<SelectChatSession>(`chat_sessions-${prefix}`),
-		sessionHosts: createLocalCollection<SelectSessionHost>(`session_hosts-${prefix}`),
+		chatSessions: createLocalCollection<SelectChatSession>(
+			`chat_sessions-${prefix}`,
+		),
+		sessionHosts: createLocalCollection<SelectSessionHost>(
+			`session_hosts-${prefix}`,
+		),
 	};
 }
 

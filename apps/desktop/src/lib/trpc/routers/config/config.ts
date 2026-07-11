@@ -7,8 +7,8 @@ import {
 	type RuntimeAvailability,
 } from "@superset/shared/agent-binaries";
 import { eq } from "drizzle-orm";
-import { MEMORY_SCAFFOLD_ENABLED } from "main/lib/feature-flags";
 import { findRealBinary } from "main/lib/agent-setup/utils";
+import { MEMORY_SCAFFOLD_ENABLED } from "main/lib/feature-flags";
 import { localDb } from "main/lib/local-db";
 import type { SetupAction, SetupDetectionResult } from "shared/types/config";
 import { z } from "zod";
@@ -33,7 +33,11 @@ function computeRuntimeAvailability(): RuntimeAvailability {
 
 function getRuntimeAvailability(force: boolean): RuntimeAvailability {
 	const now = Date.now();
-	if (!force && availabilityCache && now - availabilityCache.at < AVAILABILITY_TTL_MS) {
+	if (
+		!force &&
+		availabilityCache &&
+		now - availabilityCache.at < AVAILABILITY_TTL_MS
+	) {
 		return availabilityCache.value;
 	}
 	const value = computeRuntimeAvailability();
@@ -378,7 +382,9 @@ function ensureConfigExists(mainRepoPath: string): string {
 		// Repo-less Categories use "" as mainRepoPath. Joining "" yields a path
 		// relative to the process cwd — in the packaged app that's `mkdir '.superset'`
 		// failing with ENOENT. Callers must guard; this is the backstop.
-		throw new Error("This project has no repository, so it has no config file.");
+		throw new Error(
+			"This project has no repository, so it has no config file.",
+		);
 	}
 	const configPath = getConfigPath(mainRepoPath);
 	const supersetDir = join(mainRepoPath, ".superset");

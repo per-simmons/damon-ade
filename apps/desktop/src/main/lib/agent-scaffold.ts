@@ -56,10 +56,7 @@ export interface ScaffoldParams {
 	worktreePath?: string;
 }
 
-function sub(
-	template: string,
-	vars: Record<string, string>,
-): string {
+function sub(template: string, vars: Record<string, string>): string {
 	return template.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? "");
 }
 
@@ -322,7 +319,12 @@ export function regenerateCodexAgentsMd(agentId: string): void {
 	mkdirSync(codexHome, { recursive: true });
 
 	const parts: string[] = [];
-	for (const file of ["AGENT.md", "USER.md", "MEMORY.md", ".writeback-protocol.md"]) {
+	for (const file of [
+		"AGENT.md",
+		"USER.md",
+		"MEMORY.md",
+		".writeback-protocol.md",
+	]) {
 		const p = join(memoryDir, file);
 		if (existsSync(p)) {
 			parts.push(readFileSync(p, "utf8"));

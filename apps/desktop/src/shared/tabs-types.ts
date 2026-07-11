@@ -8,11 +8,7 @@ import type { ChangeCategory } from "./changes-types";
 /**
  * Pane types that can be displayed within a tab
  */
-export type PaneType =
-	| "terminal"
-	| "webview"
-	| "file-viewer"
-	| "devtools";
+export type PaneType = "terminal" | "webview" | "file-viewer" | "devtools";
 
 /**
  * Pane status for agent lifecycle indicators

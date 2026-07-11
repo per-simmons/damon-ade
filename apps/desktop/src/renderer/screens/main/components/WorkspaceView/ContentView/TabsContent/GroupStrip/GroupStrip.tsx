@@ -138,7 +138,11 @@ export function GroupStrip() {
 	const logSessionMutation = electronTrpc.filesystem.logSession.useMutation();
 
 	const logSession = useCallback(
-		(tabName: string, action: "created" | "renamed" | "closed", extra?: { oldName?: string; createdAt?: string }) => {
+		(
+			tabName: string,
+			action: "created" | "renamed" | "closed",
+			extra?: { oldName?: string; createdAt?: string },
+		) => {
 			if (!workspace?.project?.mainRepoPath) return;
 			logSessionMutation.mutate({
 				rootPath: workspace.project.mainRepoPath,
@@ -160,7 +164,9 @@ export function GroupStrip() {
 			worktreePath: workspace?.worktreePath ?? null,
 		});
 		if (result) {
-			const tab = useTabsStore.getState().tabs.find((t) => t.id === result.tabId);
+			const tab = useTabsStore
+				.getState()
+				.tabs.find((t) => t.id === result.tabId);
 			if (tab) logSession(tab.name || "Terminal", "created");
 		}
 	};
@@ -170,7 +176,9 @@ export function GroupStrip() {
 		if (!activeWorkspaceId) return;
 		const result = addTab(activeWorkspaceId);
 		if (result) {
-			const tab = useTabsStore.getState().tabs.find((t) => t.id === result.tabId);
+			const tab = useTabsStore
+				.getState()
+				.tabs.find((t) => t.id === result.tabId);
 			if (tab) logSession(tab.name || "Terminal", "created");
 		}
 	};
@@ -195,7 +203,12 @@ export function GroupStrip() {
 		} catch (error) {
 			console.error("[GroupStrip] Failed to create note:", error);
 		}
-	}, [activeWorkspaceId, workspace?.project?.mainRepoPath, createNoteMutation, addFileViewerPane]);
+	}, [
+		activeWorkspaceId,
+		workspace?.project?.mainRepoPath,
+		createNoteMutation,
+		addFileViewerPane,
+	]);
 
 	const handleSelectGroup = (tabId: string) => {
 		if (activeWorkspaceId) {
@@ -207,9 +220,15 @@ export function GroupStrip() {
 		const tab = tabs.find((t) => t.id === tabId);
 		if (tab) {
 			const created = new Date(tab.createdAt).toLocaleString("en-US", {
-				month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true,
+				month: "short",
+				day: "numeric",
+				hour: "numeric",
+				minute: "2-digit",
+				hour12: true,
 			});
-			logSession(tab.userTitle || tab.name || "Terminal", "closed", { createdAt: created });
+			logSession(tab.userTitle || tab.name || "Terminal", "closed", {
+				createdAt: created,
+			});
 		}
 		removeTab(tabId);
 	};
@@ -217,9 +236,15 @@ export function GroupStrip() {
 	const handleRenameGroup = (tabId: string, newName: string) => {
 		const tab = tabs.find((t) => t.id === tabId);
 		const oldName = tab?.userTitle || tab?.name || "Terminal";
-		const created = tab ? new Date(tab.createdAt).toLocaleString("en-US", {
-			month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true,
-		}) : undefined;
+		const created = tab
+			? new Date(tab.createdAt).toLocaleString("en-US", {
+					month: "short",
+					day: "numeric",
+					hour: "numeric",
+					minute: "2-digit",
+					hour12: true,
+				})
+			: undefined;
 		renameTab(tabId, newName);
 		logSession(newName, "renamed", { oldName, createdAt: created });
 	};

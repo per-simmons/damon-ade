@@ -16,7 +16,7 @@ import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useProviderKeys } from "renderer/stores/model-bar/useProviderKeys";
 import { useRuntimeAvailability } from "renderer/stores/model-bar/useRuntimeAvailability";
 import { useAgentSession } from "renderer/stores/tabs/useAgentSession";
-import { type ModelDescriptor, MODEL_BAR_MODELS } from "./models";
+import { MODEL_BAR_MODELS, type ModelDescriptor } from "./models";
 import {
 	ProviderKeyDialog,
 	type ProviderKeyDialogMode,

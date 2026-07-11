@@ -35,9 +35,15 @@ export const AGENT_PRESET_COMMANDS: Record<AgentType, string[]> = {
 	opencode: ["opencode"],
 	copilot: ["copilot --allow-all"],
 	"cursor-agent": ["cursor-agent"],
-	kimi: ['ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model moonshotai/kimi-k2.7-code --dangerously-skip-permissions'],
-	minimax: ['ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model minimax/minimax-m3 --dangerously-skip-permissions'],
-	glm: ['ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model z-ai/glm-5.2 --dangerously-skip-permissions'],
+	kimi: [
+		'ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model moonshotai/kimi-k2.7-code --dangerously-skip-permissions',
+	],
+	minimax: [
+		'ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model minimax/minimax-m3 --dangerously-skip-permissions',
+	],
+	glm: [
+		'ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model z-ai/glm-5.2 --dangerously-skip-permissions',
+	],
 	// pi picks provider/model from the user's own pi settings; tools run
 	// unattended by default, so no danger-mode flag is needed.
 	pi: ["pi"],
@@ -134,11 +140,23 @@ const AGENT_COMMANDS: Record<
 	"cursor-agent": (prompt, delimiter) =>
 		buildHeredoc(prompt, delimiter, "cursor-agent --yolo"),
 	kimi: (prompt, delimiter) =>
-		buildHeredoc(prompt, delimiter, 'ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model moonshotai/kimi-k2.7-code --dangerously-skip-permissions'),
+		buildHeredoc(
+			prompt,
+			delimiter,
+			'ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model moonshotai/kimi-k2.7-code --dangerously-skip-permissions',
+		),
 	minimax: (prompt, delimiter) =>
-		buildHeredoc(prompt, delimiter, 'ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model minimax/minimax-m3 --dangerously-skip-permissions'),
+		buildHeredoc(
+			prompt,
+			delimiter,
+			'ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model minimax/minimax-m3 --dangerously-skip-permissions',
+		),
 	glm: (prompt, delimiter) =>
-		buildHeredoc(prompt, delimiter, 'ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model z-ai/glm-5.2 --dangerously-skip-permissions'),
+		buildHeredoc(
+			prompt,
+			delimiter,
+			'ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model z-ai/glm-5.2 --dangerously-skip-permissions',
+		),
 	// pi treats positional args as the opening message of an interactive session.
 	pi: (prompt, delimiter) => buildHeredoc(prompt, delimiter, "pi"),
 };

@@ -319,8 +319,7 @@ export function BehaviorSettings({ visibleItems }: BehaviorSettingsProps) {
 								Delete local branch on agent removal
 							</Label>
 							<p className="text-xs text-muted-foreground">
-								Also delete the local git branch when deleting a worktree
-								agent
+								Also delete the local git branch when deleting a worktree agent
 							</p>
 						</div>
 						<Switch

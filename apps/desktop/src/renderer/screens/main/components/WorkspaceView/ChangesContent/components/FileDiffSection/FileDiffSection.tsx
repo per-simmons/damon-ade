@@ -5,10 +5,7 @@ import { LuFileCode, LuLoader } from "react-icons/lu";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useChangesStore } from "renderer/stores/changes";
 import type { ChangeCategory, ChangedFile } from "shared/changes-types";
-import {
-	getStatusColor,
-	getStatusIndicator,
-} from "../../../shared/file-utils";
+import { getStatusColor, getStatusIndicator } from "../../../shared/file-utils";
 import { createFileKey, useScrollContext } from "../../context";
 import { DiffViewer } from "../DiffViewer";
 import { LightDiffViewer } from "../LightDiffViewer";

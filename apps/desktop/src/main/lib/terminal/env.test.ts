@@ -5,9 +5,9 @@ import {
 	FALLBACK_SHELL,
 	getLocale,
 	removeAppEnvVars,
-	setOpenRouterKeyResolver,
 	SHELL_CRASH_THRESHOLD_MS,
 	sanitizeEnv,
+	setOpenRouterKeyResolver,
 } from "./env";
 
 describe("env", () => {

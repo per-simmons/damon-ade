@@ -4,9 +4,9 @@ import { join } from "node:path";
 import { JSONFilePreset } from "lowdb/node";
 import {
 	APP_STATE_PATH,
+	ensureSupersetHomeDirExists,
 	SUPERSET_HOME_DIR,
 	SUPERSET_SENSITIVE_FILE_MODE,
-	ensureSupersetHomeDirExists,
 } from "../app-environment";
 import type { AppState } from "./schemas";
 import { defaultAppState } from "./schemas";
@@ -47,9 +47,7 @@ function loadOrCreateDeviceId(): string {
 
 export function getDeviceId(): string {
 	if (!_deviceId) {
-		throw new Error(
-			"Device ID not initialized. Call initAppState() first.",
-		);
+		throw new Error("Device ID not initialized. Call initAppState() first.");
 	}
 	return _deviceId;
 }

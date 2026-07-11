@@ -54,10 +54,7 @@ export function backfillAgentMemory(): void {
 			// worktrees row — using the derived path would skip it (no .git there)
 			// and, worse, drop bridges into a non-existent dir. Fall back to the
 			// derived path when the row has none.
-			const worktreePath = resolveAgentWorktreePath(
-				agent.id,
-				agent.worktreeId,
-			);
+			const worktreePath = resolveAgentWorktreePath(agent.id, agent.worktreeId);
 			// Repo must already exist and be a git repo; this guard also filters
 			// out any non-ADE workspace that happens to carry a runtime value.
 			if (!existsSync(join(worktreePath, ".git"))) continue;
@@ -78,7 +75,9 @@ export function backfillAgentMemory(): void {
 	}
 
 	if (scaffolded > 0) {
-		console.log(`[memory-backfill] Scaffolded memory for ${scaffolded} agent(s).`);
+		console.log(
+			`[memory-backfill] Scaffolded memory for ${scaffolded} agent(s).`,
+		);
 	}
 }
 

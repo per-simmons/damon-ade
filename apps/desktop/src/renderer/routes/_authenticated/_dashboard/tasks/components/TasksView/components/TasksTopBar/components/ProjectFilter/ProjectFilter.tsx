@@ -28,7 +28,10 @@ export function ProjectFilter({ value, onChange }: ProjectFilterProps) {
 	// Extract unique project names from task.externalProvider
 	const projects = useMemo(() => {
 		if (!allTasks) return [];
-		const map = new Map<string, { name: string; color: string | null; count: number }>();
+		const map = new Map<
+			string,
+			{ name: string; color: string | null; count: number }
+		>();
 		for (const task of allTasks) {
 			const name = task.externalProvider;
 			if (!name) continue;
@@ -76,7 +79,10 @@ export function ProjectFilter({ value, onChange }: ProjectFilterProps) {
 						<>
 							<button
 								type="button"
-								onClick={() => { onChange([]); setOpen(false); }}
+								onClick={() => {
+									onChange([]);
+									setOpen(false);
+								}}
 								className="w-full px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground text-left cursor-pointer"
 							>
 								Clear filter

@@ -12,9 +12,7 @@ import {
  * - init:  a fresh empty git repo (`git init` + empty initial commit)
  * - clone: clone a remote URL or a local path into the worktree
  */
-export type AgentRepoSource =
-	| { type: "init" }
-	| { type: "clone"; url: string };
+export type AgentRepoSource = { type: "init" } | { type: "clone"; url: string };
 
 export interface AgentRepoResult {
 	agentHome: string;
@@ -86,9 +84,8 @@ export async function setupAgentRepo({
 		await git.addConfig("user.email", "agent@ade.local", false, "local");
 		await git.raw(["commit", "--allow-empty", "-m", "Initial commit"]);
 		branch =
-			(await git
-				.revparse(["--abbrev-ref", "HEAD"])
-				.catch(() => "main")) || "main";
+			(await git.revparse(["--abbrev-ref", "HEAD"]).catch(() => "main")) ||
+			"main";
 		branch = branch.trim();
 	}
 

@@ -15,7 +15,6 @@ import { toast } from "@superset/ui/sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@superset/ui/tooltip";
 import { cn } from "@superset/ui/utils";
 import { useMatchRoute, useNavigate } from "@tanstack/react-router";
-import type { ChangeEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDrag, useDrop } from "react-dnd";
 import { HiMiniXMark } from "react-icons/hi2";
@@ -135,10 +134,12 @@ export function WorkspaceListItem({
 
 	// Agent avatar (circular rail bust) photo upload.
 	const photoInputRef = useRef<HTMLInputElement>(null);
-	const setWorkspaceIcon = electronTrpc.workspaces.setWorkspaceIcon.useMutation({
-		onSuccess: () => utils.workspaces.getAllGrouped.invalidate(),
-		onError: (error) => toast.error(`Failed to set photo: ${error.message}`),
-	});
+	const setWorkspaceIcon = electronTrpc.workspaces.setWorkspaceIcon.useMutation(
+		{
+			onSuccess: () => utils.workspaces.getAllGrouped.invalidate(),
+			onError: (error) => toast.error(`Failed to set photo: ${error.message}`),
+		},
+	);
 	const handlePhotoFileChange = async (
 		e: React.ChangeEvent<HTMLInputElement>,
 	) => {
@@ -372,10 +373,10 @@ export function WorkspaceListItem({
 					<div
 						className={cn(
 							"relative shrink-0 flex items-center justify-center mr-2.5",
-								// Photo avatars get a larger slot; glyph icons keep the compact
-								// one. The slot must match the img size or the reset's max-width
-								// squeezes the circle into an oval.
-								iconUrl ? "size-8" : "size-5",
+							// Photo avatars get a larger slot; glyph icons keep the compact
+							// one. The slot must match the img size or the reset's max-width
+							// squeezes the circle into an oval.
+							iconUrl ? "size-8" : "size-5",
 							hasSubtitle && "mt-0.5",
 						)}
 					>
@@ -574,9 +575,7 @@ export function WorkspaceListItem({
 							<LuPencil className="size-4 mr-2" strokeWidth={STROKE_WIDTH} />
 							Rename
 						</ContextMenuItem>
-						<ContextMenuItem
-							onSelect={() => photoInputRef.current?.click()}
-						>
+						<ContextMenuItem onSelect={() => photoInputRef.current?.click()}>
 							<LuImage className="size-4 mr-2" strokeWidth={STROKE_WIDTH} />
 							Change Photo
 						</ContextMenuItem>

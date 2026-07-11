@@ -92,9 +92,9 @@ export function ExternalWorktreesBanner({ projectId }: { projectId: string }) {
 							<AlertDialogTitle>Import all worktrees</AlertDialogTitle>
 							<AlertDialogDescription>
 								This will import {externalWorktrees.length} existing worktree
-								{externalWorktrees.length === 1 ? "" : "s"} into ADE as
-								agents. Each worktree on disk will be tracked and appear in
-								your sidebar. No files will be modified.
+								{externalWorktrees.length === 1 ? "" : "s"} into ADE as agents.
+								Each worktree on disk will be tracked and appear in your
+								sidebar. No files will be modified.
 							</AlertDialogDescription>
 						</AlertDialogHeader>
 						<AlertDialogFooter>

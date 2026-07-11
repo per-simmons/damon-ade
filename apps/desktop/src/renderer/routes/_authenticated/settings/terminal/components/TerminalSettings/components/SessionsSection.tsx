@@ -197,9 +197,7 @@ export function SessionsSection() {
 							<table className="w-full text-xs">
 								<thead className="sticky top-0 bg-background">
 									<tr className="text-muted-foreground">
-										<th className="px-2 py-2 text-left font-medium">
-											Agent
-										</th>
+										<th className="px-2 py-2 text-left font-medium">Agent</th>
 										<th className="px-2 py-2 text-left font-medium">Session</th>
 										<th className="px-2 py-2 text-right font-medium">
 											Clients

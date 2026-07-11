@@ -16,9 +16,9 @@
  */
 
 import { createHash } from "node:crypto";
-import { projects, workspaces, type SelectWorkspace } from "@superset/local-db";
-import { eq } from "drizzle-orm";
 import type { WorkspaceType } from "@superset/local-db";
+import { projects, type SelectWorkspace, workspaces } from "@superset/local-db";
+import { eq } from "drizzle-orm";
 import { localDb } from "main/lib/local-db";
 
 export interface WorkspaceIdentityInput {
@@ -37,9 +37,7 @@ export interface ResolveLocalWorkspaceIdOptions {
  * Canonical cross-Mac workspace identifier.
  * Deterministic from project mainRepoPath + branch + type.
  */
-export function canonicalizeWorkspace(
-	input: WorkspaceIdentityInput,
-): string {
+export function canonicalizeWorkspace(input: WorkspaceIdentityInput): string {
 	const payload = `${input.mainRepoPath}:${input.branch}:${input.type}`;
 	return createHash("sha256").update(payload).digest("hex");
 }

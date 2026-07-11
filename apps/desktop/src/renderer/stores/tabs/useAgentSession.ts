@@ -1,8 +1,8 @@
+import type { AgentRuntime, TerminalPreset } from "@superset/local-db";
 import {
 	AGENT_LABELS,
 	AGENT_PRESET_COMMANDS,
 } from "@superset/shared/agent-command";
-import type { AgentRuntime, TerminalPreset } from "@superset/local-db";
 import { useCallback } from "react";
 import { useTabsWithPresets } from "./useTabsWithPresets";
 

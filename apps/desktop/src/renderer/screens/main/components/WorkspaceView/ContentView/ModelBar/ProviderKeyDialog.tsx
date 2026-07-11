@@ -111,13 +111,13 @@ export function ProviderKeyDialog({
 							</>
 						) : openrouterConfigured ? (
 							<>
-								An OpenRouter key is configured. Replace or remove it below — keys
-								are managed at{" "}
+								An OpenRouter key is configured. Replace or remove it below —
+								keys are managed at{" "}
 							</>
 						) : (
 							<>
-								Add an OpenRouter API key to unlock the OpenRouter-proxied models
-								— get one at{" "}
+								Add an OpenRouter API key to unlock the OpenRouter-proxied
+								models — get one at{" "}
 							</>
 						)}
 						<button

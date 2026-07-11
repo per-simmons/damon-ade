@@ -5,6 +5,7 @@ import type { BrowserWindow } from "electron";
 import { app, Notification, nativeTheme } from "electron";
 import { createWindow } from "lib/electron-app/factories/windows/create";
 import { createAppRouter } from "lib/trpc/routers";
+import { getWorkspacesInVisualOrder } from "lib/trpc/routers/workspaces/procedures/query";
 import { localDb } from "main/lib/local-db";
 import { NOTIFICATION_EVENTS, PLATFORM } from "shared/constants";
 import {
@@ -14,27 +15,26 @@ import {
 import type { AgentLifecycleEvent } from "shared/notification-types";
 import { createIPCHandler } from "trpc-electron/main";
 import { productName } from "~/package.json";
-import { getWorkspacesInVisualOrder } from "lib/trpc/routers/workspaces/procedures/query";
 import { appState } from "../lib/app-state";
 import { browserManager } from "../lib/browser/browser-manager";
 import { createApplicationMenu, registerMenuHotkeyUpdates } from "../lib/menu";
 import { playNotificationSound } from "../lib/notification-sound";
 import { NotificationManager } from "../lib/notifications/notification-manager";
-import { AgentWatcher } from "../lib/scheduler/watcher";
 import {
 	notificationsApp,
 	notificationsEmitter,
 } from "../lib/notifications/server";
 import {
-	configureTestServer,
-	TEST_SERVER_PORT,
-	testServerApp,
-} from "../lib/test-server";
-import {
 	extractWorkspaceIdFromUrl,
 	getNotificationTitle,
 	getWorkspaceName,
 } from "../lib/notifications/utils";
+import { AgentWatcher } from "../lib/scheduler/watcher";
+import {
+	configureTestServer,
+	TEST_SERVER_PORT,
+	testServerApp,
+} from "../lib/test-server";
 import {
 	getInitialWindowBounds,
 	loadWindowState,
@@ -165,8 +165,12 @@ export async function MainWindow() {
 			if (currentIndex === -1) return;
 
 			const targetIndex = input.shift
-				? (currentIndex === 0 ? orderedIds.length - 1 : currentIndex - 1)
-				: (currentIndex === orderedIds.length - 1 ? 0 : currentIndex + 1);
+				? currentIndex === 0
+					? orderedIds.length - 1
+					: currentIndex - 1
+				: currentIndex === orderedIds.length - 1
+					? 0
+					: currentIndex + 1;
 
 			window.webContents.send(
 				"deep-link-navigate",

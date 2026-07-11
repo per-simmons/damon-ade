@@ -89,8 +89,7 @@ export function useAgentHookListener() {
 				// Reuse an existing tab with this title so e.g. nightly maintenance
 				// always writes to the same tab.
 				const existingTab = state.tabs.find(
-					(t) =>
-						t.workspaceId === wsId && (t.userTitle ?? t.name) === label,
+					(t) => t.workspaceId === wsId && (t.userTitle ?? t.name) === label,
 				);
 				let tabId: string;
 				let paneId: string;

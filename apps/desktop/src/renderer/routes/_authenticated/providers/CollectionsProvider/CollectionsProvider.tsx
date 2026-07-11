@@ -1,9 +1,4 @@
-import {
-	createContext,
-	type ReactNode,
-	useContext,
-	useMemo,
-} from "react";
+import { createContext, type ReactNode, useContext, useMemo } from "react";
 import { MOCK_ORG_ID } from "shared/constants";
 import { getCollections } from "./collections";
 
@@ -14,7 +9,7 @@ type CollectionsContextType = ReturnType<typeof getCollections> & {
 const CollectionsContext = createContext<CollectionsContextType | null>(null);
 
 export function preloadActiveOrganizationCollections(
-	activeOrganizationId: string | null | undefined,
+	_activeOrganizationId: string | null | undefined,
 ): void {
 	// No-op in Local build (no Electric SQL sync)
 }
@@ -29,7 +24,7 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
 
 	const collections = useMemo(() => {
 		return getCollections(activeOrganizationId);
-	}, [activeOrganizationId]);
+	}, []);
 
 	return (
 		<CollectionsContext.Provider value={{ ...collections, switchOrganization }}>

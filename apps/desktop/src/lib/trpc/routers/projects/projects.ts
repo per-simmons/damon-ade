@@ -1192,7 +1192,8 @@ export const createProjectsRouter = (getWindow: () => BrowserWindow | null) => {
 			.mutation(({ input }) => {
 				const allProjects = localDb.select().from(projects).all();
 				const maxTabOrder = allProjects.reduce(
-					(max, p) => (p.tabOrder != null && p.tabOrder > max ? p.tabOrder : max),
+					(max, p) =>
+						p.tabOrder != null && p.tabOrder > max ? p.tabOrder : max,
 					-1,
 				);
 

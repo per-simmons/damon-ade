@@ -7,6 +7,7 @@ interface SupersetLogoProps {
 export function SupersetLogo({ className }: SupersetLogoProps) {
 	return (
 		<span
+			role="img"
 			className={cn(
 				"text-foreground font-mono font-bold tracking-[0.25em] text-4xl uppercase select-none",
 				className,

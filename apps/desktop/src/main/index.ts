@@ -262,7 +262,8 @@ if (!gotTheLock) {
 			// superset-icon://<namespace>/<id> — namespace is the URL host
 			// ("projects" for Category photos, "workspaces" for Agent avatars).
 			const url = new URL(request.url);
-			const namespace = url.hostname === "workspaces" ? "workspaces" : "projects";
+			const namespace =
+				url.hostname === "workspaces" ? "workspaces" : "projects";
 			const id = url.pathname.replace(/^\//, "");
 			const iconPath = getIconPath(namespace, id);
 			if (!iconPath) {

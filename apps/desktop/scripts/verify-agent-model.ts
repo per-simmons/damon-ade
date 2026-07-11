@@ -67,8 +67,14 @@ async function main() {
 	// 4. Assertions.
 	console.log("Assertions:");
 	assert(existsSync(worktreePath), `worktree exists on disk: ${worktreePath}`);
-	assert(existsSync(join(worktreePath, ".git")), "worktree is a git repo (.git present)");
-	assert(existsSync(memoryDir), `memory/ dir exists as sibling of worktree: ${memoryDir}`);
+	assert(
+		existsSync(join(worktreePath, ".git")),
+		"worktree is a git repo (.git present)",
+	);
+	assert(
+		existsSync(memoryDir),
+		`memory/ dir exists as sibling of worktree: ${memoryDir}`,
+	);
 
 	const gitBranch = execSync("git rev-parse --abbrev-ref HEAD", {
 		cwd: worktreePath,
@@ -82,9 +88,16 @@ async function main() {
 			 FROM workspaces w JOIN worktrees wt ON wt.id = w.worktree_id
 			 WHERE w.id = ?`,
 		)
-		.get(agentId) as { runtime: string; worktree_id: string; worktree_path: string };
+		.get(agentId) as {
+		runtime: string;
+		worktree_id: string;
+		worktree_path: string;
+	};
 
-	assert(row.runtime === "claude", `agent row runtime === 'claude' (got '${row.runtime}')`);
+	assert(
+		row.runtime === "claude",
+		`agent row runtime === 'claude' (got '${row.runtime}')`,
+	);
 	assert(row.worktree_id === worktreeId, "agent linked to its worktree row");
 	// Terminal derives cwd from workspaceId -> worktrees.path (getWorkspacePath).
 	assert(

@@ -98,7 +98,11 @@ export function NewCategoryModal() {
 						className="size-12 shrink-0 rounded overflow-hidden bg-muted flex items-center justify-center text-xs text-muted-foreground border border-border"
 					>
 						{photoDataUrl ? (
-							<img src={photoDataUrl} alt="" className="size-full object-cover" />
+							<img
+								src={photoDataUrl}
+								alt=""
+								className="size-full object-cover"
+							/>
 						) : (
 							"Photo"
 						)}

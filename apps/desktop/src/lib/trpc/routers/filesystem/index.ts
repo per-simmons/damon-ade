@@ -859,7 +859,12 @@ export const createFilesystemRouter = () => {
 						try {
 							const homedir = os.homedir();
 							const projectHash = input.rootPath.replace(/[^a-zA-Z0-9-]/g, "-");
-							const sessionsDir = path.join(homedir, ".claude", "projects", projectHash);
+							const sessionsDir = path.join(
+								homedir,
+								".claude",
+								"projects",
+								projectHash,
+							);
 							const files = await fs.readdir(sessionsDir);
 							const jsonlFiles = files.filter((f) => f.endsWith(".jsonl"));
 							let newest = { name: "", mtime: 0 };
@@ -879,10 +884,11 @@ export const createFilesystemRouter = () => {
 				}
 
 				// Clean display name for claude commands
-				const displayName = input.tabName
-					.replace(/--resume\s+\S+\s*/i, "")
-					.replace(/--dangerously-skip-permissions\s*/g, "")
-					.trim() || input.tabName;
+				const displayName =
+					input.tabName
+						.replace(/--resume\s+\S+\s*/i, "")
+						.replace(/--dangerously-skip-permissions\s*/g, "")
+						.trim() || input.tabName;
 
 				let line = "";
 				if (input.action === "created") {
@@ -912,7 +918,12 @@ export const createFilesystemRouter = () => {
 				const homedir = os.homedir();
 				// Claude hashes project paths by replacing / with -
 				const projectHash = input.projectPath.replace(/[^a-zA-Z0-9-]/g, "-");
-				const sessionsDir = path.join(homedir, ".claude", "projects", projectHash);
+				const sessionsDir = path.join(
+					homedir,
+					".claude",
+					"projects",
+					projectHash,
+				);
 
 				try {
 					const files = await fs.readdir(sessionsDir);
@@ -1135,7 +1146,12 @@ export const createFilesystemRouter = () => {
 				async ({
 					input,
 				}): Promise<
-					| { ok: true; content: string; truncated: boolean; byteLength: number }
+					| {
+							ok: true;
+							content: string;
+							truncated: boolean;
+							byteLength: number;
+					  }
 					| { ok: false; reason: "not-found" | "too-large" | "binary" }
 				> => {
 					try {

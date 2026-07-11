@@ -63,10 +63,12 @@ export function BinaryInstallDialog({
 		<Dialog open={binary !== null} onOpenChange={onOpenChange}>
 			<DialogContent className="sm:max-w-[460px]">
 				<DialogHeader>
-					<DialogTitle>{info ? `Install ${info.label}` : "Install"}</DialogTitle>
+					<DialogTitle>
+						{info ? `Install ${info.label}` : "Install"}
+					</DialogTitle>
 					<DialogDescription>
-						{info?.label ?? "This tool"} isn't installed on this machine. Run the
-						command below in a terminal, then re-check.
+						{info?.label ?? "This tool"} isn't installed on this machine. Run
+						the command below in a terminal, then re-check.
 					</DialogDescription>
 				</DialogHeader>
 

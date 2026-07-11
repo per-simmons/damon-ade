@@ -145,8 +145,8 @@ export function DeleteWorkspaceDialog({
 						<AlertDialogDescription asChild>
 							<div className="text-muted-foreground space-y-1.5">
 								<span className="block">
-									This will close the agent and kill any active terminals.
-									Your branch and commits will remain in the repository.
+									This will close the agent and kill any active terminals. Your
+									branch and commits will remain in the repository.
 								</span>
 							</div>
 						</AlertDialogDescription>

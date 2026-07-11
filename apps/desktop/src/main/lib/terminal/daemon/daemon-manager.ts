@@ -581,8 +581,10 @@ export class DaemonTerminalManager extends EventEmitter {
 
 	private extractClaudeSessionId(scrollback: string): string | undefined {
 		// Strip ANSI escape sequences for cleaner matching
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: ESC is the ANSI escape introducer
 		const plain = scrollback.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-		const UUID_RE = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+		const UUID_RE =
+			"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 
 		// Pattern 1: `claude --resume <uuid>` — explicit resume command
 		const resumeMatch = plain.match(

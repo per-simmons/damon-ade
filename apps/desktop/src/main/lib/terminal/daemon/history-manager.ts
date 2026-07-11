@@ -135,7 +135,8 @@ export class HistoryManager {
 		//   3. `.claude/projects/<project>/<uuid>.jsonl` — session file paths
 		// Patterns 2 and 3 work even for NAMED sessions (e.g. `claude --resume "my-session"`)
 		// where the user-facing name differs from the underlying UUID.
-		const UUID_RE = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+		const UUID_RE =
+			"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 		const resumeMatch = data.match(
 			new RegExp(`claude\\s+--resume\\s+(${UUID_RE})`, "i"),
 		);
@@ -146,9 +147,7 @@ export class HistoryManager {
 			new RegExp(`\\.claude/projects/[^/]+/(${UUID_RE})\\.jsonl`, "i"),
 		);
 		const sessionId =
-			resumeMatch?.[1] ||
-			taskPathMatch?.[1] ||
-			sessionFileMatch?.[1];
+			resumeMatch?.[1] || taskPathMatch?.[1] || sessionFileMatch?.[1];
 		if (sessionId) {
 			writer.updateClaudeSessionId(sessionId);
 		}
