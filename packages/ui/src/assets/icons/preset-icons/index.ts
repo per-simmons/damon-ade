@@ -13,6 +13,8 @@ import minimaxIcon from "./minimax.svg";
 import minimaxWhiteIcon from "./minimax-white.svg";
 import opencodeIcon from "./opencode.svg";
 import opencodeWhiteIcon from "./opencode-white.svg";
+import piIcon from "./pi.svg";
+import piWhiteIcon from "./pi-white.svg";
 
 export interface PresetIconSet {
 	light: string;
@@ -29,6 +31,7 @@ export const PRESET_ICONS: Record<string, PresetIconSet> = {
 	kimi: { light: kimiIcon, dark: kimiWhiteIcon },
 	minimax: { light: minimaxIcon, dark: minimaxWhiteIcon },
 	glm: { light: glmIcon, dark: glmWhiteIcon },
+	pi: { light: piIcon, dark: piWhiteIcon },
 };
 
 export function getPresetIcon(
@@ -57,4 +60,6 @@ export {
 	minimaxWhiteIcon,
 	opencodeIcon,
 	opencodeWhiteIcon,
+	piIcon,
+	piWhiteIcon,
 };

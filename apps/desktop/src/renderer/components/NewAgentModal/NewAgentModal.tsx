@@ -45,7 +45,7 @@ type RepoMode = "init" | "clone" | "local";
  * the launch presets) still support the rest — they return for the later
  * models stage.
  */
-const RUNTIME_CHOICES = ["claude", "codex", "opencode"] as const;
+const RUNTIME_CHOICES = ["claude", "codex", "opencode", "pi"] as const;
 
 /**
  * Create an Agent inside a Category. ADE agents own a standalone repo, so this

@@ -8,6 +8,7 @@ export const AGENT_TYPES = [
 	"kimi",
 	"minimax",
 	"glm",
+	"pi",
 ] as const;
 
 export type AgentType = (typeof AGENT_TYPES)[number];
@@ -22,6 +23,7 @@ export const AGENT_LABELS: Record<AgentType, string> = {
 	kimi: "Kimi K2.7",
 	minimax: "MiniMax M3",
 	glm: "GLM 5.2",
+	pi: "pi",
 };
 
 export const AGENT_PRESET_COMMANDS: Record<AgentType, string[]> = {
@@ -36,6 +38,9 @@ export const AGENT_PRESET_COMMANDS: Record<AgentType, string[]> = {
 	kimi: ['ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model moonshotai/kimi-k2.7-code --dangerously-skip-permissions'],
 	minimax: ['ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model minimax/minimax-m3 --dangerously-skip-permissions'],
 	glm: ['ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model z-ai/glm-5.2 --dangerously-skip-permissions'],
+	// pi picks provider/model from the user's own pi settings; tools run
+	// unattended by default, so no danger-mode flag is needed.
+	pi: ["pi"],
 };
 
 export const AGENT_PRESET_DESCRIPTIONS: Record<AgentType, string> = {
@@ -48,6 +53,7 @@ export const AGENT_PRESET_DESCRIPTIONS: Record<AgentType, string> = {
 	kimi: "Kimi K2.7 via Claude Code + OpenRouter",
 	minimax: "MiniMax M3 via Claude Code + OpenRouter",
 	glm: "GLM 5.2 via Claude Code + OpenRouter",
+	pi: "pi: minimal multi-provider coding agent",
 };
 
 export interface TaskInput {
@@ -133,6 +139,8 @@ const AGENT_COMMANDS: Record<
 		buildHeredoc(prompt, delimiter, 'ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model minimax/minimax-m3 --dangerously-skip-permissions'),
 	glm: (prompt, delimiter) =>
 		buildHeredoc(prompt, delimiter, 'ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model z-ai/glm-5.2 --dangerously-skip-permissions'),
+	// pi treats positional args as the opening message of an interactive session.
+	pi: (prompt, delimiter) => buildHeredoc(prompt, delimiter, "pi"),
 };
 
 export function buildAgentPromptCommand({

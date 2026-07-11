@@ -38,6 +38,12 @@ export const MODEL_BAR_MODELS: ModelDescriptor[] = [
 		needsOpenRouterKey: false,
 	},
 	{
+		runtime: "pi",
+		iconName: "pi",
+		label: "pi",
+		needsOpenRouterKey: false,
+	},
+	{
 		runtime: "kimi",
 		iconName: "kimi",
 		label: "Kimi K2.7",

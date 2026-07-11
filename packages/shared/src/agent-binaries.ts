@@ -6,7 +6,13 @@ import { type AgentType } from "./agent-command";
  * CLI (see AGENT_PRESET_COMMANDS), so availability of those runtimes gates on
  * `claude` being installed.
  */
-export type AgentBinary = "claude" | "codex" | "opencode" | "gemini" | "git";
+export type AgentBinary =
+	| "claude"
+	| "codex"
+	| "opencode"
+	| "gemini"
+	| "pi"
+	| "git";
 
 /**
  * Maps an agent runtime to the external binary its launch command invokes. Used
@@ -25,6 +31,7 @@ export const RUNTIME_BINARY: Record<AgentType, AgentBinary> = {
 	kimi: "claude",
 	minimax: "claude",
 	glm: "claude",
+	pi: "pi",
 };
 
 export interface BinaryInstallInfo {
@@ -65,6 +72,11 @@ export const BINARY_INSTALL: Record<AgentBinary, BinaryInstallInfo> = {
 		command: "npm i -g @google/gemini-cli",
 		url: "https://github.com/google-gemini/gemini-cli",
 	},
+	pi: {
+		label: "pi",
+		command: "npm i -g @earendil-works/pi-coding-agent",
+		url: "https://www.npmjs.com/package/@earendil-works/pi-coding-agent",
+	},
 	git: {
 		label: "Git",
 		command: "xcode-select --install",
@@ -78,6 +90,7 @@ export const CHECKED_BINARIES = [
 	"claude",
 	"codex",
 	"opencode",
+	"pi",
 	"git",
 ] as const satisfies readonly AgentBinary[];
 
