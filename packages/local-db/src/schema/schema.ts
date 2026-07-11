@@ -407,3 +407,48 @@ export const agentMessages = sqliteTable(
 
 export type InsertAgentMessage = typeof agentMessages.$inferInsert;
 export type SelectAgentMessage = typeof agentMessages.$inferSelect;
+
+export type AgentTaskStatus = "todo" | "in_progress" | "review" | "done";
+export type AgentTaskPriority = "urgent" | "high" | "medium" | "low" | "none";
+
+/**
+ * ADE task board. Local-first replacement for the synced Superset "Code Queue"
+ * tasks: each row is a card the user can assign to an agent (a workspace with
+ * a runtime) and dispatch — which launches the agent's CLI with the task as
+ * its opening prompt.
+ */
+export const agentTasks = sqliteTable(
+	"agent_tasks",
+	{
+		id: text("id")
+			.primaryKey()
+			.$defaultFn(() => uuidv4()),
+		title: text("title").notNull(),
+		description: text("description"),
+		status: text("status").notNull().default("todo").$type<AgentTaskStatus>(),
+		priority: text("priority")
+			.notNull()
+			.default("none")
+			.$type<AgentTaskPriority>(),
+		// The assigned agent. Not a hard FK so deleting an agent leaves the card
+		// (it just becomes unassigned in the UI when the join finds nothing).
+		workspaceId: text("workspace_id"),
+		// Sort order within a status column (fractional insert-between).
+		position: integer("position").notNull().default(0),
+		dispatchedAt: integer("dispatched_at"),
+		completedAt: integer("completed_at"),
+		createdAt: integer("created_at")
+			.notNull()
+			.$defaultFn(() => Date.now()),
+		updatedAt: integer("updated_at")
+			.notNull()
+			.$defaultFn(() => Date.now()),
+	},
+	(table) => [
+		index("agent_tasks_status_idx").on(table.status),
+		index("agent_tasks_workspace_id_idx").on(table.workspaceId),
+	],
+);
+
+export type InsertAgentTask = typeof agentTasks.$inferInsert;
+export type SelectAgentTask = typeof agentTasks.$inferSelect;

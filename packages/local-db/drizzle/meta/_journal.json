@@ -281,6 +281,13 @@
       "when": 1783787826851,
       "tag": "0039_add_pi_models_setting",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1783788343288,
+      "tag": "0040_add_agent_tasks",
+      "breakpoints": true
     }
   ]
 }
