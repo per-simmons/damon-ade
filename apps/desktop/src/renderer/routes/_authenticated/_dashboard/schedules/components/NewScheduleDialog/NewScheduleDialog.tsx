@@ -22,13 +22,16 @@ import { useEffect, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import type { ScheduleAgent } from "../../types";
 
+// Radix Select forbids empty-string item values, so Custom gets a sentinel.
+const CUSTOM_CRON = "__custom__";
+
 const CRON_PRESETS: { label: string; expression: string }[] = [
 	{ label: "Every hour", expression: "0 * * * *" },
 	{ label: "Every morning at 9", expression: "0 9 * * *" },
 	{ label: "Weekdays at 9", expression: "0 9 * * 1-5" },
 	{ label: "Every 30 minutes", expression: "*/30 * * * *" },
 	{ label: "Sundays at 8", expression: "0 8 * * 0" },
-	{ label: "Custom…", expression: "" },
+	{ label: "Custom…", expression: CUSTOM_CRON },
 ];
 
 interface NewScheduleDialogProps {
@@ -65,7 +68,7 @@ export function NewScheduleDialog({
 		}
 	}, [open]);
 
-	const cronExpression = preset === "" ? customCron.trim() : preset;
+	const cronExpression = preset === CUSTOM_CRON ? customCron.trim() : preset;
 	const canCreate =
 		name.trim().length > 0 &&
 		cronExpression.length > 0 &&
@@ -151,7 +154,7 @@ export function NewScheduleDialog({
 						</div>
 					</div>
 
-					{preset === "" && (
+					{preset === CUSTOM_CRON && (
 						<div className="flex flex-col gap-1.5">
 							<Label htmlFor="schedule-cron">Cron expression</Label>
 							<Input
