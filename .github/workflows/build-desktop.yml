@@ -251,6 +251,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup MSVC development environment (for native modules like node-pty, bufferutil)
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
         with:
