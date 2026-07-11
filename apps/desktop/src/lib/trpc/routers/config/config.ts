@@ -79,7 +79,12 @@ async function fileExists(path: string): Promise<boolean> {
 async function detectSetupDefaults(
 	mainRepoPath: string,
 ): Promise<SetupDetectionResult> {
-	const check = (name: string) => fileExists(join(mainRepoPath, name));
+	// Repo-less Categories use "" as mainRepoPath; joining "" would probe paths
+	// relative to the process cwd, so report "nothing detected" instead.
+	const check = (name: string) =>
+		mainRepoPath
+			? fileExists(join(mainRepoPath, name))
+			: Promise.resolve(false);
 
 	const [
 		hasBunLock,
@@ -369,6 +374,12 @@ function getConfigPath(mainRepoPath: string): string {
 }
 
 function ensureConfigExists(mainRepoPath: string): string {
+	if (!mainRepoPath) {
+		// Repo-less Categories use "" as mainRepoPath. Joining "" yields a path
+		// relative to the process cwd — in the packaged app that's `mkdir '.superset'`
+		// failing with ENOENT. Callers must guard; this is the backstop.
+		throw new Error("This project has no repository, so it has no config file.");
+	}
 	const configPath = getConfigPath(mainRepoPath);
 	const supersetDir = join(mainRepoPath, ".superset");
 
@@ -412,6 +423,11 @@ export const createConfigRouter = () => {
 					return false;
 				}
 
+				// Repo-less Categories have no repo to configure
+				if (!project.mainRepoPath) {
+					return false;
+				}
+
 				// Don't show if already dismissed or if config has scripts
 				if (project.configToastDismissed) {
 					return false;
@@ -441,7 +457,7 @@ export const createConfigRouter = () => {
 					.from(projects)
 					.where(eq(projects.id, input.projectId))
 					.get();
-				if (!project) {
+				if (!project || !project.mainRepoPath) {
 					return null;
 				}
 				return ensureConfigExists(project.mainRepoPath);
@@ -456,7 +472,7 @@ export const createConfigRouter = () => {
 					.from(projects)
 					.where(eq(projects.id, input.projectId))
 					.get();
-				if (!project) {
+				if (!project || !project.mainRepoPath) {
 					return { content: null, exists: false };
 				}
 
@@ -505,6 +521,11 @@ export const createConfigRouter = () => {
 					.get();
 				if (!project) {
 					throw new Error("Project not found");
+				}
+				if (!project.mainRepoPath) {
+					throw new Error(
+						"This project has no repository, so setup scripts cannot be saved.",
+					);
 				}
 
 				const configPath = ensureConfigExists(project.mainRepoPath);
