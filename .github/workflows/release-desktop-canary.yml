@@ -99,27 +99,11 @@ jobs:
       - name: Create canary-named copies for updater URLs
         run: |
           cd release-artifacts
-          for file in *.AppImage; do
-            if [[ -f "$file" ]]; then
-              arch=$(echo "$file" | sed -E 's/.*-([^-]+)\.AppImage$/\1/')
-              cp "$file" "ADE-Canary-${arch}.AppImage"
-              echo "Created canary copy: ADE-Canary-${arch}.AppImage"
-            fi
-          done
           for file in *.exe; do
             if [[ -f "$file" ]]; then
               arch=$(echo "$file" | sed -E 's/.*-([^-]+)\.exe$/\1/')
               cp "$file" "ADE-Canary-${arch}.exe"
               echo "Created canary copy: ADE-Canary-${arch}.exe"
-            fi
-          done
-          # Prerelease builds may request canary-linux.yml; keep latest-linux.yml as fallback.
-          for file in *-linux.yml; do
-            if [[ -f "$file" && "$file" != "canary-linux.yml" && "$file" != "latest-linux.yml" ]]; then
-              cp "$file" "canary-linux.yml"
-              cp "$file" "latest-linux.yml"
-              echo "Created canary manifests: canary-linux.yml, latest-linux.yml from $file"
-              break
             fi
           done
 
