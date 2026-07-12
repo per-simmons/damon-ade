@@ -101,6 +101,7 @@ export type WorkspaceType = z.infer<typeof workspaceTypeSchema>;
  * manually because local-db does not depend on @superset/shared.
  */
 export const AGENT_RUNTIMES = [
+	"orchestrator",
 	"claude",
 	"codex",
 	"gemini",

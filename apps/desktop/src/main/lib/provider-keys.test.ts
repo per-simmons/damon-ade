@@ -40,9 +40,17 @@ mock.module("./local-db", () => ({
 
 const {
 	setProviderKey,
+	setProviderAccountKey,
+	setProviderAccountSecret,
 	clearProviderKey,
+	clearProviderAccountKey,
+	clearProviderAccountSecret,
 	hasProviderKey,
+	hasProviderAccountKey,
+	hasProviderAccountSecret,
 	getProviderKey,
+	getProviderAccountKey,
+	getProviderAccountSecret,
 	getProviderKeyStatus,
 } = await import("./provider-keys");
 
@@ -60,7 +68,9 @@ describe("provider-keys", () => {
 
 		expect(hasProviderKey("openrouter")).toBe(true);
 		expect(getProviderKey("openrouter")).toBe("sk-or-test-123");
-		expect(getProviderKeyStatus()).toEqual({ openrouter: true });
+		expect(getProviderKeyStatus()).toEqual(
+			expect.objectContaining({ openrouter: true, openai: false }),
+		);
 
 		// Persisted value must be the encrypted blob, never plaintext.
 		expect(settingsRow?.providerApiKeys?.openrouter).not.toContain(
@@ -86,7 +96,52 @@ describe("provider-keys", () => {
 
 		expect(hasProviderKey("openrouter")).toBe(false);
 		expect(getProviderKey("openrouter")).toBeNull();
-		expect(getProviderKeyStatus()).toEqual({ openrouter: false });
+		expect(getProviderKeyStatus()).toEqual(
+			expect.objectContaining({ openrouter: false, openai: false }),
+		);
+	});
+
+	it("stores independent account keys per provider", () => {
+		setProviderAccountKey("openrouter", "account-a", "sk-or-a");
+		setProviderAccountKey("openrouter", "account-b", "sk-or-b");
+
+		expect(hasProviderKey("openrouter")).toBe(true);
+		expect(hasProviderAccountKey("openrouter", "account-a")).toBe(true);
+		expect(getProviderAccountKey("openrouter", "account-a")).toBe("sk-or-a");
+		expect(getProviderAccountKey("openrouter", "account-b")).toBe("sk-or-b");
+		expect(getProviderKeyStatus()).toEqual(
+			expect.objectContaining({ openrouter: true }),
+		);
+
+		clearProviderAccountKey("openrouter", "account-a");
+
+		expect(getProviderAccountKey("openrouter", "account-a")).toBeNull();
+		expect(getProviderAccountKey("openrouter", "account-b")).toBe("sk-or-b");
+	});
+
+	it("stores independent account secrets alongside account keys", () => {
+		setProviderAccountKey("openai", "account-a", "access-token");
+		setProviderAccountSecret("openai", "account-a", "refresh", "refresh-token");
+		setProviderAccountSecret("openai", "account-a", "id", "id-token");
+
+		expect(hasProviderAccountSecret("openai", "account-a", "refresh")).toBe(
+			true,
+		);
+		expect(getProviderAccountSecret("openai", "account-a", "refresh")).toBe(
+			"refresh-token",
+		);
+		expect(getProviderAccountSecret("openai", "account-a", "id")).toBe(
+			"id-token",
+		);
+
+		clearProviderAccountSecret("openai", "account-a", "id");
+		expect(getProviderAccountSecret("openai", "account-a", "id")).toBeNull();
+
+		clearProviderAccountKey("openai", "account-a");
+		expect(getProviderAccountKey("openai", "account-a")).toBeNull();
+		expect(
+			getProviderAccountSecret("openai", "account-a", "refresh"),
+		).toBeNull();
 	});
 
 	it("degrades gracefully when secure storage is unavailable", () => {

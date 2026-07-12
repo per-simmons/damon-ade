@@ -24,10 +24,17 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { connect, type Socket } from "node:net";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { app } from "electron";
-import { SUPERSET_DIR_NAME } from "shared/constants";
+import {
+	PID_PATH,
+	SCRIPT_MTIME_PATH,
+	SOCKET_PATH,
+	SPAWN_LOCK_PATH,
+	SUPERSET_HOME_DIR,
+	TERMINAL_HOST_USES_NAMED_PIPE,
+	TOKEN_PATH,
+} from "./paths";
 import {
 	type ClearScrollbackRequest,
 	type CreateOrAttachRequest,
@@ -66,15 +73,6 @@ enum ConnectionState {
 
 const DEBUG_CLIENT = process.env.SUPERSET_TERMINAL_DEBUG === "1";
 
-// Get from shared constants for multi-worktree support (imported at top of file)
-const SUPERSET_HOME_DIR = join(homedir(), SUPERSET_DIR_NAME);
-
-const SOCKET_PATH = join(SUPERSET_HOME_DIR, "terminal-host.sock");
-const TOKEN_PATH = join(SUPERSET_HOME_DIR, "terminal-host.token");
-const PID_PATH = join(SUPERSET_HOME_DIR, "terminal-host.pid");
-const SPAWN_LOCK_PATH = join(SUPERSET_HOME_DIR, "terminal-host.spawn.lock");
-const SCRIPT_MTIME_PATH = join(SUPERSET_HOME_DIR, "terminal-host.mtime");
-
 // Connection timeouts
 const CONNECT_TIMEOUT_MS = 5000;
 const SPAWN_WAIT_MS = 2000;
@@ -84,6 +82,10 @@ const SPAWN_LOCK_TIMEOUT_MS = 10000; // Max time to hold spawn lock
 // Queue limits
 const MAX_NOTIFY_QUEUE_BYTES = 2_000_000; // 2MB cap to prevent OOM
 const MAX_DAEMON_LOG_BYTES = 5 * 1024 * 1024; // 5MB cap for daemon.log
+
+function socketEndpointMayExist(): boolean {
+	return TERMINAL_HOST_USES_NAMED_PIPE || existsSync(SOCKET_PATH);
+}
 
 // =============================================================================
 // NDJSON Parser
@@ -175,7 +177,6 @@ export class TerminalHostClient extends EventEmitter {
 		super();
 		if (DEBUG_CLIENT) {
 			console.log("[TerminalHostClient] Initialized with paths:", {
-				SUPERSET_DIR_NAME,
 				SUPERSET_HOME_DIR,
 				SOCKET_PATH,
 				NODE_ENV: process.env.NODE_ENV,
@@ -428,7 +429,7 @@ export class TerminalHostClient extends EventEmitter {
 
 	private async tryConnectControl(): Promise<boolean> {
 		return new Promise((resolve) => {
-			if (!existsSync(SOCKET_PATH)) {
+			if (!socketEndpointMayExist()) {
 				resolve(false);
 				return;
 			}
@@ -468,7 +469,7 @@ export class TerminalHostClient extends EventEmitter {
 
 	private async tryConnectStream(): Promise<boolean> {
 		return new Promise((resolve) => {
-			if (!existsSync(SOCKET_PATH)) {
+			if (!socketEndpointMayExist()) {
 				resolve(false);
 				return;
 			}
@@ -813,7 +814,7 @@ export class TerminalHostClient extends EventEmitter {
 	}: {
 		killSessions?: boolean;
 	} = {}): Promise<void> {
-		if (!existsSync(SOCKET_PATH)) return;
+		if (!socketEndpointMayExist()) return;
 
 		const token = this.readAuthToken();
 
@@ -908,7 +909,6 @@ export class TerminalHostClient extends EventEmitter {
 		const timeoutMs = 2000;
 
 		while (Date.now() - startTime < timeoutMs) {
-			if (!existsSync(SOCKET_PATH)) return;
 			const live = await this.isSocketLive();
 			if (!live) return;
 			await this.sleep(100);
@@ -925,7 +925,7 @@ export class TerminalHostClient extends EventEmitter {
 	 */
 	private isSocketLive(): Promise<boolean> {
 		return new Promise((resolve) => {
-			if (!existsSync(SOCKET_PATH)) {
+			if (!socketEndpointMayExist()) {
 				resolve(false);
 				return;
 			}
@@ -1007,7 +1007,7 @@ export class TerminalHostClient extends EventEmitter {
 	private async spawnDaemon(): Promise<void> {
 		// Check if socket is live first - this is the authoritative check
 		// PID file can be stale if daemon crashed and PID was reused by another process
-		if (existsSync(SOCKET_PATH)) {
+		if (socketEndpointMayExist()) {
 			const isLive = await this.isSocketLive();
 			if (isLive) {
 				if (DEBUG_CLIENT) {
@@ -1020,10 +1020,12 @@ export class TerminalHostClient extends EventEmitter {
 			if (DEBUG_CLIENT) {
 				console.log("[TerminalHostClient] Removing stale socket file");
 			}
-			try {
-				unlinkSync(SOCKET_PATH);
-			} catch {
-				// Ignore - might not have permission
+			if (!TERMINAL_HOST_USES_NAMED_PIPE && existsSync(SOCKET_PATH)) {
+				try {
+					unlinkSync(SOCKET_PATH);
+				} catch {
+					// Ignore - might not have permission
+				}
 			}
 		}
 
@@ -1175,9 +1177,7 @@ export class TerminalHostClient extends EventEmitter {
 		const startTime = Date.now();
 
 		while (Date.now() - startTime < SPAWN_WAIT_MS) {
-			if (existsSync(SOCKET_PATH)) {
-				// Give it a moment to start listening
-				await this.sleep(200);
+			if (await this.isSocketLive()) {
 				return;
 			}
 			await this.sleep(100);

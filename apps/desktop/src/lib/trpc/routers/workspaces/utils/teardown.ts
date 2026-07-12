@@ -3,11 +3,21 @@ import {
 	getCommandShellArgs,
 	getShellEnv,
 } from "main/lib/agent-setup/shell-wrappers";
-import { buildSafeEnv, sanitizeEnv } from "main/lib/terminal/env";
+import {
+	buildSafeEnv,
+	getDefaultShell,
+	sanitizeEnv,
+} from "main/lib/terminal/env";
+import { treeKillAsync } from "main/lib/tree-kill";
 import { removeWorktree } from "./git";
 import { loadSetupConfig } from "./setup";
 
 const TEARDOWN_TIMEOUT_MS = 60_000;
+
+function isCmdShell(shell: string): boolean {
+	const baseName = shell.trim().split(/[\\/]/).pop() || shell;
+	return baseName.toLowerCase().replace(/\.(exe|cmd|bat|ps1)$/i, "") === "cmd";
+}
 
 export interface TeardownResult {
 	success: boolean;
@@ -39,9 +49,8 @@ export async function runTeardown({
 	console.log(`[teardown] Running for "${workspaceName}": ${command}`);
 
 	try {
-		const shell =
-			process.env.SHELL ||
-			(process.platform === "darwin" ? "/bin/zsh" : "/bin/bash");
+		const shell = process.env.SHELL || getDefaultShell();
+		const useVerbatimArgs = process.platform === "win32" && isCmdShell(shell);
 
 		const baseEnv = buildSafeEnv(sanitizeEnv(process.env) || {});
 		const wrapperEnv = getShellEnv(shell);
@@ -52,6 +61,7 @@ export async function runTeardown({
 				cwd: worktreePath,
 				detached: true,
 				stdio: ["ignore", "pipe", "pipe"],
+				windowsVerbatimArguments: useVerbatimArgs,
 				env: {
 					...baseEnv,
 					...wrapperEnv,
@@ -104,7 +114,13 @@ export async function runTeardown({
 						`[teardown] Timed out after ${TEARDOWN_TIMEOUT_MS}ms, killing process group`,
 					);
 					try {
-						if (child.pid) process.kill(-child.pid, "SIGKILL");
+						if (child.pid) {
+							if (process.platform === "win32") {
+								void treeKillAsync(child.pid, "SIGKILL");
+							} else {
+								process.kill(-child.pid, "SIGKILL");
+							}
+						}
 					} catch {}
 					reject(
 						new Error(`Teardown timed out after ${TEARDOWN_TIMEOUT_MS}ms`),

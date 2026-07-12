@@ -1,11 +1,12 @@
 import { exec } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import type { AgentRuntime } from "@superset/local-db";
 import defaultShell from "default-shell";
 import { env } from "shared/env.shared";
 import { getAgentCodexHome } from "../agent-home";
+import { BIN_DIR } from "../agent-setup/paths";
 import { getShellEnv } from "../agent-setup/shell-wrappers";
 
 const MACOS_SYSTEM_CERT_FILE = "/etc/ssl/cert.pem";
@@ -362,6 +363,28 @@ export function buildSafeEnv(
 	return safe;
 }
 
+function normalizePathEntry(value: string): string {
+	const resolved = fs.existsSync(value) ? fs.realpathSync(value) : value;
+	return os.platform() === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+function prependSupersetBinToPath(env: Record<string, string>): void {
+	const existingPath = env.PATH || env.Path || "";
+	const existingParts = existingPath.split(delimiter).filter(Boolean);
+	const normalizedBinDir = normalizePathEntry(BIN_DIR);
+	const hasBinDir = existingParts.some(
+		(part) => normalizePathEntry(part) === normalizedBinDir,
+	);
+	const nextPath = hasBinDir
+		? existingPath
+		: [BIN_DIR, ...existingParts].join(delimiter);
+
+	env.PATH = nextPath;
+	if (os.platform() === "win32") {
+		env.Path = nextPath;
+	}
+}
+
 /**
  * @deprecated Use buildSafeEnv instead. Kept for backward compatibility.
  */
@@ -468,6 +491,7 @@ export function buildTerminalEnv(params: {
 		// Hook protocol version for forward compatibility
 		SUPERSET_HOOK_VERSION: HOOK_PROTOCOL_VERSION,
 	};
+	prependSupersetBinToPath(terminalEnv);
 
 	delete terminalEnv.GOOGLE_API_KEY;
 

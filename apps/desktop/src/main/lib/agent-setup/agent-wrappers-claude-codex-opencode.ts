@@ -2,11 +2,16 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+	buildWindowsWrapperScript,
 	buildWrapperScript,
 	createWrapper,
 	writeFileIfChanged,
 } from "./agent-wrappers-common";
-import { getNotifyScriptPath } from "./notify-hook";
+import {
+	getNotifyNodeScriptPath,
+	getNotifyScriptPath,
+	getNotifyShellScriptPath,
+} from "./notify-hook";
 import { HOOKS_DIR, OPENCODE_CONFIG_DIR, OPENCODE_PLUGIN_DIR } from "./paths";
 
 export const CLAUDE_SETTINGS_FILE = "claude-settings.json";
@@ -86,7 +91,13 @@ export function createClaudeWrapper(): void {
 		"claude",
 		`exec "$REAL_BIN" --settings "${settingsPath}" "$@"`,
 	);
-	createWrapper("claude", script);
+	createWrapper(
+		"claude",
+		script,
+		buildWindowsWrapperScript("claude", {
+			argsPrefix: ["--settings", settingsPath],
+		}),
+	);
 }
 
 export function createCodexWrapper(): void {
@@ -95,12 +106,24 @@ export function createCodexWrapper(): void {
 		"codex",
 		buildCodexWrapperExecLine(notifyPath),
 	);
-	createWrapper("codex", script);
+	createWrapper(
+		"codex",
+		script,
+		buildWindowsCodexWrapperScript(getNotifyNodeScriptPath()),
+	);
 }
 
 export function buildCodexWrapperExecLine(notifyPath: string): string {
 	const template = fs.readFileSync(CODEX_WRAPPER_EXEC_TEMPLATE_PATH, "utf-8");
 	return template.replaceAll("{{NOTIFY_PATH}}", notifyPath);
+}
+
+export function buildWindowsCodexWrapperScript(notifyPath: string): string {
+	const notifyConfig = `notify=["node",${JSON.stringify(notifyPath)}]`;
+	return buildWindowsWrapperScript("codex", {
+		argsPrefix: ["-c", notifyConfig],
+		env: { CODEX_TUI_RECORD_SESSION: "1" },
+	});
 }
 
 /**
@@ -109,7 +132,10 @@ export function buildCodexWrapperExecLine(notifyPath: string): string {
  */
 export function createOpenCodePlugin(): void {
 	const pluginPath = getOpenCodePluginPath();
-	const notifyPath = getNotifyScriptPath();
+	const notifyPath =
+		process.platform === "win32"
+			? getNotifyNodeScriptPath()
+			: getNotifyShellScriptPath();
 	const content = getOpenCodePluginContent(notifyPath);
 	const changed = writeFileIfChanged(pluginPath, content, 0o644);
 	console.log(
@@ -146,5 +172,11 @@ export function createOpenCodeWrapper(): void {
 		"opencode",
 		`export OPENCODE_CONFIG_DIR="${OPENCODE_CONFIG_DIR}"\nexec "$REAL_BIN" "$@"`,
 	);
-	createWrapper("opencode", script);
+	createWrapper(
+		"opencode",
+		script,
+		buildWindowsWrapperScript("opencode", {
+			env: { OPENCODE_CONFIG_DIR },
+		}),
+	);
 }

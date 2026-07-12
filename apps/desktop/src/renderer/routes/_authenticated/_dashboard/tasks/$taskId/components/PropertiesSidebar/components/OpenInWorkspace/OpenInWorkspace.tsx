@@ -56,7 +56,7 @@ export function OpenInWorkspace({ task }: OpenInWorkspaceProps) {
 		const stored = localStorage.getItem("lastSelectedAgent");
 		return stored && (AGENT_TYPES as readonly string[]).includes(stored)
 			? (stored as AgentType)
-			: "claude";
+			: "orchestrator";
 	});
 
 	const effectiveProjectId = selectedProjectId ?? recentProjects[0]?.id ?? null;

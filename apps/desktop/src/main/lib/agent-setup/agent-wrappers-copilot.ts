@@ -2,13 +2,16 @@ import fs from "node:fs";
 import path from "node:path";
 import { env } from "shared/env.shared";
 import {
+	buildWindowsWrapperScript,
 	buildWrapperScript,
 	createWrapper,
 	writeFileIfChanged,
 } from "./agent-wrappers-common";
+import { NOTIFY_NODE_SCRIPT_NAME } from "./notify-hook";
 import { HOOKS_DIR } from "./paths";
 
 export const COPILOT_HOOK_SCRIPT_NAME = "copilot-hook.sh";
+export const COPILOT_CMD_HOOK_SCRIPT_NAME = "copilot-hook.cmd";
 
 const COPILOT_HOOK_SIGNATURE = "# Superset copilot hook";
 const COPILOT_HOOK_VERSION = "v1";
@@ -21,6 +24,9 @@ const COPILOT_HOOK_TEMPLATE_PATH = path.join(
 );
 
 export function getCopilotHookScriptPath(): string {
+	if (process.platform === "win32") {
+		return path.join(HOOKS_DIR, COPILOT_CMD_HOOK_SCRIPT_NAME);
+	}
 	return path.join(HOOKS_DIR, COPILOT_HOOK_SCRIPT_NAME);
 }
 
@@ -31,9 +37,16 @@ export function getCopilotHookScriptContent(): string {
 		.replace(/\{\{DEFAULT_PORT\}\}/g, String(env.DESKTOP_NOTIFICATIONS_PORT));
 }
 
+export function getCopilotCmdHookScriptContent(): string {
+	return `@echo off\r\nnode "%~dp0${NOTIFY_NODE_SCRIPT_NAME}" --copilot %*\r\n`;
+}
+
 export function createCopilotHookScript(): void {
 	const scriptPath = getCopilotHookScriptPath();
-	const content = getCopilotHookScriptContent();
+	const content =
+		process.platform === "win32"
+			? getCopilotCmdHookScriptContent()
+			: getCopilotHookScriptContent();
 	const changed = writeFileIfChanged(scriptPath, content, 0o755);
 	console.log(
 		`[agent-setup] ${changed ? "Updated" : "Verified"} Copilot hook script`,
@@ -41,34 +54,42 @@ export function createCopilotHookScript(): void {
 }
 
 export function getCopilotHooksJsonContent(hookScriptPath: string): string {
+	const hookCommand = (eventName: string) => {
+		const command =
+			process.platform === "win32"
+				? `"${hookScriptPath.replaceAll('"', '\\"')}" ${eventName}`
+				: `${hookScriptPath} ${eventName}`;
+		return process.platform === "win32" ? { cmd: command } : { bash: command };
+	};
+
 	const hooks = {
 		version: 1,
 		hooks: {
 			sessionStart: [
 				{
 					type: "command",
-					bash: `${hookScriptPath} sessionStart`,
+					...hookCommand("sessionStart"),
 					timeoutSec: 5,
 				},
 			],
 			sessionEnd: [
 				{
 					type: "command",
-					bash: `${hookScriptPath} sessionEnd`,
+					...hookCommand("sessionEnd"),
 					timeoutSec: 5,
 				},
 			],
 			userPromptSubmitted: [
 				{
 					type: "command",
-					bash: `${hookScriptPath} userPromptSubmitted`,
+					...hookCommand("userPromptSubmitted"),
 					timeoutSec: 5,
 				},
 			],
 			postToolUse: [
 				{
 					type: "command",
-					bash: `${hookScriptPath} postToolUse`,
+					...hookCommand("postToolUse"),
 					timeoutSec: 5,
 				},
 			],
@@ -102,7 +123,36 @@ fi
 exec "$REAL_BIN" "$@"`;
 }
 
+export function buildWindowsCopilotWrapperScript(): string {
+	const hookScriptPath = getCopilotHookScriptPath();
+	const hooksJson = getCopilotHooksJsonContent(hookScriptPath);
+
+	return buildWindowsWrapperScript("copilot", {
+		prelude: `
+if (env.SUPERSET_TAB_ID) {
+  const hooksDir = path.join(process.cwd(), ".github", "hooks");
+  const hookFile = path.join(hooksDir, "superset-notify.json");
+  try {
+    fs.mkdirSync(hooksDir, { recursive: true });
+    fs.writeFileSync(hookFile, ${JSON.stringify(hooksJson)});
+
+    const excludeFile = path.join(process.cwd(), ".git", "info", "exclude");
+    if (fs.existsSync(path.dirname(excludeFile))) {
+      const entry = ".github/hooks/superset-notify.json";
+      const existing = fs.existsSync(excludeFile) ? fs.readFileSync(excludeFile, "utf8") : "";
+      if (!existing.includes(entry)) {
+        fs.appendFileSync(excludeFile, \`\${existing.endsWith("\\n") || existing.length === 0 ? "" : "\\n"}\${entry}\\n\`);
+      }
+    }
+  } catch {
+    // Best-effort hook injection; never block the CLI.
+  }
+}
+`,
+	});
+}
+
 export function createCopilotWrapper(): void {
 	const script = buildWrapperScript("copilot", buildCopilotWrapperExecLine());
-	createWrapper("copilot", script);
+	createWrapper("copilot", script, buildWindowsCopilotWrapperScript());
 }

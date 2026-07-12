@@ -17,7 +17,7 @@ export const createAgentInput = z.object({
 		.max(280)
 		.optional()
 		.transform((v) => (v ? v : undefined)),
-	runtime: z.enum(AGENT_RUNTIMES).default("claude"),
+	runtime: z.enum(AGENT_RUNTIMES).default("orchestrator"),
 	repo: z
 		.discriminatedUnion("type", [
 			z.object({ type: z.literal("init") }),

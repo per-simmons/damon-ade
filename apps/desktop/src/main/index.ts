@@ -18,6 +18,10 @@ import {
 } from "shared/constants";
 import { getWorkspaceName } from "shared/env.shared";
 import { backfillAgentMemory } from "./lib/agent-memory-backfill";
+import {
+	startAgentRouterGateway,
+	stopAgentRouterGateway,
+} from "./lib/agent-router-gateway";
 import { setupAgentHooks } from "./lib/agent-setup";
 import { SUPERSET_HOME_DIR } from "./lib/app-environment";
 import { initAppState } from "./lib/app-state";
@@ -182,7 +186,9 @@ app.on("before-quit", async (event) => {
 	}
 
 	isQuitting = true;
+	event.preventDefault();
 	disposeTray();
+	await stopAgentRouterGateway();
 	app.exit(0);
 });
 
@@ -262,7 +268,8 @@ if (!gotTheLock) {
 			// superset-icon://<namespace>/<id> — namespace is the URL host
 			// ("projects" for Category photos, "workspaces" for Agent avatars).
 			const url = new URL(request.url);
-			const namespace = url.hostname === "workspaces" ? "workspaces" : "projects";
+			const namespace =
+				url.hostname === "workspaces" ? "workspaces" : "projects";
 			const id = url.pathname.replace(/^\//, "");
 			const iconPath = getIconPath(namespace, id);
 			if (!iconPath) {
@@ -296,6 +303,12 @@ if (!gotTheLock) {
 			setupAgentHooks();
 		} catch (error) {
 			console.error("[main] Failed to set up agent hooks:", error);
+		}
+
+		try {
+			await startAgentRouterGateway();
+		} catch (error) {
+			console.error("[main] Failed to start agent router gateway:", error);
 		}
 
 		console.log("[main] boot: makeAppSetup (create window)…");

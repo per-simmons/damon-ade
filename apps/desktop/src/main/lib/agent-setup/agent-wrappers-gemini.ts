@@ -8,9 +8,11 @@ import {
 	isSupersetManagedHookCommand,
 	writeFileIfChanged,
 } from "./agent-wrappers-common";
+import { NOTIFY_NODE_SCRIPT_NAME } from "./notify-hook";
 import { HOOKS_DIR } from "./paths";
 
 export const GEMINI_HOOK_SCRIPT_NAME = "gemini-hook.sh";
+export const GEMINI_CMD_HOOK_SCRIPT_NAME = "gemini-hook.cmd";
 
 const GEMINI_HOOK_SIGNATURE = "# Superset gemini hook";
 const GEMINI_HOOK_VERSION = "v1";
@@ -40,6 +42,9 @@ interface GeminiSettingsJson {
 }
 
 export function getGeminiHookScriptPath(): string {
+	if (process.platform === "win32") {
+		return path.join(HOOKS_DIR, GEMINI_CMD_HOOK_SCRIPT_NAME);
+	}
 	return path.join(HOOKS_DIR, GEMINI_HOOK_SCRIPT_NAME);
 }
 
@@ -52,6 +57,10 @@ export function getGeminiHookScriptContent(): string {
 	return template
 		.replace("{{MARKER}}", GEMINI_HOOK_MARKER)
 		.replace(/\{\{DEFAULT_PORT\}\}/g, String(env.DESKTOP_NOTIFICATIONS_PORT));
+}
+
+export function getGeminiCmdHookScriptContent(): string {
+	return `@echo off\r\nnode "%~dp0${NOTIFY_NODE_SCRIPT_NAME}" --gemini %*\r\n`;
 }
 
 /**
@@ -110,7 +119,10 @@ export function getGeminiSettingsJsonContent(hookScriptPath: string): string {
 
 export function createGeminiHookScript(): void {
 	const scriptPath = getGeminiHookScriptPath();
-	const content = getGeminiHookScriptContent();
+	const content =
+		process.platform === "win32"
+			? getGeminiCmdHookScriptContent()
+			: getGeminiHookScriptContent();
 	const changed = writeFileIfChanged(scriptPath, content, 0o755);
 	console.log(
 		`[agent-setup] ${changed ? "Updated" : "Verified"} Gemini hook script`,

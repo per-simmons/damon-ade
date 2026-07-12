@@ -13,6 +13,7 @@ import {
 	getAgentMemoryDir,
 	getAgentWorktreePath,
 } from "./agent-home";
+import { seedBundledAgentSkills } from "./bundled-agent-skills";
 
 /**
  * Memory scaffold written on agent creation (ADE Phase E, docs/memory.md).
@@ -56,10 +57,7 @@ export interface ScaffoldParams {
 	worktreePath?: string;
 }
 
-function sub(
-	template: string,
-	vars: Record<string, string>,
-): string {
+function sub(template: string, vars: Record<string, string>): string {
 	return template.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? "");
 }
 
@@ -267,8 +265,8 @@ dependency stance.
 A single command or check that proves the skill worked.
 `;
 
-const CLAUDE_BRIDGE = `@{{agent_home}}/memory/AGENT.md
-@{{agent_home}}/memory/USER.md
+const CLAUDE_BRIDGE = `@{{agent_md_path}}
+@{{user_md_path}}
 <!-- MEMORY.md is loaded via Claude Code native auto-memory (autoMemoryDirectory). -->
 `;
 
@@ -322,7 +320,12 @@ export function regenerateCodexAgentsMd(agentId: string): void {
 	mkdirSync(codexHome, { recursive: true });
 
 	const parts: string[] = [];
-	for (const file of ["AGENT.md", "USER.md", "MEMORY.md", ".writeback-protocol.md"]) {
+	for (const file of [
+		"AGENT.md",
+		"USER.md",
+		"MEMORY.md",
+		".writeback-protocol.md",
+	]) {
 		const p = join(memoryDir, file);
 		if (existsSync(p)) {
 			parts.push(readFileSync(p, "utf8"));
@@ -373,7 +376,9 @@ export function scaffoldAgentMemory({
 		agent_name: agentName,
 		agent_id: agentId,
 		agent_home: agentHome,
+		agent_md_path: join(memoryDir, "AGENT.md"),
 		user_name: resolvedUserName,
+		user_md_path: join(memoryDir, "USER.md"),
 		role_section: roleSection(role, resolvedUserName),
 		runtime,
 		created_date: new Date().toISOString().slice(0, 10),
@@ -393,6 +398,7 @@ export function scaffoldAgentMemory({
 	);
 	writeIfEmpty(join(skillsDir, "README.md"), sub(SKILLS_README, vars));
 	writeIfEmpty(join(skillsDir, "SKILL.template.md"), sub(SKILL_TEMPLATE, vars));
+	seedBundledAgentSkills(skillsDir);
 
 	// Per-runtime bridge files in the worktree (point each CLI at canonical
 	// memory). Idempotent so we never clobber a bridge the user customized.

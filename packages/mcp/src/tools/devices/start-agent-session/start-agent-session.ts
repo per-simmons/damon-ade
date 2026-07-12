@@ -100,7 +100,7 @@ export function register(server: McpServer) {
 					.enum(AGENT_TYPES)
 					.optional()
 					.describe(
-						'AI agent to use: "claude", "codex", "gemini", "opencode", "copilot", or "cursor-agent". Defaults to "claude".',
+						'AI agent to use: "orchestrator", "claude", "codex", "gemini", "opencode", "copilot", or "cursor-agent". Defaults to "orchestrator".',
 					),
 			},
 		},
@@ -110,7 +110,7 @@ export function register(server: McpServer) {
 			if (!validated) return ERROR_ARGS_REQUIRED;
 
 			const agent =
-				(validated.agent as (typeof AGENT_TYPES)[number]) ?? "claude";
+				(validated.agent as (typeof AGENT_TYPES)[number]) ?? "orchestrator";
 
 			const task = await fetchTask({
 				taskId: validated.taskId,

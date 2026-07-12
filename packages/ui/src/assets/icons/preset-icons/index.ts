@@ -26,6 +26,7 @@ export const PRESET_ICONS: Record<string, PresetIconSet> = {
 	gemini: { light: geminiIcon, dark: geminiIcon },
 	"cursor-agent": { light: cursorAgentIcon, dark: cursorAgentIcon },
 	opencode: { light: opencodeIcon, dark: opencodeWhiteIcon },
+	orchestrator: { light: codexIcon, dark: codexWhiteIcon },
 	kimi: { light: kimiIcon, dark: kimiWhiteIcon },
 	minimax: { light: minimaxIcon, dark: minimaxWhiteIcon },
 	glm: { light: glmIcon, dark: glmWhiteIcon },

@@ -25,11 +25,17 @@ export interface ModelDescriptor {
 
 export const MODEL_BAR_MODELS: ModelDescriptor[] = [
 	{
+		runtime: "orchestrator",
+		iconName: "orchestrator",
+		label: "Orchestrator Router",
+		needsOpenRouterKey: false,
+		isDefault: true,
+	},
+	{
 		runtime: "claude",
 		iconName: "claude",
 		label: "Claude",
 		needsOpenRouterKey: false,
-		isDefault: true,
 	},
 	{
 		runtime: "codex",

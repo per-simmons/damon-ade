@@ -7,7 +7,11 @@ import {
 	isSupersetManagedHookCommand,
 	writeFileIfChanged,
 } from "./agent-wrappers-common";
-import { getNotifyScriptPath, NOTIFY_SCRIPT_NAME } from "./notify-hook";
+import {
+	getNotifyNodeScriptPath,
+	getNotifyShellScriptPath,
+	NOTIFY_SCRIPT_NAME,
+} from "./notify-hook";
 
 interface MastraHookMatcher {
 	tool_name?: string;
@@ -38,6 +42,10 @@ function quoteShellPath(filePath: string): string {
 	return `'${filePath.replaceAll("'", "'\\''")}'`;
 }
 
+function quoteWindowsPath(filePath: string): string {
+	return `"${filePath.replaceAll('"', '\\"')}"`;
+}
+
 export function getMastraGlobalHooksJsonPath(): string {
 	return path.join(os.homedir(), ".mastracode", "hooks.json");
 }
@@ -65,7 +73,10 @@ export function getMastraHooksJsonContent(notifyScriptPath: string): string {
 		);
 	}
 
-	const notifyCommand = `bash ${quoteShellPath(notifyScriptPath)}`;
+	const notifyCommand =
+		process.platform === "win32"
+			? `node ${quoteWindowsPath(notifyScriptPath)}`
+			: `bash ${quoteShellPath(notifyScriptPath)}`;
 	const managedEvents = ["UserPromptSubmit", "Stop", "PostToolUse"] as const;
 
 	for (const eventName of managedEvents) {
@@ -89,7 +100,10 @@ export function getMastraHooksJsonContent(notifyScriptPath: string): string {
 }
 
 export function createMastraHooksJson(): void {
-	const notifyScriptPath = getNotifyScriptPath();
+	const notifyScriptPath =
+		process.platform === "win32"
+			? getNotifyNodeScriptPath()
+			: getNotifyShellScriptPath();
 	const globalPath = getMastraGlobalHooksJsonPath();
 	const content = getMastraHooksJsonContent(notifyScriptPath);
 

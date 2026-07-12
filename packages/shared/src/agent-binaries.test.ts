@@ -1,10 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { AGENT_TYPES } from "./agent-command";
 import {
 	BINARY_INSTALL,
 	CHECKED_BINARIES,
 	RUNTIME_BINARY,
 } from "./agent-binaries";
+import { AGENT_TYPES } from "./agent-command";
 
 describe("agent-binaries", () => {
 	it("maps every agent runtime to a binary that has install info", () => {
@@ -19,6 +19,10 @@ describe("agent-binaries", () => {
 		expect(RUNTIME_BINARY.kimi).toBe("claude");
 		expect(RUNTIME_BINARY.minimax).toBe("claude");
 		expect(RUNTIME_BINARY.glm).toBe("claude");
+	});
+
+	it("runs the Fable orchestrator through Claude Code", () => {
+		expect(RUNTIME_BINARY.orchestrator).toBe("claude");
 	});
 
 	it("gives every checked binary a copy-pasteable command and URL", () => {

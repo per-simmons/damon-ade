@@ -28,6 +28,22 @@
 			"types": "./src/agent-binaries.ts",
 			"default": "./src/agent-binaries.ts"
 		},
+		"./agent-routing": {
+			"types": "./src/agent-routing.ts",
+			"default": "./src/agent-routing.ts"
+		},
+		"./agent-router": {
+			"types": "./src/agent-router.ts",
+			"default": "./src/agent-router.ts"
+		},
+		"./router-control-plane": {
+			"types": "./src/router-control-plane.ts",
+			"default": "./src/router-control-plane.ts"
+		},
+		"./token-cut": {
+			"types": "./src/token-cut.ts",
+			"default": "./src/token-cut.ts"
+		},
 		"./claude-command": {
 			"types": "./src/claude-command.ts",
 			"default": "./src/claude-command.ts"

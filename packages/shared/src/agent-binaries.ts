@@ -1,4 +1,4 @@
-import { type AgentType } from "./agent-command";
+import type { AgentType } from "./agent-command";
 
 /**
  * The external CLIs ADE shells out to. Several agent runtimes share one binary:
@@ -14,6 +14,7 @@ export type AgentBinary = "claude" | "codex" | "opencode" | "gemini" | "git";
  * command-parsing logic in AGENT_PRESET_COMMANDS.
  */
 export const RUNTIME_BINARY: Record<AgentType, AgentBinary> = {
+	orchestrator: "claude",
 	claude: "claude",
 	codex: "codex",
 	gemini: "gemini",

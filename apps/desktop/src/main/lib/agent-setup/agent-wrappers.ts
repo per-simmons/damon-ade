@@ -21,6 +21,7 @@ export {
 } from "./agent-wrappers-common";
 export {
 	buildCopilotWrapperExecLine,
+	buildWindowsCopilotWrapperScript,
 	COPILOT_HOOK_MARKER,
 	COPILOT_HOOK_SCRIPT_NAME,
 	createCopilotHookScript,

@@ -83,6 +83,15 @@ describe("scaffoldAgentMemory — canonical layout", () => {
 		const skills = join(getAgentHome(agentId), "skills");
 		expect(existsSync(join(skills, "README.md"))).toBe(true);
 		expect(existsSync(join(skills, "SKILL.template.md"))).toBe(true);
+		expect(existsSync(join(skills, "plan-big-execute-small", "SKILL.md"))).toBe(
+			true,
+		);
+		const coordinatorSkill = readFileSync(
+			join(skills, "plan-big-execute-small", "SKILL.md"),
+			"utf8",
+		);
+		expect(coordinatorSkill).toContain("Anthropic's MIT-licensed coordinator");
+		expect(coordinatorSkill).toContain("Wait for every expected worker report");
 	});
 
 	it("SKILL template carries the Hermes frontmatter + section order", () => {

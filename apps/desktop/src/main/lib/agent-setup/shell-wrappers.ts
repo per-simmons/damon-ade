@@ -16,7 +16,8 @@ const DEFAULT_PATHS: ShellWrapperPaths = {
 };
 
 function getShellName(shell: string): string {
-	return shell.split("/").pop() || shell;
+	const baseName = shell.trim().split(/[\\/]/).pop() || shell;
+	return baseName.toLowerCase().replace(/\.(exe|cmd|bat|ps1)$/i, "");
 }
 
 function writeFileIfChanged(
@@ -198,6 +199,13 @@ export function getShellArgs(
 	paths: ShellWrapperPaths = DEFAULT_PATHS,
 ): string[] {
 	const shellName = getShellName(shell);
+	if (
+		shellName === "cmd" ||
+		shellName === "powershell" ||
+		shellName === "pwsh"
+	) {
+		return [];
+	}
 	if (shellName === "bash") {
 		return ["--rcfile", path.join(paths.BASH_DIR, "rcfile")];
 	}
@@ -232,6 +240,19 @@ export function getCommandShellArgs(
 	paths: ShellWrapperPaths = DEFAULT_PATHS,
 ): string[] {
 	const shellName = getShellName(shell);
+	if (shellName === "cmd") {
+		return ["/d", "/c", command];
+	}
+	if (shellName === "powershell" || shellName === "pwsh") {
+		return [
+			"-NoLogo",
+			"-NoProfile",
+			"-ExecutionPolicy",
+			"Bypass",
+			"-Command",
+			command,
+		];
+	}
 	const zshRc = path.join(paths.ZSH_DIR, ".zshrc");
 	const bashRcfile = path.join(paths.BASH_DIR, "rcfile");
 	if (shellName === "zsh" && fs.existsSync(zshRc)) {
