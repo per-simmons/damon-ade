@@ -1,8 +1,11 @@
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AgentRuntime } from "@superset/local-db";
 import { workspaces, worktrees } from "@superset/local-db";
 import { eq } from "drizzle-orm";
 import { localDb } from "main/lib/local-db";
 import { workspaceInitManager } from "main/lib/workspace-init-manager";
+import { getAgentHome } from "./agent-home";
 import { type AgentRepoSource, setupAgentRepo } from "./agent-repo";
 import { scaffoldAgentMemory } from "./agent-scaffold";
 import { resolveAgentWorktreePath } from "./agent-worktree";
@@ -16,9 +19,10 @@ import { getUserName } from "./user-profile";
  * builds the repo + memory scaffold while streaming progress through the shared
  * workspaceInitManager (the same channel WorkspaceInitializingView listens to).
  *
- * Retry context is held in-memory, consistent with workspaceInitManager's own
- * in-memory model (a documented cross-restart limitation). On a cross-restart
- * retry with no context we fall back to a fresh init.
+ * Retry context is held in-memory, with the repo source also persisted to a
+ * sidecar file in the agent home. Without that, a retry after an app restart
+ * would silently downgrade a clone into a fresh empty repo — the agent would
+ * "lose" the codebase it was created for.
  */
 
 interface AgentInitContext {
@@ -33,6 +37,40 @@ interface AgentInitContext {
 
 const contexts = new Map<string, AgentInitContext>();
 
+const INIT_SOURCE_FILE = ".init-source.json";
+
+/** Persist the repo source so a cross-restart retry can still clone. */
+function writeInitSource(agentId: string, source: AgentRepoSource): void {
+	try {
+		const agentHome = getAgentHome(agentId);
+		mkdirSync(agentHome, { recursive: true });
+		writeFileSync(
+			join(agentHome, INIT_SOURCE_FILE),
+			JSON.stringify(source),
+			"utf8",
+		);
+	} catch (error) {
+		console.warn(`[agent-init] Could not persist init source:`, error);
+	}
+}
+
+function readInitSource(agentId: string): AgentRepoSource | null {
+	try {
+		const raw = readFileSync(
+			join(getAgentHome(agentId), INIT_SOURCE_FILE),
+			"utf8",
+		);
+		const parsed = JSON.parse(raw);
+		if (parsed?.type === "init") return { type: "init" };
+		if (parsed?.type === "clone" && typeof parsed.url === "string") {
+			return { type: "clone", url: parsed.url };
+		}
+		return null;
+	} catch {
+		return null;
+	}
+}
+
 export function isAgentInit(agentId: string): boolean {
 	return contexts.has(agentId);
 }
@@ -40,6 +78,7 @@ export function isAgentInit(agentId: string): boolean {
 /** Start the background init job for a freshly-created agent. */
 export function beginAgentInit(agentId: string, ctx: AgentInitContext): void {
 	contexts.set(agentId, ctx);
+	writeInitSource(agentId, ctx.source);
 	workspaceInitManager.clearJob(agentId);
 	workspaceInitManager.startJob(agentId, ctx.categoryId);
 	// Fire and forget — progress is streamed via workspaceInitManager.
@@ -65,7 +104,9 @@ export function retryAgentInit(agentId: string): boolean {
 			worktreeId: workspace.worktreeId,
 			agentName: workspace.name,
 			runtime: workspace.runtime,
-			source: { type: "init" },
+			// The sidecar keeps the original clone URL across restarts; only a
+			// missing/corrupt sidecar degrades to a fresh init.
+			source: readInitSource(agentId) ?? { type: "init" },
 		};
 		contexts.set(agentId, ctx);
 	}
