@@ -31,6 +31,7 @@ import type {
 	TerminalWriteMutate,
 } from "../types";
 import { scrollToBottom } from "../utils";
+import { RESET_LEAKED_INPUT_MODES } from "./resetLeakedInputModes";
 
 type RegisterCallback = (paneId: string, callback: () => void) => void;
 type UnregisterCallback = (paneId: string) => void;
@@ -456,6 +457,7 @@ export function useTerminalLifecycle({
 											storedColdRestore.scrollback,
 											scheduleScrollToBottom,
 										);
+										xterm.write(RESET_LEAKED_INPUT_MODES);
 									}
 									didFirstRenderRef.current = true;
 									return;
@@ -474,6 +476,7 @@ export function useTerminalLifecycle({
 									setRestoredCwd(result.previousCwd || null);
 									if (scrollback && xterm) {
 										xterm.write(scrollback, scheduleScrollToBottom);
+										xterm.write(RESET_LEAKED_INPUT_MODES);
 									}
 									didFirstRenderRef.current = true;
 									return;

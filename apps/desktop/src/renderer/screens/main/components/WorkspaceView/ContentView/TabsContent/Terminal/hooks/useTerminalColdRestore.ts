@@ -10,6 +10,7 @@ import type {
 	TerminalStreamEvent,
 } from "../types";
 import { scrollToBottom } from "../utils";
+import { RESET_LEAKED_INPUT_MODES } from "./resetLeakedInputModes";
 
 export interface UseTerminalColdRestoreOptions {
 	paneId: string;
@@ -120,6 +121,7 @@ export function useTerminalColdRestore({
 									scrollToBottom(currentXterm);
 								});
 							});
+							currentXterm.write(RESET_LEAKED_INPUT_MODES);
 						}
 
 						didFirstRenderRef.current = true;
