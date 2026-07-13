@@ -118,6 +118,18 @@ export function NewAgentModal() {
 			(repoMode === "local" && localPath.trim().length > 0)) &&
 		!createAgent.isPending;
 
+	// Surface why Create is disabled instead of a silently grayed-out button.
+	// gitMissing has its own banner below, so it isn't repeated here.
+	const disabledReason = createAgent.isPending
+		? null
+		: !name.trim()
+			? "Give the agent a name to continue"
+			: repoMode === "clone" && !cloneUrl.trim()
+				? "Enter a repository URL"
+				: repoMode === "local" && !localPath.trim()
+					? "Enter a local repository path"
+					: null;
+
 	const handleCreate = async () => {
 		if (!categoryId || !canCreate) return;
 		try {
@@ -325,7 +337,12 @@ export function NewAgentModal() {
 					</div>
 				)}
 
-				<div className="flex justify-end gap-2">
+				<div className="flex items-center justify-end gap-2">
+					{disabledReason && (
+						<p className="mr-auto text-xs text-muted-foreground">
+							{disabledReason}
+						</p>
+					)}
 					<Button variant="ghost" onClick={() => closeModal()}>
 						Cancel
 					</Button>
