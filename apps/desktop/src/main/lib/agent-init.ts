@@ -39,6 +39,9 @@ const contexts = new Map<string, AgentInitContext>();
 
 const INIT_SOURCE_FILE = ".init-source.json";
 
+/** Marker: the agent's first session should run the repo-onboarding prompt. */
+export const NEEDS_ONBOARDING_FILE = ".needs-onboarding";
+
 /** Persist the repo source so a cross-restart retry can still clone. */
 function writeInitSource(agentId: string, source: AgentRepoSource): void {
 	try {
@@ -188,6 +191,22 @@ async function runAgentInit(agentId: string): Promise<void> {
 			})
 			.where(eq(worktrees.id, ctx.worktreeId))
 			.run();
+
+		// Cloned repos get a one-time onboarding: the first session launches with
+		// a prompt to read the repo (AGENTS.md/CLAUDE.md/README) and write the
+		// agent's identity + memory from what it finds. See needsOnboarding /
+		// markOnboarded in the workspaces router.
+		if (ctx.source.type === "clone") {
+			try {
+				writeFileSync(
+					join(getAgentHome(agentId), NEEDS_ONBOARDING_FILE),
+					"",
+					"utf8",
+				);
+			} catch (error) {
+				console.warn(`[agent-init] Could not write onboarding marker:`, error);
+			}
+		}
 
 		workspaceInitManager.updateProgress(agentId, "ready", "Ready");
 		workspaceInitManager.finalizeJob(agentId);

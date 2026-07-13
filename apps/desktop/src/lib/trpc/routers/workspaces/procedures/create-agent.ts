@@ -1,8 +1,11 @@
+import { existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { workspaces, worktrees } from "@superset/local-db";
-import { getAgentWorktreePath } from "main/lib/agent-home";
-import { beginAgentInit } from "main/lib/agent-init";
+import { getAgentHome, getAgentWorktreePath } from "main/lib/agent-home";
+import { beginAgentInit, NEEDS_ONBOARDING_FILE } from "main/lib/agent-init";
 import { localDb } from "main/lib/local-db";
 import { v4 as uuidv4 } from "uuid";
+import { z } from "zod";
 import { publicProcedure, router } from "../../..";
 import {
 	activateProject,
@@ -89,6 +92,24 @@ export const createAgentProcedures = () => {
 					worktreeId: worktree.id,
 					isInitializing: true,
 				};
+			}),
+
+		// One-time repo onboarding for cloned agents: the marker is written by
+		// the init job, read before the first auto-spawned session, and cleared
+		// once that session launches with the onboarding prompt.
+		needsOnboarding: publicProcedure
+			.input(z.object({ id: z.string() }))
+			.query(({ input }) => {
+				return existsSync(join(getAgentHome(input.id), NEEDS_ONBOARDING_FILE));
+			}),
+
+		markOnboarded: publicProcedure
+			.input(z.object({ id: z.string() }))
+			.mutation(({ input }) => {
+				rmSync(join(getAgentHome(input.id), NEEDS_ONBOARDING_FILE), {
+					force: true,
+				});
+				return { success: true };
 			}),
 	});
 };

@@ -2,6 +2,7 @@ import { toast } from "@superset/ui/sonner";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFileOpenMode } from "renderer/hooks/useFileOpenMode";
+import { buildOnboardingCommand } from "renderer/lib/agent-onboarding";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { electronTrpcClient as trpcClient } from "renderer/lib/trpc-client";
 import { usePresets } from "renderer/react-query/presets";
@@ -195,7 +196,10 @@ function WorkspacePage() {
 		return useTabsStore.persist.onFinishHydration(() => setTabsHydrated(true));
 	}, [tabsHydrated]);
 
-	// Auto-spawn a runtime session when a freshly-activated agent has no tabs yet.
+	// Auto-spawn a runtime session when a freshly-activated agent has no tabs
+	// yet. A freshly-cloned agent's very first session instead launches with a
+	// one-time onboarding prompt: read the repo (AGENTS.md/CLAUDE.md included)
+	// and write its identity + memory from what it finds.
 	const autoSpawnedRef = useRef<Set<string>>(new Set());
 	useEffect(() => {
 		if (!tabsHydrated) return;
@@ -204,7 +208,37 @@ function WorkspacePage() {
 		if (tabs.length > 0) return;
 		if (autoSpawnedRef.current.has(workspaceId)) return;
 		autoSpawnedRef.current.add(workspaceId);
-		spawnSession();
+
+		void (async () => {
+			let needsOnboarding = false;
+			try {
+				needsOnboarding = await trpcClient.workspaces.needsOnboarding.query({
+					id: workspaceId,
+				});
+			} catch {
+				// Marker check failing should never block the session.
+			}
+
+			if (needsOnboarding && workspace.runtime) {
+				spawnAgentSession(
+					{
+						id: workspaceId,
+						runtime: workspace.runtime,
+						worktreePath: workspace.worktreePath ?? null,
+					},
+					{
+						commands: [buildOnboardingCommand(workspace.runtime)],
+						label: "Onboarding",
+					},
+				);
+				trpcClient.workspaces.markOnboarded
+					.mutate({ id: workspaceId })
+					.catch(() => {});
+				return;
+			}
+
+			spawnSession();
+		})();
 	}, [
 		tabsHydrated,
 		workspace,
@@ -212,6 +246,7 @@ function WorkspacePage() {
 		tabs.length,
 		workspaceId,
 		spawnSession,
+		spawnAgentSession,
 	]);
 
 	const { presets } = usePresets();
