@@ -1,5 +1,6 @@
 import type { BrowserWindow } from "electron";
 import { router } from "..";
+import { createAgentChatRouter } from "./agent-chat";
 import { createAgentTasksRouter } from "./agent-tasks";
 import { createAuthRouter } from "./auth";
 import { createAutoUpdateRouter } from "./auto-update";
@@ -53,6 +54,7 @@ export const createAppRouter = (getWindow: () => BrowserWindow | null) => {
 		ringtone: createRingtoneRouter(getWindow),
 		agentTasks: createAgentTasksRouter(),
 		schedules: createSchedulesRouter(),
+		agentChat: createAgentChatRouter(),
 	});
 };
 

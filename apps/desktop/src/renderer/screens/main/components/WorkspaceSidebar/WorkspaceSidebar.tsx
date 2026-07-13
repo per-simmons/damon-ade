@@ -1,7 +1,7 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@superset/ui/tooltip";
 import { Link } from "@tanstack/react-router";
 import { useMemo } from "react";
-import { LuClock, LuKanban, LuPlus } from "react-icons/lu";
+import { LuClock, LuKanban, LuMessageSquare, LuPlus } from "react-icons/lu";
 import { useWorkspaceShortcuts } from "renderer/hooks/useWorkspaceShortcuts";
 import { useOpenNewCategoryModal } from "renderer/stores/new-category-modal";
 import { PortsList } from "./PortsList";
@@ -89,6 +89,14 @@ export function WorkspaceSidebar({
 
 			{!isCollapsed && (
 				<>
+					<Link
+						to="/chat"
+						className="mx-2 mb-1 flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+						activeProps={{ className: "bg-muted text-foreground" }}
+					>
+						<LuMessageSquare className="size-4" />
+						Chat
+					</Link>
 					<Link
 						to="/board"
 						className="mx-2 mb-1 flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
