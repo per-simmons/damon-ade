@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { bashPath, forwardSlashPath } from "./shell-path";
 import {
 	createBashWrapper,
 	createZshWrapper,
@@ -17,6 +18,9 @@ const TEST_ROOT = path.join(
 const TEST_BIN_DIR = path.join(TEST_ROOT, "bin");
 const TEST_ZSH_DIR = path.join(TEST_ROOT, "zsh");
 const TEST_BASH_DIR = path.join(TEST_ROOT, "bash");
+// Shims and the rcfile path are written in bash form on Windows (shell-path.ts);
+// on macOS and Linux these equal the plain paths.
+const SHIM_BIN_DIR = bashPath(TEST_BIN_DIR);
 const TEST_PATHS: ShellWrapperPaths = {
 	BIN_DIR: TEST_BIN_DIR,
 	ZSH_DIR: TEST_ZSH_DIR,
@@ -45,22 +49,22 @@ describe("shell-wrappers", () => {
 		expect(zshenv).toContain(`export ZDOTDIR="${TEST_ZSH_DIR}"`);
 
 		expect(zshrc).toContain("_superset_prepend_bin()");
-		expect(zshrc).toContain(`claude() { "${TEST_BIN_DIR}/claude" "$@"; }`);
-		expect(zshrc).toContain(`codex() { "${TEST_BIN_DIR}/codex" "$@"; }`);
-		expect(zshrc).toContain(`opencode() { "${TEST_BIN_DIR}/opencode" "$@"; }`);
-		expect(zshrc).toContain(`copilot() { "${TEST_BIN_DIR}/copilot" "$@"; }`);
+		expect(zshrc).toContain(`claude() { "${SHIM_BIN_DIR}/claude" "$@"; }`);
+		expect(zshrc).toContain(`codex() { "${SHIM_BIN_DIR}/codex" "$@"; }`);
+		expect(zshrc).toContain(`opencode() { "${SHIM_BIN_DIR}/opencode" "$@"; }`);
+		expect(zshrc).toContain(`copilot() { "${SHIM_BIN_DIR}/copilot" "$@"; }`);
 		expect(zshrc).toContain(
-			`mastracode() { "${TEST_BIN_DIR}/mastracode" "$@"; }`,
+			`mastracode() { "${SHIM_BIN_DIR}/mastracode" "$@"; }`,
 		);
 		expect(zshrc).toContain("rehash 2>/dev/null || true");
 
 		expect(zlogin).toContain("if [[ -o interactive ]]; then");
 		expect(zlogin).toContain('source "$_superset_home/.zlogin"');
 		expect(zlogin).toContain("_superset_prepend_bin()");
-		expect(zlogin).toContain(`claude() { "${TEST_BIN_DIR}/claude" "$@"; }`);
-		expect(zlogin).toContain(`copilot() { "${TEST_BIN_DIR}/copilot" "$@"; }`);
+		expect(zlogin).toContain(`claude() { "${SHIM_BIN_DIR}/claude" "$@"; }`);
+		expect(zlogin).toContain(`copilot() { "${SHIM_BIN_DIR}/copilot" "$@"; }`);
 		expect(zlogin).toContain(
-			`mastracode() { "${TEST_BIN_DIR}/mastracode" "$@"; }`,
+			`mastracode() { "${SHIM_BIN_DIR}/mastracode" "$@"; }`,
 		);
 		expect(zlogin).toContain("rehash 2>/dev/null || true");
 	});
@@ -70,12 +74,12 @@ describe("shell-wrappers", () => {
 
 		const rcfile = readFileSync(path.join(TEST_BASH_DIR, "rcfile"), "utf-8");
 		expect(rcfile).toContain("_superset_prepend_bin()");
-		expect(rcfile).toContain(`claude() { "${TEST_BIN_DIR}/claude" "$@"; }`);
-		expect(rcfile).toContain(`codex() { "${TEST_BIN_DIR}/codex" "$@"; }`);
-		expect(rcfile).toContain(`opencode() { "${TEST_BIN_DIR}/opencode" "$@"; }`);
-		expect(rcfile).toContain(`copilot() { "${TEST_BIN_DIR}/copilot" "$@"; }`);
+		expect(rcfile).toContain(`claude() { "${SHIM_BIN_DIR}/claude" "$@"; }`);
+		expect(rcfile).toContain(`codex() { "${SHIM_BIN_DIR}/codex" "$@"; }`);
+		expect(rcfile).toContain(`opencode() { "${SHIM_BIN_DIR}/opencode" "$@"; }`);
+		expect(rcfile).toContain(`copilot() { "${SHIM_BIN_DIR}/copilot" "$@"; }`);
 		expect(rcfile).toContain(
-			`mastracode() { "${TEST_BIN_DIR}/mastracode" "$@"; }`,
+			`mastracode() { "${SHIM_BIN_DIR}/mastracode" "$@"; }`,
 		);
 		expect(rcfile).toContain("hash -r 2>/dev/null || true");
 	});
@@ -98,7 +102,7 @@ describe("shell-wrappers", () => {
 	it("uses bash rcfile args for interactive bash shells", () => {
 		expect(getShellArgs("/bin/bash", TEST_PATHS)).toEqual([
 			"--rcfile",
-			path.join(TEST_BASH_DIR, "rcfile"),
+			forwardSlashPath(path.join(TEST_BASH_DIR, "rcfile")),
 		]);
 	});
 

@@ -8,6 +8,7 @@ import {
 } from "./agent-wrappers-common";
 import { getNotifyScriptPath } from "./notify-hook";
 import { HOOKS_DIR, OPENCODE_CONFIG_DIR, OPENCODE_PLUGIN_DIR } from "./paths";
+import { forwardSlashPath } from "./shell-path";
 
 export const CLAUDE_SETTINGS_FILE = "claude-settings.json";
 export const OPENCODE_PLUGIN_FILE = "superset-notify.js";
@@ -28,7 +29,7 @@ const CODEX_WRAPPER_EXEC_TEMPLATE_PATH = path.join(
 );
 
 export function getClaudeSettingsPath(): string {
-	return path.join(HOOKS_DIR, CLAUDE_SETTINGS_FILE);
+	return forwardSlashPath(path.join(HOOKS_DIR, CLAUDE_SETTINGS_FILE));
 }
 
 export function getOpenCodePluginPath(): string {
@@ -144,7 +145,7 @@ export function cleanupGlobalOpenCodePlugin(): void {
 export function createOpenCodeWrapper(): void {
 	const script = buildWrapperScript(
 		"opencode",
-		`export OPENCODE_CONFIG_DIR="${OPENCODE_CONFIG_DIR}"\nexec "$REAL_BIN" "$@"`,
+		`export OPENCODE_CONFIG_DIR="${forwardSlashPath(OPENCODE_CONFIG_DIR)}"\nexec "$REAL_BIN" "$@"`,
 	);
 	createWrapper("opencode", script);
 }

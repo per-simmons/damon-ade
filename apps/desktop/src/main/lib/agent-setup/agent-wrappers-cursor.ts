@@ -9,6 +9,7 @@ import {
 	writeFileIfChanged,
 } from "./agent-wrappers-common";
 import { HOOKS_DIR } from "./paths";
+import { forwardSlashPath } from "./shell-path";
 
 export const CURSOR_HOOK_SCRIPT_NAME = "cursor-hook.sh";
 
@@ -34,7 +35,7 @@ interface CursorHooksJson {
 }
 
 export function getCursorHookScriptPath(): string {
-	return path.join(HOOKS_DIR, CURSOR_HOOK_SCRIPT_NAME);
+	return forwardSlashPath(path.join(HOOKS_DIR, CURSOR_HOOK_SCRIPT_NAME));
 }
 
 export function getCursorGlobalHooksJsonPath(): string {

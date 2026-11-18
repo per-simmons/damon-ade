@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { env } from "shared/env.shared";
 import { HOOKS_DIR } from "./paths";
+import { forwardSlashPath } from "./shell-path";
 
 export const NOTIFY_SCRIPT_NAME = "notify.sh";
 export const NOTIFY_SCRIPT_MARKER = "# Superset agent notification hook";
@@ -34,7 +35,7 @@ function writeFileIfChanged(
 }
 
 export function getNotifyScriptPath(): string {
-	return path.join(HOOKS_DIR, NOTIFY_SCRIPT_NAME);
+	return forwardSlashPath(path.join(HOOKS_DIR, NOTIFY_SCRIPT_NAME));
 }
 
 export function getNotifyScriptContent(): string {

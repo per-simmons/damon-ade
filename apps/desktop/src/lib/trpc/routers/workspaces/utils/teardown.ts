@@ -3,7 +3,11 @@ import {
 	getCommandShellArgs,
 	getShellEnv,
 } from "main/lib/agent-setup/shell-wrappers";
-import { buildSafeEnv, sanitizeEnv } from "main/lib/terminal/env";
+import {
+	buildSafeEnv,
+	getDefaultShell,
+	sanitizeEnv,
+} from "main/lib/terminal/env";
 import { removeWorktree } from "./git";
 import { loadSetupConfig } from "./setup";
 
@@ -40,8 +44,10 @@ export async function runTeardown({
 
 	try {
 		const shell =
-			process.env.SHELL ||
-			(process.platform === "darwin" ? "/bin/zsh" : "/bin/bash");
+			process.platform === "win32"
+				? getDefaultShell()
+				: process.env.SHELL ||
+					(process.platform === "darwin" ? "/bin/zsh" : "/bin/bash");
 
 		const baseEnv = buildSafeEnv(sanitizeEnv(process.env) || {});
 		const wrapperEnv = getShellEnv(shell);
@@ -51,6 +57,7 @@ export async function runTeardown({
 			const child = spawn(shell, args, {
 				cwd: worktreePath,
 				detached: true,
+				windowsHide: true,
 				stdio: ["ignore", "pipe", "pipe"],
 				env: {
 					...baseEnv,

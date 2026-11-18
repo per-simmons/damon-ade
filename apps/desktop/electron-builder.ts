@@ -151,8 +151,13 @@ const config: Configuration = {
 		"!**/.DS_Store",
 	],
 
-	// Rebuild native modules for Electron's Node.js version
-	npmRebuild: true,
+	// Rebuild native modules for Electron's Node.js version.
+	// Not on Windows: `bun run install:deps` (scripts/install-app-deps.ts) has
+	// already fetched better-sqlite3's Electron binary there, and the other
+	// native modules ship N-API prebuilds. electron-builder's own rebuild would
+	// compile node-pty from source, which needs Visual Studio's
+	// Spectre-mitigated libraries (MSB8040).
+	npmRebuild: process.platform !== "win32",
 
 	// macOS
 	mac: {

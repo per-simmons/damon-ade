@@ -9,6 +9,7 @@ import {
 	writeFileIfChanged,
 } from "./agent-wrappers-common";
 import { HOOKS_DIR } from "./paths";
+import { forwardSlashPath } from "./shell-path";
 
 export const GEMINI_HOOK_SCRIPT_NAME = "gemini-hook.sh";
 
@@ -40,7 +41,7 @@ interface GeminiSettingsJson {
 }
 
 export function getGeminiHookScriptPath(): string {
-	return path.join(HOOKS_DIR, GEMINI_HOOK_SCRIPT_NAME);
+	return forwardSlashPath(path.join(HOOKS_DIR, GEMINI_HOOK_SCRIPT_NAME));
 }
 
 export function getGeminiSettingsJsonPath(): string {

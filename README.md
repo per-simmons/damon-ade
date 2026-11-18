@@ -1,6 +1,6 @@
 # ADE
 
-An agentic development environment for macOS. ADE is a local-first, single-user desktop app where you build a roster of persistent coding agents and work alongside them in the terminal. Every agent is a durable identity — its own name, photo, git repository, runtime CLI, and long-lived memory — not a throwaway chat session. You come back to the same agent tomorrow and it remembers what it learned today.
+An agentic development environment for macOS and Windows. ADE is a local-first, single-user desktop app where you build a roster of persistent coding agents and work alongside them in the terminal. Every agent is a durable identity — its own name, photo, git repository, runtime CLI, and long-lived memory — not a throwaway chat session. You come back to the same agent tomorrow and it remembers what it learned today.
 
 The interface is a two-level left rail. **Teams** group your work (a name and a square photo); inside each team live **Agents** (a name and a circular photo). Selecting an agent opens its workspace: a strip of **session** tabs, each a real terminal running the agent's coding CLI inside that agent's own git worktree. A **model bar** under the tabs lets you spawn a session on a different model without leaving the agent. On the right, the **Agent Files** panel shows the agent's memory growing as it works.
 
@@ -16,12 +16,14 @@ ADE runs whatever CLI coding agents you already have installed. Claude Code, Ope
 
 ### Download (recommended)
 
-Download the signed DMG from the [latest release](https://github.com/per-simmons/damon-ade/releases/latest), open it, and drag ADE to your Applications folder. macOS only.
+**macOS:** download the signed DMG from the [latest release](https://github.com/per-simmons/damon-ade/releases/latest), open it, and drag ADE to your Applications folder.
+
+**Windows (x64):** download `ADE-Setup-x64.exe` from the same release and run it. It installs for your user account only, no administrator rights needed. Unless the release says it is signed, Windows SmartScreen shows "Windows protected your PC" the first time: choose **More info → Run anyway**.
 
 
 ### Build from source
 
-Requires [Bun](https://bun.sh) 1.0+.
+Requires [Bun](https://bun.sh) 1.3+ (on Windows: `npm i -g bun` or `powershell -c "irm bun.sh/install.ps1 | iex"`).
 
 ```bash
 git clone https://github.com/per-simmons/damon-ade.git
@@ -34,11 +36,13 @@ bunx electron .            # launches the built app
 
 `compile:app` runs the full production build; `bunx electron .` then launches it directly. (Avoid `electron-vite preview` for a full run — it can exhaust memory.)
 
+To build an installer instead, run `bun run build` in `apps/desktop`; it lands in `apps/desktop/release/` (a DMG on macOS, `ADE-<version>-x64.exe` on Windows). On Windows no C++ compiler is needed: the native modules come prebuilt.
+
 ## Prerequisites
 
 ADE orchestrates coding CLIs; it does not bundle them. You need:
 
-- **Git** — required. Each agent gets its own repository or worktree. Install Apple's command line tools with `xcode-select --install`.
+- **Git** — required. Each agent gets its own repository or worktree. On macOS, install Apple's command line tools with `xcode-select --install`. On Windows, install [Git for Windows](https://git-scm.com/download/win): ADE runs every session in its **Git Bash**, the same shell Claude Code uses on Windows. If Git is installed somewhere unusual, set `ADE_GIT_BASH_PATH` (or Claude Code's `CLAUDE_CODE_GIT_BASH_PATH`) to its `bin\bash.exe`. Without Git Bash, sessions fall back to PowerShell and the agent hooks don't run.
 - **At least one agent CLI.** Claude Code is recommended, because it also powers the Kimi, MiniMax, and GLM sessions from the model bar (they run Claude Code pointed at OpenRouter):
 
   ```bash

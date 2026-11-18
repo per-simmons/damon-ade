@@ -7,6 +7,7 @@ import {
 	writeFileIfChanged,
 } from "./agent-wrappers-common";
 import { HOOKS_DIR } from "./paths";
+import { forwardSlashPath } from "./shell-path";
 
 export const COPILOT_HOOK_SCRIPT_NAME = "copilot-hook.sh";
 
@@ -21,7 +22,7 @@ const COPILOT_HOOK_TEMPLATE_PATH = path.join(
 );
 
 export function getCopilotHookScriptPath(): string {
-	return path.join(HOOKS_DIR, COPILOT_HOOK_SCRIPT_NAME);
+	return forwardSlashPath(path.join(HOOKS_DIR, COPILOT_HOOK_SCRIPT_NAME));
 }
 
 export function getCopilotHookScriptContent(): string {

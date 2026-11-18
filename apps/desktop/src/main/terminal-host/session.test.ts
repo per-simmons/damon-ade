@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import path from "node:path";
 import {
 	createFrameHeader,
 	PtySubprocessFrameDecoder,
@@ -86,8 +85,7 @@ describe("Terminal Host Session shell args", () => {
 		) as { args?: string[] };
 
 		expect(spawnPayload?.args?.[0]).toBe("--rcfile");
-		expect(spawnPayload?.args?.[1]?.endsWith(path.join("bash", "rcfile"))).toBe(
-			true,
-		);
+		// Windows passes the rcfile with forward slashes (agent-setup/shell-path.ts).
+		expect(spawnPayload?.args?.[1]).toMatch(/[\\/]bash[\\/]rcfile$/);
 	});
 });

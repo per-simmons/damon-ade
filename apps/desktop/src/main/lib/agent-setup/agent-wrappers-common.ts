@@ -5,6 +5,7 @@ import {
 	BINARY_INSTALL,
 } from "@superset/shared/agent-binaries";
 import { BIN_DIR } from "./paths";
+import { bashPath } from "./shell-path";
 
 export const WRAPPER_MARKER = "# ADE agent-wrapper v2";
 
@@ -61,7 +62,7 @@ function buildRealBinaryResolver(): string {
     [ -z "$dir" ] && continue
     dir="\${dir%/}"
     case "$dir" in
-      "${BIN_DIR}"|"$HOME"/.ade/bin|"$HOME"/.ade-*/bin) continue ;;
+      "${bashPath(BIN_DIR)}"|"$HOME"/.ade/bin|"$HOME"/.ade-*/bin) continue ;;
     esac
     local candidate="$dir/$name"
     if [ -x "$candidate" ] && [ ! -d "$candidate" ]; then

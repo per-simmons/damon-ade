@@ -24,7 +24,7 @@
 		"build": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --publish never",
 		"prepackage": "bun run copy:native-modules && bun run validate:native-runtime",
 		"package": "electron-builder --config electron-builder.ts",
-		"install:deps": "electron-builder install-app-deps",
+		"install:deps": "bun run scripts/install-app-deps.ts",
 		"release": "electron-builder --publish always",
 		"clean:dev": "rimraf ./node_modules/.dev",
 		"generate:routes": "tsr generate",
@@ -185,6 +185,7 @@
 		"zustand": "^5.0.8"
 	},
 	"devDependencies": {
+		"@electron/rebuild": "4.0.1",
 		"@sentry/vite-plugin": "^4.7.0",
 		"@superset/typescript": "workspace:*",
 		"@tailwindcss/vite": "^4.0.9",

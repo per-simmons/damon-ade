@@ -13,6 +13,7 @@ import type { Socket } from "node:net";
 import * as path from "node:path";
 import { getShellArgs } from "../lib/agent-setup/shell-wrappers";
 import { buildSafeEnv } from "../lib/terminal/env";
+import { getWindowsDefaultShell } from "../lib/terminal/windows-shell";
 import { HeadlessEmulator } from "../lib/terminal-host/headless-emulator";
 import type {
 	CreateOrAttachRequest,
@@ -199,6 +200,7 @@ export class Session {
 		const electronPath = process.execPath;
 		this.subprocess = this.spawnProcess(electronPath, [subprocessPath], {
 			stdio: ["pipe", "pipe", "inherit"],
+			windowsHide: true,
 			env: { ...processEnv, ELECTRON_RUN_AS_NODE: "1" },
 		});
 
@@ -933,7 +935,7 @@ export class Session {
 	 */
 	private getDefaultShell(): string {
 		if (process.platform === "win32") {
-			return process.env.COMSPEC || "cmd.exe";
+			return getWindowsDefaultShell();
 		}
 		return process.env.SHELL || "/bin/zsh";
 	}

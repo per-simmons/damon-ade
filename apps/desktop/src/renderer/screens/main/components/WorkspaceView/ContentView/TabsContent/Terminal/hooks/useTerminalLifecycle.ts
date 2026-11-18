@@ -534,7 +534,8 @@ export function useTerminalLifecycle({
 
 		const inputDisposable = xterm.onData(handleTerminalInput);
 		const keyDisposable = xterm.onKey(handleKeyPress);
-		const titleDisposable = xterm.onTitleChange((title) => {
+		const titleDisposable = xterm.onTitleChange((rawTitle) => {
+			const title = shortenWindowsExeTitle(rawTitle);
 			if (title) {
 				setPaneNameRef.current(paneId, title);
 				renameUnnamedWorkspaceRef.current(title);
@@ -757,4 +758,14 @@ export function useTerminalLifecycle({
 	]);
 
 	return { xtermInstance, restartTerminal };
+}
+
+/**
+ * On Windows, ConPTY reports a console's title as the full path of the program
+ * running in it (C:\Program Files\Git\bin\bash.exe). Show just the name, "bash",
+ * the way a macOS pane shows "zsh". Any other title passes through unchanged.
+ */
+function shortenWindowsExeTitle(title: string): string {
+	const match = /^[A-Za-z]:\\(?:[^\\]*\\)*([^\\]+?)\.exe$/i.exec(title.trim());
+	return match ? match[1] : title;
 }

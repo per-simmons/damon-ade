@@ -7,6 +7,7 @@ import defaultShell from "default-shell";
 import { env } from "shared/env.shared";
 import { getAgentCodexHome } from "../agent-home";
 import { getShellEnv } from "../agent-setup/shell-wrappers";
+import { getWindowsDefaultShell } from "./windows-shell";
 
 const MACOS_SYSTEM_CERT_FILE = "/etc/ssl/cert.pem";
 let cachedUtf8Locale: string | null = null;
@@ -41,6 +42,11 @@ export const FALLBACK_SHELL = os.platform() === "win32" ? "cmd.exe" : "/bin/sh";
 export const SHELL_CRASH_THRESHOLD_MS = 1000;
 
 export function getDefaultShell(): string {
+	// default-shell answers COMSPEC (cmd.exe) on Windows; sessions need Git Bash.
+	if (os.platform() === "win32") {
+		return getWindowsDefaultShell();
+	}
+
 	if (defaultShell) {
 		return defaultShell;
 	}

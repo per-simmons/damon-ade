@@ -26,6 +26,11 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { SUPERSET_DIR_NAME } from "shared/constants";
 import {
+	IS_WINDOWS,
+	socketMayExist,
+	terminalHostSocketPath,
+} from "../lib/terminal-host/socket-path";
+import {
 	type ClearScrollbackRequest,
 	type CreateOrAttachRequest,
 	type DetachRequest,
@@ -58,7 +63,7 @@ const DAEMON_VERSION = "1.0.0";
 const SUPERSET_HOME_DIR = join(homedir(), SUPERSET_DIR_NAME);
 
 // Socket and token paths
-const SOCKET_PATH = join(SUPERSET_HOME_DIR, "terminal-host.sock");
+const SOCKET_PATH = terminalHostSocketPath(SUPERSET_HOME_DIR);
 const TOKEN_PATH = join(SUPERSET_HOME_DIR, "terminal-host.token");
 const PID_PATH = join(SUPERSET_HOME_DIR, "terminal-host.pid");
 
@@ -636,7 +641,7 @@ function handleConnection(socket: Socket) {
  */
 function isSocketLive(): Promise<boolean> {
 	return new Promise((resolve) => {
-		if (!existsSync(SOCKET_PATH)) {
+		if (!socketMayExist(SOCKET_PATH)) {
 			resolve(false);
 			return;
 		}
@@ -678,7 +683,7 @@ async function startServer(): Promise<void> {
 
 	// Check if socket is live before removing it
 	// This prevents orphaning a running daemon
-	if (existsSync(SOCKET_PATH)) {
+	if (socketMayExist(SOCKET_PATH)) {
 		const isLive = await isSocketLive();
 		if (isLive) {
 			log("error", "Another daemon is already running and responsive");
@@ -686,11 +691,14 @@ async function startServer(): Promise<void> {
 		}
 
 		// Socket exists but not responsive - safe to remove
-		try {
-			unlinkSync(SOCKET_PATH);
-			log("info", "Removed stale socket file");
-		} catch (error) {
-			throw new Error(`Failed to remove stale socket: ${error}`);
+		// (A named pipe on Windows has no file to remove.)
+		if (!IS_WINDOWS) {
+			try {
+				unlinkSync(SOCKET_PATH);
+				log("info", "Removed stale socket file");
+			} catch (error) {
+				throw new Error(`Failed to remove stale socket: ${error}`);
+			}
 		}
 	}
 
@@ -743,7 +751,7 @@ async function startServer(): Promise<void> {
 		newServer.listen(SOCKET_PATH, () => {
 			// Set socket permissions (readable/writable by owner only)
 			try {
-				chmodSync(SOCKET_PATH, 0o600);
+				if (!IS_WINDOWS) chmodSync(SOCKET_PATH, 0o600);
 			} catch {
 				// May fail on some systems, that's okay - directory permissions protect us
 			}
@@ -777,7 +785,7 @@ async function stopServer(): Promise<void> {
 	});
 
 	try {
-		if (existsSync(SOCKET_PATH)) unlinkSync(SOCKET_PATH);
+		if (!IS_WINDOWS && existsSync(SOCKET_PATH)) unlinkSync(SOCKET_PATH);
 		if (existsSync(PID_PATH)) unlinkSync(PID_PATH);
 	} catch {
 		// Best effort cleanup
