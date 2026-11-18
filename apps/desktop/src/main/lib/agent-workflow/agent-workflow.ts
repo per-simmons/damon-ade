@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	appendFileSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -12,7 +19,9 @@ import { join } from "node:path";
  * implementation, small edits and review run on cheaper models.
  *
  * Files are written only when missing or empty, so a user's edits survive
- * re-scaffolding and the launch-time sync.
+ * re-scaffolding. Upgrading an existing agent (upgradeAgentWorkflow) only ever
+ * adds: a missing file, a missing settings key, a missing CLAUDE.md pointer or
+ * a missing exclude line. It never rewrites or removes existing content.
  */
 
 /** Model the main (coordinator) session runs on, via .claude/settings.json. */
@@ -24,9 +33,12 @@ export const WORKFLOW_TASKS_DIR = ".ade/tasks";
 /** Worktree paths the workflow adds to .git/info/exclude. */
 export const WORKFLOW_EXCLUDES = [".ade/"];
 
+/** Marks the workflow pointer in CLAUDE.md so it is appended only once. */
+export const WORKFLOW_BRIDGE_MARKER = "<!-- ADE task workflow -->";
+
 /** Appended to the generated CLAUDE.md bridge. */
 export const WORKFLOW_BRIDGE_POINTER = `
-<!-- ADE task workflow -->
+${WORKFLOW_BRIDGE_MARKER}
 For multi-step coding tasks, use /plan, then /build, then /review. Task state lives in ${WORKFLOW_TASKS_DIR}/<slug>/ (plan.md, progress.md, escalations/). Do a small, fully specified edit directly or with the quick subagent.
 `;
 
@@ -360,4 +372,87 @@ export function writeAgentWorkflowFiles(worktreePath: string): string[] {
 		}
 	}
 	return written;
+}
+
+const WORKFLOW_EXCLUDE_MARKER =
+	"# ADE task workflow state (generated, not committed)";
+
+function isDirectory(path: string): boolean {
+	try {
+		return statSync(path).isDirectory();
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Bring an existing agent worktree up to the current workflow. Additive only:
+ * - writes missing or empty subagent and command files
+ * - sets `model` in .claude/settings.json when the key is absent
+ * - appends the workflow pointer to CLAUDE.md when it is missing
+ * - git-excludes .ade/ when no exclude line covers it
+ *
+ * A CLAUDE.md or settings.json that does not exist is left for the memory
+ * scaffold to create; an unparseable settings.json is left untouched.
+ * Returns a short description of each change, for logging and tests.
+ */
+export function upgradeAgentWorkflow(worktreePath: string): string[] {
+	const changes = writeAgentWorkflowFiles(worktreePath);
+
+	const settingsPath = join(worktreePath, ".claude", "settings.json");
+	if (existsSync(settingsPath)) {
+		try {
+			const settings: unknown = JSON.parse(readFileSync(settingsPath, "utf8"));
+			if (
+				settings !== null &&
+				typeof settings === "object" &&
+				!Array.isArray(settings) &&
+				!("model" in settings)
+			) {
+				writeFileSync(
+					settingsPath,
+					`${JSON.stringify({ model: WORKFLOW_MAIN_MODEL, ...settings }, null, 2)}\n`,
+					"utf8",
+				);
+				changes.push(join(".claude", "settings.json"));
+			}
+		} catch {
+			// Hand-edited into invalid JSON: not ours to repair.
+		}
+	}
+
+	const claudeMdPath = join(worktreePath, "CLAUDE.md");
+	if (existsSync(claudeMdPath)) {
+		const claudeMd = readFileSync(claudeMdPath, "utf8");
+		if (!claudeMd.includes(WORKFLOW_BRIDGE_MARKER)) {
+			const separator = claudeMd.endsWith("\n") || claudeMd === "" ? "" : "\n";
+			appendFileSync(
+				claudeMdPath,
+				`${separator}${WORKFLOW_BRIDGE_POINTER}`,
+				"utf8",
+			);
+			changes.push("CLAUDE.md");
+		}
+	}
+
+	if (isDirectory(join(worktreePath, ".git"))) {
+		const infoDir = join(worktreePath, ".git", "info");
+		const excludePath = join(infoDir, "exclude");
+		mkdirSync(infoDir, { recursive: true });
+		const existing = existsSync(excludePath)
+			? readFileSync(excludePath, "utf8")
+			: "";
+		const lines = new Set(existing.split(/\r?\n/).map((line) => line.trim()));
+		const missing = WORKFLOW_EXCLUDES.filter((pattern) => !lines.has(pattern));
+		if (missing.length > 0) {
+			appendFileSync(
+				excludePath,
+				`\n${WORKFLOW_EXCLUDE_MARKER}\n${missing.join("\n")}\n`,
+				"utf8",
+			);
+			changes.push(join(".git", "info", "exclude"));
+		}
+	}
+
+	return changes;
 }

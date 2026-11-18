@@ -1,6 +1,8 @@
 export {
 	renderCommand,
 	renderSubagent,
+	upgradeAgentWorkflow,
+	WORKFLOW_BRIDGE_MARKER,
 	WORKFLOW_BRIDGE_POINTER,
 	WORKFLOW_COMMANDS,
 	WORKFLOW_EXCLUDES,

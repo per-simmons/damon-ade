@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
 	existsSync,
+	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
@@ -11,6 +12,8 @@ import { join } from "node:path";
 import {
 	renderCommand,
 	renderSubagent,
+	upgradeAgentWorkflow,
+	WORKFLOW_BRIDGE_MARKER,
 	WORKFLOW_COMMANDS,
 	WORKFLOW_SUBAGENTS,
 	writeAgentWorkflowFiles,
@@ -175,5 +178,133 @@ describe("writeAgentWorkflowFiles", () => {
 			join(".claude", "agents", "quick.md"),
 		]);
 		expect(readFileSync(quickPath, "utf8")).toContain("model: haiku");
+	});
+});
+
+describe("upgradeAgentWorkflow (agents created before the workflow)", () => {
+	let worktree: string;
+	const count = (text: string, sub: string) => text.split(sub).length - 1;
+	const read = (...parts: string[]) =>
+		readFileSync(join(worktree, ...parts), "utf8");
+
+	// The files an agent scaffolded before M1 has.
+	const OLD_CLAUDE_MD =
+		"@/home/agent/memory/AGENT.md\n@/home/agent/memory/USER.md\n";
+	const OLD_SETTINGS = {
+		autoMemoryDirectory: "/home/agent/memory",
+		autoMemoryEnabled: true,
+		hooks: { Stop: [{ matcher: "*", hooks: [] }] },
+	};
+	const OLD_EXCLUDE =
+		"# git ls-files --others --exclude-from=.git/info/exclude\n\n# ADE agent bridge files (generated, not committed)\nCLAUDE.md\n.claude/\nAGENTS.md\n";
+
+	beforeEach(() => {
+		worktree = mkdtempSync(join(tmpdir(), "ade-workflow-upgrade-"));
+		mkdirSync(join(worktree, ".git", "info"), { recursive: true });
+		mkdirSync(join(worktree, ".claude"), { recursive: true });
+		writeFileSync(join(worktree, "CLAUDE.md"), OLD_CLAUDE_MD, "utf8");
+		writeFileSync(
+			join(worktree, ".claude", "settings.json"),
+			`${JSON.stringify(OLD_SETTINGS, null, 2)}\n`,
+			"utf8",
+		);
+		writeFileSync(
+			join(worktree, ".git", "info", "exclude"),
+			OLD_EXCLUDE,
+			"utf8",
+		);
+	});
+
+	afterEach(() => {
+		rmSync(worktree, { recursive: true, force: true });
+	});
+
+	it("adds the workflow files, model, pointer and exclude", () => {
+		const changes = upgradeAgentWorkflow(worktree);
+
+		expect(changes).toContain(join(".claude", "agents", "planner.md"));
+		expect(changes).toContain(join(".claude", "settings.json"));
+		expect(changes).toContain("CLAUDE.md");
+		expect(changes).toContain(join(".git", "info", "exclude"));
+
+		const settings = JSON.parse(read(".claude", "settings.json"));
+		expect(settings).toEqual({ model: "sonnet", ...OLD_SETTINGS });
+
+		const claudeMd = read("CLAUDE.md");
+		expect(claudeMd.startsWith(OLD_CLAUDE_MD)).toBe(true);
+		expect(count(claudeMd, WORKFLOW_BRIDGE_MARKER)).toBe(1);
+
+		const exclude = read(".git", "info", "exclude");
+		expect(exclude.startsWith(OLD_EXCLUDE)).toBe(true);
+		expect(exclude.split("\n")).toContain(".ade/");
+	});
+
+	it("is idempotent: a second run changes nothing", () => {
+		upgradeAgentWorkflow(worktree);
+		const snapshot = {
+			claudeMd: read("CLAUDE.md"),
+			settings: read(".claude", "settings.json"),
+			exclude: read(".git", "info", "exclude"),
+		};
+
+		expect(upgradeAgentWorkflow(worktree)).toEqual([]);
+		expect(read("CLAUDE.md")).toBe(snapshot.claudeMd);
+		expect(read(".claude", "settings.json")).toBe(snapshot.settings);
+		expect(read(".git", "info", "exclude")).toBe(snapshot.exclude);
+	});
+
+	it("keeps a model the user already chose", () => {
+		const chosen = { ...OLD_SETTINGS, model: "opus" };
+		const text = `${JSON.stringify(chosen, null, 2)}\n`;
+		writeFileSync(join(worktree, ".claude", "settings.json"), text, "utf8");
+
+		expect(upgradeAgentWorkflow(worktree)).not.toContain(
+			join(".claude", "settings.json"),
+		);
+		expect(read(".claude", "settings.json")).toBe(text);
+	});
+
+	it("leaves invalid settings JSON untouched", () => {
+		const broken = "{ not json";
+		writeFileSync(join(worktree, ".claude", "settings.json"), broken, "utf8");
+
+		upgradeAgentWorkflow(worktree);
+		expect(read(".claude", "settings.json")).toBe(broken);
+	});
+
+	it("appends the pointer on its own line when CLAUDE.md has no trailing newline", () => {
+		writeFileSync(join(worktree, "CLAUDE.md"), "# My notes", "utf8");
+
+		upgradeAgentWorkflow(worktree);
+		const claudeMd = read("CLAUDE.md");
+		expect(claudeMd.startsWith("# My notes\n")).toBe(true);
+		expect(claudeMd).toContain(`\n${WORKFLOW_BRIDGE_MARKER}\n`);
+	});
+
+	it("does not create CLAUDE.md or settings.json that are missing", () => {
+		rmSync(join(worktree, "CLAUDE.md"));
+		rmSync(join(worktree, ".claude", "settings.json"));
+
+		upgradeAgentWorkflow(worktree);
+		expect(existsSync(join(worktree, "CLAUDE.md"))).toBe(false);
+		expect(existsSync(join(worktree, ".claude", "settings.json"))).toBe(false);
+	});
+
+	it("does not add a second .ade/ line when one is already excluded", () => {
+		const withAde = `${OLD_EXCLUDE}.ade/\n`;
+		writeFileSync(join(worktree, ".git", "info", "exclude"), withAde, "utf8");
+
+		upgradeAgentWorkflow(worktree);
+		expect(read(".git", "info", "exclude")).toBe(withAde);
+	});
+
+	it("skips the exclude when .git is a file (a linked git worktree)", () => {
+		rmSync(join(worktree, ".git"), { recursive: true, force: true });
+		writeFileSync(join(worktree, ".git"), "gitdir: /elsewhere\n", "utf8");
+
+		expect(upgradeAgentWorkflow(worktree)).not.toContain(
+			join(".git", "info", "exclude"),
+		);
+		expect(read(".git")).toBe("gitdir: /elsewhere\n");
 	});
 });

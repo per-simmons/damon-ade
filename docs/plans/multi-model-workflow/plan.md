@@ -1,6 +1,6 @@
 # Plan: multi-model coding workflow for ADE agents
 
-Status: **M1 done (2026-11-17); M2 next**
+Status: **M1 and M2 done (2026-11-17); M3 next**
 Created: 2026-11-17
 Scope: `apps/desktop` agent scaffolding and agent invocation. No new orchestrator, no DB migration.
 
@@ -149,7 +149,7 @@ Store results in `docs/plans/multi-model-workflow/measurements.md`. Optional sec
 - Not yet checked in a live Claude Code session (`/agents`).
 - The installed CLI is 2.1.193. Docs checked describe the current release, so `effort` and the `fable` alias need confirming on that version, or an update first.
 
-### M2 — Deliver to existing agents
+### M2 — Deliver to existing agents (done 2026-11-17)
 
 - Also append `WORKFLOW_BRIDGE_POINTER` to an existing `CLAUDE.md` if it is missing.
 - `syncAgentWorkflowFiles()` runs at launch next to `backfillAgentMemory()` in `main/index.ts`:
@@ -159,6 +159,25 @@ Store results in `docs/plans/multi-model-workflow/measurements.md`. Optional sec
 - Per-agent try/catch, as in the backfill.
 
 **Acceptance:** an agent created before M1 gets the files on the next launch; nothing user-edited changes; a second launch makes no changes.
+
+**Result:**
+- `upgradeAgentWorkflow(worktreePath)` in `agent-workflow.ts` does the per-worktree upgrade.
+- `syncAgentWorkflowFiles()` in `agent-workflow-sync.ts` runs it for every agent at launch, right after `backfillAgentMemory()`. It is kept out of the module index so the scaffold does not import the database.
+- "Nothing user-edited changes" is implemented as **additive only**. Existing text is never rewritten or removed; ADE may add:
+  - missing workflow files
+  - a `model` key when none is set
+  - the CLAUDE.md pointer once, detected by its marker
+  - an `.ade/` exclude line when none exists
+- Left alone:
+  - a user's own `model` choice
+  - invalid settings JSON
+  - a missing CLAUDE.md or settings.json (the memory backfill creates those)
+  - a `.git` that is a file rather than a folder (linked git worktree)
+- Gated by `ADE_MEMORY_SCAFFOLD`, like the scaffold itself.
+- Tests: 12 new (8 upgrade, 4 sync), all passing.
+  - Run together with `agent-scaffold.test.ts`: 63 pass, 1 fail (the pre-existing Windows path test).
+  - Desktop typecheck and Biome pass.
+- Not yet checked against a real existing agent in the running app.
 
 ### M3 — Honor the registry model on `/agent/invoke`
 

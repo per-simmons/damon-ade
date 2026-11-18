@@ -19,6 +19,7 @@ import {
 import { getWorkspaceName } from "shared/env.shared";
 import { backfillAgentMemory } from "./lib/agent-memory-backfill";
 import { setupAgentHooks } from "./lib/agent-setup";
+import { syncAgentWorkflowFiles } from "./lib/agent-workflow/agent-workflow-sync";
 import { SUPERSET_HOME_DIR } from "./lib/app-environment";
 import { initAppState } from "./lib/app-state";
 import { startAppStateWatcher } from "./lib/app-state/watcher";
@@ -262,7 +263,8 @@ if (!gotTheLock) {
 			// superset-icon://<namespace>/<id> — namespace is the URL host
 			// ("projects" for Category photos, "workspaces" for Agent avatars).
 			const url = new URL(request.url);
-			const namespace = url.hostname === "workspaces" ? "workspaces" : "projects";
+			const namespace =
+				url.hostname === "workspaces" ? "workspaces" : "projects";
 			const id = url.pathname.replace(/^\//, "");
 			const iconPath = getIconPath(namespace, id);
 			if (!iconPath) {
@@ -314,6 +316,13 @@ if (!gotTheLock) {
 				backfillAgentMemory();
 			} catch (error) {
 				console.error("[main] Memory backfill failed:", error);
+			}
+			// Then add the multi-model workflow files to agents that predate it
+			// (additive; never rewrites user-edited files).
+			try {
+				syncAgentWorkflowFiles();
+			} catch (error) {
+				console.error("[main] Workflow sync failed:", error);
 			}
 		}, 0);
 
