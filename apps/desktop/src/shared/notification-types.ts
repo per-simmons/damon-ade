@@ -3,6 +3,8 @@
  * Kept in shared/ to avoid cross-boundary imports.
  */
 
+import type { InvokeShellKind } from "./utils/agent-invoke-command";
+
 export interface NotificationIds {
 	paneId?: string;
 	tabId?: string;
@@ -23,6 +25,13 @@ export interface AgentInvokeEvent extends NotificationIds {
 	sessionId: string;
 	/** The task prompt to run claude with in the agent's terminal. */
 	prompt: string;
+	/**
+	 * Private file holding `prompt`. The terminal command reads the prompt from
+	 * here so prompt text never appears on the command line.
+	 */
+	promptFile: string;
+	/** Shell syntax for the command (from the terminal's default shell). */
+	shell: InvokeShellKind;
 	/** The agent's folder (cwd) where the terminal/claude runs. */
 	cwd: string;
 	/**

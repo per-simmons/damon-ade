@@ -10,9 +10,16 @@ import type {
 	AgentMessageEvent,
 } from "shared/notification-types";
 import { getAgentEntry } from "../agent-config/registry";
+import {
+	getInvokePromptDir,
+	parseAgentInvokeRequest,
+	shellKindFor,
+	writeInvokePromptFile,
+} from "../agent-invoke";
+import { getSupersetHomeDir } from "../app-environment";
 import { appState } from "../app-state";
 import { localDb } from "../local-db";
-import { HOOK_PROTOCOL_VERSION } from "../terminal/env";
+import { getDefaultShell, HOOK_PROTOCOL_VERSION } from "../terminal/env";
 import { mapEventType } from "./map-event-type";
 
 // Re-export types for backwards compatibility
@@ -176,55 +183,48 @@ app.get("/hook/complete", (req, res) => {
  * runtime, identity+skills+MCP read from the agent's folder) and open/focus that
  * agent's chat-mastra tab in ADE so the user watches it work.
  *
- *   POST /agent/invoke  { agent, prompt, model? }
+ *   POST /agent/invoke
+ *   { agent, prompt, tab?, claudeSessionId?, fresh?, model? }
+ *
+ * Validation, the prompt file and the shell choice live in main/lib/agent-invoke.
  */
 app.post("/agent/invoke", async (req, res) => {
-	const { agent, prompt, tab, claudeSessionId, fresh, model } = (req.body ??
-		{}) as {
-		agent?: string;
-		prompt?: string;
-		tab?: string;
-		claudeSessionId?: string;
-		fresh?: boolean;
-		model?: string;
-	};
-
-	if (!agent || !prompt) {
+	const parsed = parseAgentInvokeRequest(req.body, getAgentEntry);
+	if (!parsed.ok) {
 		return res
-			.status(400)
-			.json({ success: false, error: "agent and prompt are required" });
+			.status(parsed.status)
+			.json({ success: false, error: parsed.error });
 	}
-
-	const entry = getAgentEntry(agent);
-	if (!entry) {
-		return res
-			.status(404)
-			.json({ success: false, error: `Unknown agent: ${agent}` });
+	const request = parsed.request;
+	if (request.ignoredRegistryModel) {
+		console.warn(
+			`[notifications] /agent/invoke: ignoring registry model for ${request.agent}; it is not a plain model name`,
+		);
 	}
 
 	try {
+		// The prompt goes to a private file, never onto the command line.
+		const promptFile = writeInvokePromptFile(
+			getInvokePromptDir(getSupersetHomeDir()),
+			request.prompt,
+		);
+
 		// Tell the renderer to open a terminal in the agent's folder and run
 		// `claude` with the prompt. The agent works live in the terminal on Pat's
 		// subscription; claude's own hooks fire Start/Stop (dot + review toast)
 		// and its terminal title auto-names the tab.
 		const invokeEvent: AgentInvokeEvent = {
-			agentName: agent,
-			sessionId: entry.sessionId,
-			workspaceId: entry.workspaceId,
-			prompt,
-			cwd: entry.cwd,
-			tabTitle: typeof tab === "string" && tab.trim() ? tab.trim() : undefined,
-			claudeSessionId:
-				typeof claudeSessionId === "string" && claudeSessionId.trim()
-					? claudeSessionId.trim()
-					: undefined,
-			fresh: fresh !== false,
-			// Request override first, then the agent's registry default. The
-			// renderer only uses it when it is a plain model token.
-			model:
-				(typeof model === "string" && model.trim()) ||
-				entry.model?.trim() ||
-				undefined,
+			agentName: request.agent,
+			sessionId: request.entry.sessionId,
+			workspaceId: request.entry.workspaceId,
+			prompt: request.prompt,
+			promptFile,
+			shell: shellKindFor(getDefaultShell()),
+			cwd: request.entry.cwd,
+			tabTitle: request.tabTitle,
+			claudeSessionId: request.claudeSessionId,
+			fresh: request.fresh,
+			model: request.model,
 		};
 		notificationsEmitter.emit(NOTIFICATION_EVENTS.AGENT_INVOKE, invokeEvent);
 
@@ -233,7 +233,11 @@ app.post("/agent/invoke", async (req, res) => {
 		// claude's hooks light the rail dot + fire the review toast, and the user
 		// clicks in when they're ready.
 
-		res.json({ success: true, agent, sessionId: entry.sessionId });
+		res.json({
+			success: true,
+			agent: request.agent,
+			sessionId: request.entry.sessionId,
+		});
 	} catch (error) {
 		console.error("[notifications] /agent/invoke failed:", error);
 		res.status(500).json({ success: false, error: String(error) });
