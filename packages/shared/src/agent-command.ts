@@ -1,27 +1,10 @@
-export const AGENT_TYPES = [
-	"claude",
-	"codex",
-	"gemini",
-	"opencode",
-	"copilot",
-	"cursor-agent",
-	"kimi",
-	"minimax",
-	"glm",
-] as const;
+export const AGENT_TYPES = ["claude", "codex"] as const;
 
 export type AgentType = (typeof AGENT_TYPES)[number];
 
 export const AGENT_LABELS: Record<AgentType, string> = {
-	claude: "Claude",
+	claude: "Claude Code",
 	codex: "Codex",
-	gemini: "Gemini",
-	opencode: "OpenCode",
-	copilot: "Copilot",
-	"cursor-agent": "Cursor Agent",
-	kimi: "Kimi K2.7",
-	minimax: "MiniMax M3",
-	glm: "GLM 5.2",
 };
 
 export const AGENT_PRESET_COMMANDS: Record<AgentType, string[]> = {
@@ -29,26 +12,23 @@ export const AGENT_PRESET_COMMANDS: Record<AgentType, string[]> = {
 	codex: [
 		'codex --model gpt-5.5 -c model_reasoning_effort="high" --ask-for-approval never --sandbox danger-full-access -c model_reasoning_summary="detailed" -c model_supports_reasoning_summaries=true',
 	],
-	gemini: ["gemini --yolo"],
-	opencode: ["opencode"],
-	copilot: ["copilot --allow-all"],
-	"cursor-agent": ["cursor-agent"],
-	kimi: ['ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model moonshotai/kimi-k2.7-code --dangerously-skip-permissions'],
-	minimax: ['ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model minimax/minimax-m3 --dangerously-skip-permissions'],
-	glm: ['ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model z-ai/glm-5.2 --dangerously-skip-permissions'],
 };
 
 export const AGENT_PRESET_DESCRIPTIONS: Record<AgentType, string> = {
 	claude: "Danger mode: All permissions auto-approved",
 	codex: "Danger mode: All permissions auto-approved",
-	gemini: "Danger mode: All permissions auto-approved",
-	opencode: "OpenCode: Open-source AI coding agent",
-	copilot: "Danger mode: All permissions auto-approved",
-	"cursor-agent": "Cursor AI agent for terminal-based coding assistance",
-	kimi: "Kimi K2.7 via Claude Code + OpenRouter",
-	minimax: "MiniMax M3 via Claude Code + OpenRouter",
-	glm: "GLM 5.2 via Claude Code + OpenRouter",
 };
+
+/**
+ * Narrows a stored runtime string to a supported agent. Rows written before
+ * ADE dropped the other runtimes (gemini, opencode, kimi, ...) fall back to
+ * Claude Code.
+ */
+export function toAgentType(value: string | null | undefined): AgentType {
+	return (AGENT_TYPES as readonly string[]).includes(value ?? "")
+		? (value as AgentType)
+		: "claude";
+}
 
 export interface TaskInput {
 	id: string;
@@ -119,20 +99,6 @@ const AGENT_COMMANDS: Record<
 			delimiter,
 			'codex --model gpt-5.5 -c model_reasoning_effort="high" --ask-for-approval never --sandbox danger-full-access --',
 		),
-	gemini: (prompt, delimiter) =>
-		buildHeredoc(prompt, delimiter, "gemini --yolo"),
-	opencode: (prompt, delimiter) =>
-		buildHeredoc(prompt, delimiter, "opencode --prompt"),
-	copilot: (prompt, delimiter) =>
-		buildHeredoc(prompt, delimiter, "copilot -i", "--yolo"),
-	"cursor-agent": (prompt, delimiter) =>
-		buildHeredoc(prompt, delimiter, "cursor-agent --yolo"),
-	kimi: (prompt, delimiter) =>
-		buildHeredoc(prompt, delimiter, 'ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model moonshotai/kimi-k2.7-code --dangerously-skip-permissions'),
-	minimax: (prompt, delimiter) =>
-		buildHeredoc(prompt, delimiter, 'ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model minimax/minimax-m3 --dangerously-skip-permissions'),
-	glm: (prompt, delimiter) =>
-		buildHeredoc(prompt, delimiter, 'ANTHROPIC_BASE_URL="https://openrouter.ai/api" ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" ANTHROPIC_API_KEY="" claude --model z-ai/glm-5.2 --dangerously-skip-permissions'),
 };
 
 export function buildAgentPromptCommand({

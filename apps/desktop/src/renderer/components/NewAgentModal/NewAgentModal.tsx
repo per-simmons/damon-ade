@@ -40,12 +40,8 @@ import {
 
 type RepoMode = "init" | "clone" | "local";
 
-/**
- * Runtimes offered in the New Agent picker. The full AGENT_RUNTIMES enum (and
- * the launch presets) still support the rest — they return for the later
- * models stage.
- */
-const RUNTIME_CHOICES = ["claude", "codex", "opencode"] as const;
+/** Runtimes offered in the New Agent picker: Claude Code and Codex. */
+const RUNTIME_CHOICES = AGENT_RUNTIMES;
 
 /**
  * Create an Agent inside a Category. ADE agents own a standalone repo, so this
@@ -74,7 +70,8 @@ export function NewAgentModal() {
 	const nameInputRef = useRef<HTMLInputElement>(null);
 
 	const createAgent = electronTrpc.workspaces.createAgent.useMutation();
-	const setWorkspaceIcon = electronTrpc.workspaces.setWorkspaceIcon.useMutation();
+	const setWorkspaceIcon =
+		electronTrpc.workspaces.setWorkspaceIcon.useMutation();
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: reset each open
 	useEffect(() => {
@@ -153,11 +150,7 @@ export function NewAgentModal() {
 	};
 
 	return (
-		<Dialog
-			modal
-			open={isOpen}
-			onOpenChange={(open) => !open && closeModal()}
-		>
+		<Dialog modal open={isOpen} onOpenChange={(open) => !open && closeModal()}>
 			<DialogContent className="sm:max-w-[440px]">
 				<DialogHeader>
 					<DialogTitle>New agent</DialogTitle>
@@ -248,8 +241,8 @@ export function NewAgentModal() {
 						</Select>
 						{runtimeMissing && (
 							<p className="text-xs text-muted-foreground">
-								{AGENT_LABELS[runtime]}'s CLI isn't installed — the agent will be
-								created, but you'll need it to run sessions.{" "}
+								{AGENT_LABELS[runtime]}'s CLI isn't installed — the agent will
+								be created, but you'll need it to run sessions.{" "}
 								<button
 									type="button"
 									className="text-foreground underline underline-offset-2 hover:no-underline"
@@ -308,8 +301,8 @@ export function NewAgentModal() {
 					<div className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-xs">
 						<p className="font-medium text-foreground">Git is required</p>
 						<p className="text-muted-foreground">
-							Creating an agent sets up a git repository, and Git isn't installed.
-							Install Apple's Command Line Tools, then re-check:
+							Creating an agent sets up a git repository, and Git isn't
+							installed. Install Apple's Command Line Tools, then re-check:
 						</p>
 						<code className="select-all rounded bg-background/60 px-2 py-1 font-mono">
 							xcode-select --install

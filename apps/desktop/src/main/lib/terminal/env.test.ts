@@ -5,7 +5,6 @@ import {
 	FALLBACK_SHELL,
 	getLocale,
 	removeAppEnvVars,
-	setOpenRouterKeyResolver,
 	SHELL_CRASH_THRESHOLD_MS,
 	sanitizeEnv,
 } from "./env";
@@ -751,37 +750,6 @@ describe("env", () => {
 			it("does not set CODEX_HOME for a claude runtime", () => {
 				const result = buildTerminalEnv({ ...baseParams, runtime: "claude" });
 				expect(result.CODEX_HOME).toBeUndefined();
-			});
-		});
-
-		describe("OPENROUTER_API_KEY injection", () => {
-			afterEach(() => {
-				// Reset the module-level resolver so it does not leak into other tests.
-				setOpenRouterKeyResolver(null);
-			});
-
-			it("injects the resolved key and it survives the buildSafeEnv re-filter", () => {
-				setOpenRouterKeyResolver(() => "sk-or-live-abc");
-				const result = buildTerminalEnv(baseParams);
-				expect(result.OPENROUTER_API_KEY).toBe("sk-or-live-abc");
-				// terminal-host re-applies buildSafeEnv before the pty spawn; the key
-				// must survive it to reach the OpenRouter-routed CLI.
-				expect(buildSafeEnv(result).OPENROUTER_API_KEY).toBe("sk-or-live-abc");
-			});
-
-			it("leaves OPENROUTER_API_KEY unset when no key is stored", () => {
-				setOpenRouterKeyResolver(() => null);
-				const result = buildTerminalEnv(baseParams);
-				expect(result.OPENROUTER_API_KEY).toBeUndefined();
-			});
-
-			it("does not block terminal creation when the resolver throws", () => {
-				setOpenRouterKeyResolver(() => {
-					throw new Error("keychain locked");
-				});
-				const result = buildTerminalEnv(baseParams);
-				expect(result.OPENROUTER_API_KEY).toBeUndefined();
-				expect(result.SUPERSET_PANE_ID).toBe(baseParams.paneId);
 			});
 		});
 	});
