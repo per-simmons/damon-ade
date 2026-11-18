@@ -10,8 +10,8 @@ import type {
 	AgentMessageEvent,
 } from "shared/notification-types";
 import { getAgentEntry } from "../agent-config/registry";
-import { localDb } from "../local-db";
 import { appState } from "../app-state";
+import { localDb } from "../local-db";
 import { HOOK_PROTOCOL_VERSION } from "../terminal/env";
 import { mapEventType } from "./map-event-type";
 
@@ -179,12 +179,14 @@ app.get("/hook/complete", (req, res) => {
  *   POST /agent/invoke  { agent, prompt, model? }
  */
 app.post("/agent/invoke", async (req, res) => {
-	const { agent, prompt, tab, claudeSessionId, fresh } = (req.body ?? {}) as {
+	const { agent, prompt, tab, claudeSessionId, fresh, model } = (req.body ??
+		{}) as {
 		agent?: string;
 		prompt?: string;
 		tab?: string;
 		claudeSessionId?: string;
 		fresh?: boolean;
+		model?: string;
 	};
 
 	if (!agent || !prompt) {
@@ -217,6 +219,12 @@ app.post("/agent/invoke", async (req, res) => {
 					? claudeSessionId.trim()
 					: undefined,
 			fresh: fresh !== false,
+			// Request override first, then the agent's registry default. The
+			// renderer only uses it when it is a plain model token.
+			model:
+				(typeof model === "string" && model.trim()) ||
+				entry.model?.trim() ||
+				undefined,
 		};
 		notificationsEmitter.emit(NOTIFICATION_EVENTS.AGENT_INVOKE, invokeEvent);
 
@@ -241,13 +249,7 @@ app.post("/agent/invoke", async (req, res) => {
  *   POST /agent/message  { agent, content, conversation?, role?, metadata? }
  */
 app.post("/agent/message", (req, res) => {
-	const {
-		agent,
-		content,
-		conversation,
-		role,
-		metadata,
-	} = (req.body ?? {}) as {
+	const { agent, content, conversation, role, metadata } = (req.body ?? {}) as {
 		agent?: string;
 		content?: string;
 		conversation?: string;

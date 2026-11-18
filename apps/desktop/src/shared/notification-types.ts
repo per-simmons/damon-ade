@@ -42,6 +42,11 @@ export interface AgentInvokeEvent extends NotificationIds {
 	claudeSessionId?: string;
 	/** true = start/pin a new session (--session-id); false = resume (--resume). */
 	fresh?: boolean;
+	/**
+	 * Claude Code model for this run (`claude --model`): the request's `model`,
+	 * else the agent's registry `model`. Omitted = the agent's own default.
+	 */
+	model?: string;
 }
 
 /**

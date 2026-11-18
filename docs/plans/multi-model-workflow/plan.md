@@ -1,6 +1,6 @@
 # Plan: multi-model coding workflow for ADE agents
 
-Status: **M1 and M2 done (2026-11-17); M3 next**
+Status: **M1–M3 done (2026-11-17); M4 measurement sheet ready, runs pending (user)**
 Created: 2026-11-17
 Scope: `apps/desktop` agent scaffolding and agent invocation. No new orchestrator, no DB migration.
 
@@ -179,7 +179,7 @@ Store results in `docs/plans/multi-model-workflow/measurements.md`. Optional sec
   - Desktop typecheck and Biome pass.
 - Not yet checked against a real existing agent in the running app.
 
-### M3 — Honor the registry model on `/agent/invoke`
+### M3 — Honor the registry model on `/agent/invoke` (done 2026-11-17)
 
 - Pass `entry.model` through `AgentInvokeEvent`.
 - Add `--model <value>` to the command built in `useAgentHookListener.tsx` when present. Validate it against `^[A-Za-z0-9._\[\]-]+$` before putting it in the shell command.
@@ -187,7 +187,18 @@ Store results in `docs/plans/multi-model-workflow/measurements.md`. Optional sec
 
 **Acceptance:** an invoke for an agent with `model: "fable"` launches `claude --model fable ...`; without it the command is unchanged.
 
+**Result:**
+- New helper `apps/desktop/src/shared/utils/agent-invoke-command.ts` (`buildAgentInvokeCommand`, `isSafeCliToken`). `useAgentHookListener.tsx` now calls it instead of building the string inline.
+- Model source: the request body's `model` first (the endpoint's doc comment already advertised `model?`), then the registry entry's `model`. Carried on `AgentInvokeEvent.model`.
+- Validation: the model **and the session id** are used only when they match `^[A-Za-z0-9._[\]-]+$`; otherwise they are dropped, never escaped. The session id was previously inserted into the shell command unchecked.
+- Without a model, the command is byte-for-byte what it was before (covered by a test).
+- Tests: 8 new, all passing. Notifications tests still pass (64 in that run). Desktop typecheck passes.
+- Biome: the 2 warnings in `server.ts` (unused import and parameter) predate this change. Biome also re-sorted one import and reformatted a destructure in that file.
+- Not yet tried with a real `/agent/invoke` call.
+
 ### M4 — Measure and tune
+
+**Sheet:** [measurements.md](measurements.md) has the setup checklist, run protocol, recording tables and decision rule. The runs themselves need the user's real tasks and spend their tokens or plan usage.
 
 - Re-run the M0 tasks with `/plan` → `/build` → `/review`. Record the same metrics.
 - Compare cost/usage per completed task.

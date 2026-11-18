@@ -8,6 +8,7 @@ import { launchCommandInPane } from "renderer/lib/terminal/launch-command";
 import { navigateToWorkspace } from "renderer/routes/_authenticated/_dashboard/utils/workspace-navigation";
 import { NOTIFICATION_EVENTS } from "shared/constants";
 import { debugLog } from "shared/debug";
+import { buildAgentInvokeCommand } from "shared/utils/agent-invoke-command";
 import { useTabsStore } from "./store";
 import { resolveNotificationTarget } from "./utils/resolve-notification-target";
 
@@ -68,6 +69,7 @@ export function useAgentHookListener() {
 					tabTitle?: string;
 					claudeSessionId?: string;
 					fresh?: boolean;
+					model?: string;
 				};
 				const wsId = invoke.workspaceId;
 				const prompt = invoke.prompt;
@@ -89,8 +91,7 @@ export function useAgentHookListener() {
 				// Reuse an existing tab with this title so e.g. nightly maintenance
 				// always writes to the same tab.
 				const existingTab = state.tabs.find(
-					(t) =>
-						t.workspaceId === wsId && (t.userTitle ?? t.name) === label,
+					(t) => t.workspaceId === wsId && (t.userTitle ?? t.name) === label,
 				);
 				let tabId: string;
 				let paneId: string;
@@ -118,19 +119,13 @@ export function useAgentHookListener() {
 					state.renameTab(tabId, label);
 				}
 
-				const escaped = prompt.replace(/'/g, "'\\''");
-				// Pin/resume a SPECIFIC claude session so repeated picks share ONE
-				// conversation deterministically. `--continue` is "most recent in this
-				// folder" — ambiguous when several Cicero sessions exist — so it loses
-				// context. `--session-id <id>` (fresh) then `--resume <id>` is exact.
-				const flag = csid
-					? fresh
-						? `--session-id ${csid} `
-						: `--resume ${csid} `
-					: fresh
-						? ""
-						: "--continue ";
-				const command = `claude ${flag}--dangerously-skip-permissions '${escaped}'`;
+				// Session pinning, model choice and quoting live in the helper.
+				const command = buildAgentInvokeCommand({
+					prompt,
+					model: invoke.model,
+					claudeSessionId: csid,
+					fresh,
+				});
 
 				const launch = () =>
 					launchCommandInPane({
