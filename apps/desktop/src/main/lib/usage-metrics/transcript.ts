@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { TokenUsage } from "./pricing";
 
@@ -69,6 +70,26 @@ interface TranscriptLine {
 			inference_geo?: string;
 		};
 	};
+}
+
+/** Where Claude Code keeps session transcripts (honors CLAUDE_CONFIG_DIR). */
+export function claudeProjectsRoot(
+	env: NodeJS.ProcessEnv = process.env,
+): string {
+	return join(env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), "projects");
+}
+
+/** Claude Code names a folder's project directory after its path, non-alphanumerics as "-". */
+export function encodeProjectDir(cwd: string): string {
+	return cwd.replace(/[^A-Za-z0-9]/g, "-");
+}
+
+export function transcriptPathFor(cwd: string, sessionId: string): string {
+	return join(
+		claudeProjectsRoot(),
+		encodeProjectDir(cwd),
+		`${sessionId}.jsonl`,
+	);
 }
 
 const TASK_SLUG = /\.ade[\\/]+tasks[\\/]+([a-z0-9][a-z0-9-]*)/g;

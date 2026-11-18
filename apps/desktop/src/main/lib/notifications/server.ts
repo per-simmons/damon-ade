@@ -13,14 +13,28 @@ import { getAgentEntry } from "../agent-config/registry";
 import {
 	getInvokePromptDir,
 	parseAgentInvokeRequest,
+	resolveClaudeExecutable,
+	runHeadlessClaude,
 	shellKindFor,
 	writeInvokePromptFile,
 } from "../agent-invoke";
+import {
+	type HeadlessFinished,
+	startHeadlessInvoke,
+} from "../agent-invoke/headless-invoke";
+import { findRealBinary } from "../agent-setup/utils";
+import { loadWorkflowSettings } from "../agent-workflow/workflow-settings";
 import { getSupersetHomeDir } from "../app-environment";
 import { appState } from "../app-state";
 import { localDb } from "../local-db";
 import { getDefaultShell, HOOK_PROTOCOL_VERSION } from "../terminal/env";
-import { scheduleSessionRecording } from "../usage-metrics";
+import {
+	appendHeadlessRun,
+	decodeHookString,
+	getMetricsDir,
+	scheduleSessionRecording,
+	transcriptPathFor,
+} from "../usage-metrics";
 import { mapEventType } from "./map-event-type";
 
 // Re-export types for backwards compatibility
@@ -107,6 +121,40 @@ function resolvePaneId(
 	return undefined;
 }
 
+/** Log a finished headless run and record its usage from the transcript. */
+function recordHeadlessRun(finished: HeadlessFinished): void {
+	const { result } = finished;
+	const report = result.report;
+	appendHeadlessRun(getMetricsDir(), {
+		at: new Date().toISOString(),
+		agent: finished.agent,
+		cwd: finished.cwd,
+		model: finished.model,
+		maxBudgetUsd: finished.maxBudgetUsd,
+		maxTurns: finished.maxTurns,
+		exitCode: result.exitCode,
+		timedOut: result.timedOut,
+		durationMs: result.durationMs,
+		sessionId: report?.sessionId,
+		reportedCostUsd: report?.totalCostUsd,
+		numTurns: report?.numTurns,
+		isError: report?.isError,
+		subtype: report?.subtype,
+		error:
+			result.parseError ??
+			(result.exitCode === 0 ? undefined : result.stderrTail),
+	});
+	console.log(
+		`[notifications] headless run for ${finished.agent} finished: exit ${result.exitCode}, ${report?.subtype ?? "no result"}, reported $${report?.totalCostUsd?.toFixed(4) ?? "?"}`,
+	);
+	// Headless runs bypass ADE's terminal hooks, so record usage directly.
+	if (report?.sessionId) {
+		scheduleSessionRecording({
+			transcriptPath: transcriptPathFor(finished.cwd, report.sessionId),
+		});
+	}
+}
+
 // Agent lifecycle hook
 app.get("/hook/complete", (req, res) => {
 	const {
@@ -180,7 +228,7 @@ app.get("/hook/complete", (req, res) => {
 	// from it once the turn has stopped (debounced, off the request path).
 	if (mappedEventType === "Stop" && typeof transcriptPath === "string") {
 		scheduleSessionRecording({
-			rawTranscriptPath: transcriptPath,
+			transcriptPath: decodeHookString(transcriptPath),
 			workspaceId: typeof workspaceId === "string" ? workspaceId : undefined,
 		});
 	}
@@ -195,7 +243,11 @@ app.get("/hook/complete", (req, res) => {
  * agent's chat-mastra tab in ADE so the user watches it work.
  *
  *   POST /agent/invoke
- *   { agent, prompt, tab?, claudeSessionId?, fresh?, model? }
+ *   { agent, prompt, tab?, claudeSessionId?, fresh?, model?,
+ *     mode?: "terminal" | "headless", maxBudgetUsd? }
+ *
+ * mode "headless" runs `claude -p` in the background with a hard spending and
+ * turn cap (Settings > Models & Cost) and answers 202 straight away.
  *
  * Validation, the prompt file and the shell choice live in main/lib/agent-invoke.
  */
@@ -211,6 +263,16 @@ app.post("/agent/invoke", async (req, res) => {
 		console.warn(
 			`[notifications] /agent/invoke: ignoring registry model for ${request.agent}; it is not a plain model name`,
 		);
+	}
+
+	if (request.mode === "headless") {
+		const started = startHeadlessInvoke(request, {
+			limits: () => loadWorkflowSettings(getSupersetHomeDir()).budgets,
+			findExecutable: () => resolveClaudeExecutable(findRealBinary("claude")),
+			run: runHeadlessClaude,
+			onFinished: recordHeadlessRun,
+		});
+		return res.status(started.status).json(started.body);
 	}
 
 	try {

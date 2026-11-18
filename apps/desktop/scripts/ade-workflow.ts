@@ -49,6 +49,10 @@ import {
 	loadSessions,
 	recordSessionUsage,
 } from "../src/main/lib/usage-metrics/store";
+import {
+	claudeProjectsRoot,
+	encodeProjectDir,
+} from "../src/main/lib/usage-metrics/transcript";
 
 interface Args {
 	positional: string[];
@@ -94,18 +98,6 @@ function resolveHome(args: Args): string {
 	if (explicit) return resolve(explicit);
 	const legacy = join(homedir(), ".ade-default");
 	return existsSync(legacy) ? legacy : join(homedir(), ".ade");
-}
-
-function claudeProjectsDir(): string {
-	return join(
-		process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"),
-		"projects",
-	);
-}
-
-/** Claude Code stores a folder's sessions under its path with non-alphanumerics as "-". */
-export function encodeProjectDir(cwd: string): string {
-	return cwd.replace(/[^A-Za-z0-9]/g, "-");
 }
 
 function findClaudeBinary(args: Args): string | undefined {
@@ -222,7 +214,7 @@ function recordPaths(home: string, paths: string[]): void {
 
 function importFolder(args: Args): void {
 	const cwd = resolve(flag(args, "cwd") ?? process.cwd());
-	const dir = join(claudeProjectsDir(), encodeProjectDir(cwd));
+	const dir = join(claudeProjectsRoot(), encodeProjectDir(cwd));
 	if (!existsSync(dir))
 		fail(`no Claude Code sessions found for ${cwd} (${dir})`);
 	const paths = readdirSync(dir)

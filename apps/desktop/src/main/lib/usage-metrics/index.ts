@@ -36,7 +36,9 @@ export {
 	replaceReportSection,
 } from "./report";
 export {
+	appendHeadlessRun,
 	appendRunResult,
+	type HeadlessRunRecord,
 	isValidRunLabel,
 	loadRunResults,
 	loadSessions,
@@ -48,8 +50,11 @@ export {
 	sessionsDir,
 } from "./store";
 export {
+	claudeProjectsRoot,
+	encodeProjectDir,
 	listSubagentTranscripts,
 	type ParsedTranscript,
 	parseTranscript,
+	transcriptPathFor,
 	type UsageRecord,
 } from "./transcript";

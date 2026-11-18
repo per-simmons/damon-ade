@@ -39,12 +39,19 @@ interface Draft {
 	roles: Record<RoleName, RoleDraft>;
 	sessionWarnUsd: string;
 	dailyWarnUsd: string;
+	headlessMaxBudgetUsd: string;
+	headlessMaxTurns: string;
 }
 
 interface SettingsData {
 	mainModel: string;
 	roles: Record<RoleName, { model: string; effort: Effort; maxTurns: number }>;
-	budgets: { sessionWarnUsd: number | null; dailyWarnUsd: number | null };
+	budgets: {
+		sessionWarnUsd: number | null;
+		dailyWarnUsd: number | null;
+		headlessMaxBudgetUsd: number;
+		headlessMaxTurns: number;
+	};
 }
 
 function toDraft(settings: SettingsData): Draft {
@@ -62,6 +69,8 @@ function toDraft(settings: SettingsData): Draft {
 		) as Record<RoleName, RoleDraft>,
 		sessionWarnUsd: settings.budgets.sessionWarnUsd?.toString() ?? "",
 		dailyWarnUsd: settings.budgets.dailyWarnUsd?.toString() ?? "",
+		headlessMaxBudgetUsd: String(settings.budgets.headlessMaxBudgetUsd),
+		headlessMaxTurns: String(settings.budgets.headlessMaxTurns),
 	};
 }
 
@@ -159,6 +168,8 @@ export function ModelsSettings({ visibleItems }: ModelsSettingsProps) {
 			budgets: {
 				sessionWarnUsd: parseBudget(draft.sessionWarnUsd),
 				dailyWarnUsd: parseBudget(draft.dailyWarnUsd),
+				headlessMaxBudgetUsd: Number(draft.headlessMaxBudgetUsd),
+				headlessMaxTurns: Number(draft.headlessMaxTurns),
 			},
 		});
 	};
@@ -304,6 +315,50 @@ export function ModelsSettings({ visibleItems }: ModelsSettingsProps) {
 								value={draft.dailyWarnUsd}
 								onChange={(event) =>
 									setDraft({ ...draft, dailyWarnUsd: event.target.value })
+								}
+							/>
+						</div>
+
+						<div className="pt-2">
+							<h3 className="text-sm font-medium">Unattended runs</h3>
+							<p className="text-xs text-muted-foreground mt-1">
+								Hard limits for background agent runs started with{" "}
+								<code className="bg-muted px-1 rounded">mode: "headless"</code>{" "}
+								on /agent/invoke. Claude Code stops the run when either limit is
+								reached.
+							</p>
+						</div>
+						<div className="flex items-center justify-between">
+							<Label htmlFor="headless-budget" className="text-sm font-medium">
+								Spending limit per run ($)
+							</Label>
+							<Input
+								id="headless-budget"
+								type="number"
+								min={0}
+								step="0.5"
+								className="w-[120px]"
+								value={draft.headlessMaxBudgetUsd}
+								onChange={(event) =>
+									setDraft({
+										...draft,
+										headlessMaxBudgetUsd: event.target.value,
+									})
+								}
+							/>
+						</div>
+						<div className="flex items-center justify-between">
+							<Label htmlFor="headless-turns" className="text-sm font-medium">
+								Turn limit per run
+							</Label>
+							<Input
+								id="headless-turns"
+								type="number"
+								min={1}
+								className="w-[120px]"
+								value={draft.headlessMaxTurns}
+								onChange={(event) =>
+									setDraft({ ...draft, headlessMaxTurns: event.target.value })
 								}
 							/>
 						</div>

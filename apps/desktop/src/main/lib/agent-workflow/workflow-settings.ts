@@ -36,6 +36,8 @@ export type EffortLevel = (typeof EFFORT_LEVELS)[number];
 export const MAX_TURNS_LIMIT = 500;
 export const DEFAULT_SESSION_WARN_USD = 10;
 export const DEFAULT_DAILY_WARN_USD = 50;
+export const DEFAULT_HEADLESS_MAX_BUDGET_USD = 5;
+export const DEFAULT_HEADLESS_MAX_TURNS = 50;
 
 export interface RoleRouting {
 	model: string;
@@ -53,6 +55,13 @@ export interface WorkflowSettings {
 		sessionWarnUsd: number | null;
 		/** Notify when today's estimated cost passes this (USD); null = off. */
 		dailyWarnUsd: number | null;
+		/**
+		 * Hard cap for a headless /agent/invoke run (`--max-budget-usd`). A
+		 * request may ask for less, never more.
+		 */
+		headlessMaxBudgetUsd: number;
+		/** Turn cap for a headless run (`--max-turns`). */
+		headlessMaxTurns: number;
 	};
 	/**
 	 * Main model ADE last wrote into agents' settings. Used to tell ADE's value
@@ -83,6 +92,8 @@ export function defaultWorkflowSettings(): WorkflowSettings {
 		budgets: {
 			sessionWarnUsd: DEFAULT_SESSION_WARN_USD,
 			dailyWarnUsd: DEFAULT_DAILY_WARN_USD,
+			headlessMaxBudgetUsd: DEFAULT_HEADLESS_MAX_BUDGET_USD,
+			headlessMaxTurns: DEFAULT_HEADLESS_MAX_TURNS,
 		},
 	};
 }
@@ -142,6 +153,25 @@ export function validateWorkflowSettings(input: unknown): ValidationResult {
 	if (!value.budgets || !validBudget(value.budgets.dailyWarnUsd)) {
 		errors.push("daily warning must be a positive number or off");
 	}
+	const headlessBudget = value.budgets?.headlessMaxBudgetUsd;
+	if (
+		typeof headlessBudget !== "number" ||
+		!Number.isFinite(headlessBudget) ||
+		headlessBudget <= 0
+	) {
+		errors.push("headless budget must be a positive number");
+	}
+	const headlessTurns = value.budgets?.headlessMaxTurns;
+	if (
+		typeof headlessTurns !== "number" ||
+		!Number.isInteger(headlessTurns) ||
+		headlessTurns < 1 ||
+		headlessTurns > MAX_TURNS_LIMIT
+	) {
+		errors.push(
+			`headless turn limit must be a whole number from 1 to ${MAX_TURNS_LIMIT}`,
+		);
+	}
 	if (errors.length) return { ok: false, errors };
 
 	return {
@@ -165,6 +195,8 @@ export function validateWorkflowSettings(input: unknown): ValidationResult {
 			budgets: {
 				sessionWarnUsd: value.budgets?.sessionWarnUsd ?? null,
 				dailyWarnUsd: value.budgets?.dailyWarnUsd ?? null,
+				headlessMaxBudgetUsd: headlessBudget as number,
+				headlessMaxTurns: headlessTurns as number,
 			},
 			appliedMainModel:
 				typeof value.appliedMainModel === "string"

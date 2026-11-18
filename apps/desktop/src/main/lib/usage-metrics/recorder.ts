@@ -50,12 +50,16 @@ export function onSessionRecorded(
 	return () => listeners.delete(listener);
 }
 
+/**
+ * Record a session shortly after it stops. `transcriptPath` must already be a
+ * plain path; decode hook values with decodeHookString first.
+ */
 export function scheduleSessionRecording(params: {
-	rawTranscriptPath: string;
+	transcriptPath: string;
 	workspaceId?: string;
 	metricsDir?: string;
 }): void {
-	const transcriptPath = decodeHookString(params.rawTranscriptPath.trim());
+	const transcriptPath = params.transcriptPath.trim();
 	if (!isRecordableTranscript(transcriptPath)) return;
 
 	// Stop can fire several times in quick succession; record once it settles.

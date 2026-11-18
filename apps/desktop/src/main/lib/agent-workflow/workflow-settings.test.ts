@@ -63,7 +63,12 @@ describe("settings", () => {
 				maxTurns: 0,
 			}),
 			mainModel: "rm -rf",
-			budgets: { sessionWarnUsd: -1, dailyWarnUsd: Number.NaN },
+			budgets: {
+				sessionWarnUsd: -1,
+				dailyWarnUsd: Number.NaN,
+				headlessMaxBudgetUsd: 0,
+				headlessMaxTurns: 2.5,
+			},
 		};
 		const result = validateWorkflowSettings(bad);
 		expect(result.ok).toBe(false);
@@ -75,6 +80,8 @@ describe("settings", () => {
 			"quick: max turns must be a whole number from 1 to 500",
 			"session warning must be a positive number or off",
 			"daily warning must be a positive number or off",
+			"headless budget must be a positive number",
+			"headless turn limit must be a whole number from 1 to 500",
 		]);
 	});
 
@@ -83,7 +90,11 @@ describe("settings", () => {
 			...withRole(defaultWorkflowSettings(), "planner", {
 				model: "claude-fable-5-2",
 			}),
-			budgets: { sessionWarnUsd: null, dailyWarnUsd: 25 },
+			budgets: {
+				...defaultWorkflowSettings().budgets,
+				sessionWarnUsd: null,
+				dailyWarnUsd: 25,
+			},
 		});
 		expect(result.ok).toBe(true);
 	});

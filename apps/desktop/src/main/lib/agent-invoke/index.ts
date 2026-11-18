@@ -9,3 +9,16 @@ export {
 	shellKindFor,
 	writeInvokePromptFile,
 } from "./agent-invoke";
+export {
+	buildHeadlessArgs,
+	DEFAULT_HEADLESS_TIMEOUT_MS,
+	finishHeadlessRun,
+	type HeadlessReport,
+	type HeadlessRunParams,
+	type HeadlessRunResult,
+	MAX_HEADLESS_PROMPT_LENGTH,
+	parseHeadlessOutput,
+	resolveClaudeExecutable,
+	runHeadlessClaude,
+	tryStartHeadlessRun,
+} from "./headless-run";

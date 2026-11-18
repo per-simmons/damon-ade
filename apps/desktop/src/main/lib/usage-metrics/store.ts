@@ -168,6 +168,38 @@ export function loadSessions(metricsDir: string): SessionMetrics[] {
 		.filter((session): session is SessionMetrics => session !== undefined);
 }
 
+/** One unattended `claude -p` run started through /agent/invoke. */
+export interface HeadlessRunRecord {
+	at: string;
+	agent: string;
+	cwd: string;
+	model?: string;
+	maxBudgetUsd: number;
+	maxTurns: number;
+	exitCode: number | null;
+	timedOut: boolean;
+	durationMs: number;
+	sessionId?: string;
+	/** Claude Code's own total_cost_usd, for cross-checking our estimate. */
+	reportedCostUsd?: number;
+	numTurns?: number;
+	isError?: boolean;
+	subtype?: string;
+	error?: string;
+}
+
+export function appendHeadlessRun(
+	metricsDir: string,
+	record: HeadlessRunRecord,
+): void {
+	mkdirSync(metricsDir, { recursive: true });
+	appendFileSync(
+		join(metricsDir, "headless-runs.jsonl"),
+		`${JSON.stringify(record)}\n`,
+		"utf8",
+	);
+}
+
 export function appendRunResult(metricsDir: string, result: RunResult): void {
 	if (!isValidRunLabel(result.label)) {
 		throw new Error(`Invalid run label: ${result.label}`);

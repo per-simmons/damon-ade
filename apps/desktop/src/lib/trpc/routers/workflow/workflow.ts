@@ -41,6 +41,8 @@ const settingsInputSchema = z.object({
 	budgets: z.object({
 		sessionWarnUsd: z.number().nullable(),
 		dailyWarnUsd: z.number().nullable(),
+		headlessMaxBudgetUsd: z.number(),
+		headlessMaxTurns: z.number(),
 	}),
 });
 

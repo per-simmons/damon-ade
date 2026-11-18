@@ -529,8 +529,9 @@ describe("recording from the hook", () => {
 		const seen: string[] = [];
 		const off = onSessionRecorded((metrics) => seen.push(metrics.sessionId));
 		const raw = JSON.stringify(transcript).slice(1, -1);
-		scheduleSessionRecording({ rawTranscriptPath: raw, metricsDir });
-		scheduleSessionRecording({ rawTranscriptPath: raw, metricsDir });
+		const path = decodeHookString(raw);
+		scheduleSessionRecording({ transcriptPath: path, metricsDir });
+		scheduleSessionRecording({ transcriptPath: path, metricsDir });
 		await Bun.sleep(1_000);
 		off();
 		expect(seen).toEqual(["sess-1"]);

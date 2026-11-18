@@ -1,5 +1,4 @@
 import { describe, expect, it } from "bun:test";
-import { encodeProjectDir } from "../../../../scripts/ade-workflow";
 import type { ArmSummary, RunSummary } from "./aggregate";
 import { costOf } from "./aggregate";
 import {
@@ -9,6 +8,7 @@ import {
 	renderM4Report,
 	replaceReportSection,
 } from "./report";
+import { encodeProjectDir } from "./transcript";
 
 function arm(
 	name: string,

@@ -12,6 +12,7 @@ import {
 	type InvokeShellKind,
 	isSafeCliToken,
 } from "shared/utils/agent-invoke-command";
+import { MAX_HEADLESS_PROMPT_LENGTH } from "./headless-run";
 
 /**
  * Request handling for POST /agent/invoke, kept free of Electron and Express
@@ -40,6 +41,13 @@ export interface ParsedInvokeRequest {
 	fresh: boolean;
 	/** Request model, else the registry model; only plain tokens survive. */
 	model?: string;
+	/**
+	 * "terminal" (default): run interactively in the agent's ADE terminal.
+	 * "headless": run `claude -p` in the background with a hard budget cap.
+	 */
+	mode: "terminal" | "headless";
+	/** Requested cap for a headless run; the settings cap still applies. */
+	maxBudgetUsd?: number;
 	entry: InvokeAgentEntry;
 	/** Set when the registry model was ignored because it is not a plain token. */
 	ignoredRegistryModel?: string;
@@ -91,6 +99,35 @@ export function parseAgentInvokeRequest(
 		return { ok: false, status: 400, error: "fresh must be a boolean" };
 	}
 
+	const mode = fields.mode ?? "terminal";
+	if (mode !== "terminal" && mode !== "headless") {
+		return {
+			ok: false,
+			status: 400,
+			error: 'mode must be "terminal" or "headless"',
+		};
+	}
+	if (mode === "headless" && prompt.length > MAX_HEADLESS_PROMPT_LENGTH) {
+		return {
+			ok: false,
+			status: 413,
+			error: `a headless prompt is limited to ${MAX_HEADLESS_PROMPT_LENGTH} characters`,
+		};
+	}
+	const maxBudgetUsd = fields.maxBudgetUsd;
+	if (
+		maxBudgetUsd !== undefined &&
+		(typeof maxBudgetUsd !== "number" ||
+			!Number.isFinite(maxBudgetUsd) ||
+			maxBudgetUsd <= 0)
+	) {
+		return {
+			ok: false,
+			status: 400,
+			error: "maxBudgetUsd must be a positive number",
+		};
+	}
+
 	const tab = optionalString(fields, "tab");
 	const session = optionalString(fields, "claudeSessionId");
 	const model = optionalString(fields, "model");
@@ -130,6 +167,8 @@ export function parseAgentInvokeRequest(
 			claudeSessionId: session.value,
 			fresh: fields.fresh !== false,
 			model: model.value ?? registryModelSafe,
+			mode,
+			maxBudgetUsd: maxBudgetUsd as number | undefined,
 			entry,
 			ignoredRegistryModel:
 				registryModel && !registryModelSafe ? registryModel : undefined,
