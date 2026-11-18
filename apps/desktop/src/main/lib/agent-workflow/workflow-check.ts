@@ -69,6 +69,21 @@ const KNOWN_TOOLS = new Set([
 	"TodoWrite",
 ]);
 
+/**
+ * Whether a model recorded in a transcript (always a full ID) is what a
+ * configured value asks for. An alias matches any model of its tier, since
+ * aliases move to newer models over time.
+ */
+export function modelMatches(configured: string, observed: string): boolean {
+	const base = configured.replace(/\[1m\]$/, "");
+	if (base === "inherit") return true;
+	if (base.startsWith("claude-")) return observed === base;
+	const tier = base === "best" ? "opus" : base;
+	return (
+		observed === `claude-${tier}` || observed.startsWith(`claude-${tier}-`)
+	);
+}
+
 /** A model value Claude Code accepts: an alias or a full claude-* model ID. */
 export function isPlausibleModel(value: string): boolean {
 	const base = value.replace(/\[1m\]$/, "");

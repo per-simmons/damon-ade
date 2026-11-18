@@ -19,6 +19,7 @@ export {
 	checkClaudeCliSupport,
 	type FileState,
 	isPlausibleModel,
+	modelMatches,
 	parseFrontmatter,
 	type RoleCheck,
 	type WorkflowCheck,

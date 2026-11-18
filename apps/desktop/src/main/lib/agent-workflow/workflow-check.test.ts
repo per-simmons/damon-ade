@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { observedModelsByRole } from "../../../../scripts/ade-workflow";
 import {
 	upgradeAgentWorkflow,
 	writeAgentWorkflowFiles,
@@ -10,6 +11,7 @@ import {
 	checkAgentWorkflow,
 	checkClaudeCliSupport,
 	isPlausibleModel,
+	modelMatches,
 	parseFrontmatter,
 } from "./workflow-check";
 
@@ -162,5 +164,73 @@ describe("helpers", () => {
 			knowsFableAlias: true,
 		});
 		expect(checkClaudeCliSupport(join(worktree, "nope"))).toBeUndefined();
+	});
+});
+
+describe("modelMatches", () => {
+	it("matches an alias to any model of its tier", () => {
+		expect(modelMatches("sonnet", "claude-sonnet-5-5")).toBe(true);
+		expect(modelMatches("sonnet", "claude-sonnet-5")).toBe(true);
+		expect(modelMatches("fable", "claude-fable-5-2")).toBe(true);
+		expect(modelMatches("opus[1m]", "claude-opus-5-5")).toBe(true);
+		expect(modelMatches("best", "claude-opus-5-5")).toBe(true);
+		expect(modelMatches("inherit", "claude-haiku-5-5")).toBe(true);
+	});
+
+	it("rejects another tier, and a different version for a full ID", () => {
+		expect(modelMatches("sonnet", "claude-opus-5-5")).toBe(false);
+		expect(modelMatches("haiku", "claude-sonnet-5-5")).toBe(false);
+		expect(modelMatches("claude-sonnet-5-5", "claude-sonnet-5")).toBe(false);
+		expect(modelMatches("claude-sonnet-5-5", "claude-sonnet-5-5")).toBe(true);
+	});
+});
+
+describe("observedModelsByRole", () => {
+	it("collects models per role for sessions run in the folder", () => {
+		const record = (model: string, agentType: string) => ({
+			id: `${model}-${agentType}-${Math.random()}`,
+			model,
+			agentType,
+			timestamp: "",
+			input: 1,
+			output: 1,
+			cacheRead: 0,
+			cacheWrite5m: 0,
+			cacheWrite1h: 0,
+		});
+		const session = (cwd: string, records: ReturnType<typeof record>[]) => ({
+			schemaVersion: 1,
+			sessionId: Math.random().toString(),
+			transcriptPath: "/t.jsonl",
+			cwd,
+			recordedAt: "",
+			activeMs: 0,
+			humanPrompts: 1,
+			subagentCalls: {},
+			apiErrors: 0,
+			taskSlugs: [],
+			tasks: {},
+			records,
+		});
+		const observed = observedModelsByRole(
+			[
+				session(join(worktree, "/"), [
+					record("claude-sonnet-5-5", "main"),
+					record("claude-fable-5-2", "planner"),
+					record("claude-sonnet-5-5", "implementer"),
+				]),
+				session(join(tmpdir(), "elsewhere"), [
+					record("claude-opus-5-5", "main"),
+				]),
+			],
+			worktree,
+		);
+		expect(
+			Object.fromEntries([...observed].map(([k, v]) => [k, [...v]])),
+		).toEqual({
+			main: ["claude-sonnet-5-5"],
+			planner: ["claude-fable-5-2"],
+			implementer: ["claude-sonnet-5-5"],
+		});
 	});
 });

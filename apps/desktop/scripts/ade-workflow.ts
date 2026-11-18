@@ -31,6 +31,7 @@ import { dirname, join, resolve } from "node:path";
 import {
 	checkAgentWorkflow,
 	checkClaudeCliSupport,
+	modelMatches,
 } from "../src/main/lib/agent-workflow/workflow-check";
 import {
 	costOf,
@@ -174,8 +175,54 @@ function doctor(args: Args): void {
 			`  .ade/ git-excluded: ${check.adeExcluded === null ? "no .git folder" : check.adeExcluded ? "yes" : "no"}`,
 		);
 		if (!check.ok) problems++;
+
+		// Runtime confirmation: models actually used, from recorded transcripts.
+		const observed = observedModelsByRole(
+			loadSessions(join(resolveHome(args), "metrics")),
+			check.worktreePath,
+		);
+		if (observed.size === 0) {
+			console.log(
+				"  models actually used: no recorded sessions in this folder yet",
+			);
+			continue;
+		}
+		console.log("  models actually used (recorded sessions):");
+		for (const [role, models] of observed) {
+			const configured = check.roles.find((r) => r.name === role)?.actual
+				?.model;
+			const mismatched = configured
+				? [...models].filter((model) => !modelMatches(configured, model))
+				: [];
+			if (mismatched.length) problems++;
+			console.log(
+				`    ${role.padEnd(12)} ${[...models].join(", ")}${mismatched.length ? `  !! configured ${configured}` : ""}`,
+			);
+		}
 	}
 	process.exit(problems ? 1 : 0);
+}
+
+/** Models seen per role ("main" or subagent type) in sessions run in `cwd`. */
+export function observedModelsByRole(
+	sessions: ReturnType<typeof loadSessions>,
+	cwd: string,
+): Map<string, Set<string>> {
+	const normalize = (path: string) =>
+		resolve(path)
+			.replace(/[\\/]+$/, "")
+			.toLowerCase();
+	const target = normalize(cwd);
+	const byRole = new Map<string, Set<string>>();
+	for (const session of sessions) {
+		if (!session.cwd || normalize(session.cwd) !== target) continue;
+		for (const record of session.records) {
+			const models = byRole.get(record.agentType) ?? new Set<string>();
+			models.add(record.model);
+			byRole.set(record.agentType, models);
+		}
+	}
+	return byRole;
 }
 
 function label(args: Args): void {
