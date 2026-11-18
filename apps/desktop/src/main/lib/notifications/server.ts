@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import { agentMessages } from "@superset/local-db";
 import { BrowserWindow } from "electron";
 import express from "express";
@@ -23,6 +24,11 @@ import {
 	startHeadlessInvoke,
 } from "../agent-invoke/headless-invoke";
 import { findRealBinary } from "../agent-setup/utils";
+import {
+	ensureProjectWorkflow,
+	portablePath,
+	projectKeyFor,
+} from "../agent-workflow/project-workflow";
 import { loadWorkflowSettings } from "../agent-workflow/workflow-settings";
 import { getSupersetHomeDir } from "../app-environment";
 import { appState } from "../app-state";
@@ -121,6 +127,22 @@ function resolvePaneId(
 	return undefined;
 }
 
+/** The project workflow for a headless run in `cwd`, or none if it fails. */
+function headlessWorkflowFor(
+	cwd: string,
+): { tasksDir: string; agentsJson: string } | undefined {
+	try {
+		const workflow = ensureProjectWorkflow(getSupersetHomeDir(), cwd);
+		return {
+			tasksDir: portablePath(workflow.tasksDir),
+			agentsJson: readFileSync(workflow.agentsFile, "utf8"),
+		};
+	} catch (error) {
+		console.warn("[notifications] No workflow for headless run:", error);
+		return undefined;
+	}
+}
+
 /** Log a finished headless run and record its usage from the transcript. */
 function recordHeadlessRun(finished: HeadlessFinished): void {
 	const { result } = finished;
@@ -151,6 +173,7 @@ function recordHeadlessRun(finished: HeadlessFinished): void {
 	if (report?.sessionId) {
 		scheduleSessionRecording({
 			transcriptPath: transcriptPathFor(finished.cwd, report.sessionId),
+			projectKey: projectKeyFor(finished.cwd),
 		});
 	}
 }
@@ -163,6 +186,7 @@ app.get("/hook/complete", (req, res) => {
 		workspaceId,
 		sessionId,
 		transcriptPath,
+		projectKey,
 		eventType,
 		env: clientEnv,
 		version,
@@ -230,6 +254,8 @@ app.get("/hook/complete", (req, res) => {
 		scheduleSessionRecording({
 			transcriptPath: decodeHookString(transcriptPath),
 			workspaceId: typeof workspaceId === "string" ? workspaceId : undefined,
+			projectKey:
+				typeof projectKey === "string" && projectKey ? projectKey : undefined,
 		});
 	}
 
@@ -269,7 +295,12 @@ app.post("/agent/invoke", async (req, res) => {
 		const started = startHeadlessInvoke(request, {
 			limits: () => loadWorkflowSettings(getSupersetHomeDir()).budgets,
 			findExecutable: () => resolveClaudeExecutable(findRealBinary("claude")),
-			run: runHeadlessClaude,
+			// Same workflow roles as the agent's terminal sessions.
+			run: (params) =>
+				runHeadlessClaude({
+					...params,
+					workflow: headlessWorkflowFor(request.entry.cwd),
+				}),
 			onFinished: recordHeadlessRun,
 		});
 		return res.status(started.status).json(started.body);

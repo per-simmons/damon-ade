@@ -87,18 +87,24 @@ function buildHeredoc(
 	].join("\n");
 }
 
+/**
+ * Each runtime's command for a one-shot prompt, without the prompt itself
+ * (the prompt is appended as the last argument).
+ */
+export const AGENT_PROMPT_BASE_COMMANDS: Record<AgentType, string> = {
+	claude: "claude --dangerously-skip-permissions",
+	codex:
+		'codex --model gpt-5.5 -c model_reasoning_effort="high" --ask-for-approval never --sandbox danger-full-access --',
+};
+
 const AGENT_COMMANDS: Record<
 	AgentType,
 	(prompt: string, delimiter: string) => string
 > = {
 	claude: (prompt, delimiter) =>
-		buildHeredoc(prompt, delimiter, "claude --dangerously-skip-permissions"),
+		buildHeredoc(prompt, delimiter, AGENT_PROMPT_BASE_COMMANDS.claude),
 	codex: (prompt, delimiter) =>
-		buildHeredoc(
-			prompt,
-			delimiter,
-			'codex --model gpt-5.5 -c model_reasoning_effort="high" --ask-for-approval never --sandbox danger-full-access --',
-		),
+		buildHeredoc(prompt, delimiter, AGENT_PROMPT_BASE_COMMANDS.codex),
 };
 
 export function buildAgentPromptCommand({

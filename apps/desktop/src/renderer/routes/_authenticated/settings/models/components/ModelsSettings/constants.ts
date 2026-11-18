@@ -3,17 +3,17 @@ export const ROLES = [
 	{
 		name: "planner",
 		label: "Planner",
-		description: "Writes the plan before any code (/plan)",
+		description: "Plans complex tasks before any code is written",
 	},
 	{
 		name: "architect",
 		label: "Architect",
-		description: "Unblocks escalations (/escalate)",
+		description: "Handles exceptional problems: blocked steps and escalations",
 	},
 	{
 		name: "implementer",
 		label: "Implementer",
-		description: "Carries out the plan step by step (/build)",
+		description: "Implements tasks and builds plans step by step",
 	},
 	{
 		name: "quick",
@@ -23,7 +23,7 @@ export const ROLES = [
 	{
 		name: "reviewer",
 		label: "Reviewer",
-		description: "Checks the work against the plan (/review)",
+		description: "Checks finished work independently",
 	},
 ] as const;
 

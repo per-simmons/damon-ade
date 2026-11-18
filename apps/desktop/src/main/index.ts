@@ -19,7 +19,6 @@ import {
 import { getWorkspaceName } from "shared/env.shared";
 import { backfillAgentMemory } from "./lib/agent-memory-backfill";
 import { setupAgentHooks } from "./lib/agent-setup";
-import { syncAgentWorkflowFiles } from "./lib/agent-workflow/agent-workflow-sync";
 import { loadWorkflowSettings } from "./lib/agent-workflow/workflow-settings";
 import { SUPERSET_HOME_DIR } from "./lib/app-environment";
 import { initAppState } from "./lib/app-state";
@@ -323,13 +322,6 @@ if (!gotTheLock) {
 				backfillAgentMemory();
 			} catch (error) {
 				console.error("[main] Memory backfill failed:", error);
-			}
-			// Then add the multi-model workflow files to agents that predate it
-			// (additive; never rewrites user-edited files).
-			try {
-				syncAgentWorkflowFiles();
-			} catch (error) {
-				console.error("[main] Workflow sync failed:", error);
 			}
 		}, 0);
 

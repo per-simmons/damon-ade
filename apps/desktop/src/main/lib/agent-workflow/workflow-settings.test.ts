@@ -1,19 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import {
-	mkdirSync,
-	mkdtempSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { upgradeAgentWorkflow, WORKFLOW_SUBAGENTS } from "./agent-workflow";
-import { checkAgentWorkflow } from "./workflow-check";
+import { WORKFLOW_SUBAGENTS } from "./agent-workflow";
 import {
-	applyRouting,
 	defaultWorkflowSettings,
-	isUneditedGeneratedFile,
 	loadWorkflowSettings,
 	resolveSubagents,
 	saveWorkflowSettings,
@@ -41,10 +32,9 @@ function withRole(
 	};
 }
 
-describe("settings", () => {
-	it("defaults to the built-in roles and a sonnet main session", () => {
+describe("workflow settings", () => {
+	it("defaults to the built-in roles", () => {
 		const defaults = defaultWorkflowSettings();
-		expect(defaults.mainModel).toBe("sonnet");
 		for (const agent of WORKFLOW_SUBAGENTS) {
 			expect(defaults.roles[agent.name as "planner"]).toEqual({
 				model: agent.model,
@@ -62,7 +52,6 @@ describe("settings", () => {
 				effort: "extreme" as "low",
 				maxTurns: 0,
 			}),
-			mainModel: "rm -rf",
 			budgets: {
 				sessionWarnUsd: -1,
 				dailyWarnUsd: Number.NaN,
@@ -74,7 +63,6 @@ describe("settings", () => {
 		expect(result.ok).toBe(false);
 		if (result.ok) return;
 		expect(result.errors).toEqual([
-			"main model must be a model alias or a claude-* model ID",
 			"quick: model must be a model alias or a claude-* model ID",
 			"quick: effort must be one of low, medium, high, xhigh, max",
 			"quick: max turns must be a whole number from 1 to 500",
@@ -112,11 +100,20 @@ describe("settings", () => {
 			effort: "medium",
 			maxTurns: 40,
 		});
-		expect(loaded.roles.planner.model).toBe("fable");
+		expect(loaded.roles.planner.model).toBe("opus");
 
 		const changed = withRole(loaded, "quick", { maxTurns: 5 });
 		saveWorkflowSettings(dir, changed);
 		expect(loadWorkflowSettings(dir)).toEqual(changed);
+	});
+
+	it("ignores keys from older versions", () => {
+		writeFileSync(
+			workflowSettingsPath(dir),
+			JSON.stringify({ mainModel: "opus", appliedMainModel: "sonnet" }),
+			"utf8",
+		);
+		expect(loadWorkflowSettings(dir)).toEqual(defaultWorkflowSettings());
 	});
 
 	it("falls back to defaults when the file is invalid", () => {
@@ -124,92 +121,9 @@ describe("settings", () => {
 		expect(loadWorkflowSettings(dir)).toEqual(defaultWorkflowSettings());
 		writeFileSync(
 			workflowSettingsPath(dir),
-			JSON.stringify({ mainModel: "$(id)" }),
+			JSON.stringify({ roles: { planner: { model: "$(id)" } } }),
 			"utf8",
 		);
 		expect(loadWorkflowSettings(dir)).toEqual(defaultWorkflowSettings());
-	});
-});
-
-describe("applyRouting", () => {
-	let worktree: string;
-	beforeEach(() => {
-		worktree = join(dir, "worktree");
-		mkdirSync(join(worktree, ".claude"), { recursive: true });
-		writeFileSync(
-			join(worktree, ".claude", "settings.json"),
-			JSON.stringify({ autoMemoryEnabled: true }),
-			"utf8",
-		);
-		upgradeAgentWorkflow(worktree);
-	});
-
-	const read = (...parts: string[]) =>
-		readFileSync(join(worktree, ...parts), "utf8");
-
-	it("recognizes ADE's own files with any routing values", () => {
-		const implementer = WORKFLOW_SUBAGENTS.find(
-			(a) => a.name === "implementer",
-		);
-		if (!implementer) throw new Error("missing role");
-		const content = read(".claude", "agents", "implementer.md");
-		expect(isUneditedGeneratedFile(content, implementer)).toBe(true);
-		expect(
-			isUneditedGeneratedFile(
-				content.replace("Implement", "Build"),
-				implementer,
-			),
-		).toBe(false);
-	});
-
-	it("moves unedited roles to the new routing and leaves edited ones alone", () => {
-		const editedQuick = read(".claude", "agents", "quick.md").replace(
-			"You make one small",
-			"I make one small",
-		);
-		writeFileSync(
-			join(worktree, ".claude", "agents", "quick.md"),
-			editedQuick,
-			"utf8",
-		);
-
-		let settings = defaultWorkflowSettings();
-		settings = withRole(settings, "implementer", {
-			model: "opus",
-			maxTurns: 60,
-		});
-		settings = withRole(settings, "quick", { model: "sonnet" });
-
-		const changes = applyRouting(worktree, settings, "sonnet");
-		expect(changes).toEqual([join(".claude", "agents", "implementer.md")]);
-
-		const check = checkAgentWorkflow(worktree);
-		const implementer = check.roles.find((r) => r.name === "implementer");
-		expect(implementer?.actual?.model).toBe("opus");
-		expect(implementer?.actual?.maxTurns).toBe("60");
-		expect(read(".claude", "agents", "quick.md")).toBe(editedQuick);
-
-		// Applying the same routing again changes nothing.
-		expect(applyRouting(worktree, settings, "sonnet")).toEqual([]);
-	});
-
-	it("changes the main model only where it still holds ADE's value", () => {
-		const settings = { ...defaultWorkflowSettings(), mainModel: "opus" };
-		expect(applyRouting(worktree, settings, "sonnet")).toContain(
-			join(".claude", "settings.json"),
-		);
-		expect(JSON.parse(read(".claude", "settings.json"))).toEqual({
-			model: "opus",
-			autoMemoryEnabled: true,
-		});
-
-		// The user picks haiku by hand; ADE's next change must not undo it.
-		writeFileSync(
-			join(worktree, ".claude", "settings.json"),
-			JSON.stringify({ model: "haiku" }),
-			"utf8",
-		);
-		applyRouting(worktree, { ...settings, mainModel: "fable" }, "opus");
-		expect(JSON.parse(read(".claude", "settings.json")).model).toBe("haiku");
 	});
 });

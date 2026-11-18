@@ -27,6 +27,11 @@ export interface HeadlessRunParams {
 	claudeSessionId?: string;
 	/** true = new session pinned with --session-id; false = --resume. */
 	fresh: boolean;
+	/**
+	 * The project's multi-model workflow (agent-workflow/project-workflow.ts):
+	 * its task folder and its roles as `--agents` JSON.
+	 */
+	workflow?: { tasksDir: string; agentsJson: string };
 	timeoutMs?: number;
 	env?: NodeJS.ProcessEnv;
 }
@@ -65,6 +70,11 @@ export function buildHeadlessArgs(
 		String(params.maxTurns),
 		"--dangerously-skip-permissions",
 	];
+	if (params.workflow) {
+		// --add-dir takes several values; --agents right after it ends the list.
+		args.push("--add-dir", params.workflow.tasksDir);
+		args.push("--agents", params.workflow.agentsJson);
+	}
 	if (params.model) args.push("--model", params.model);
 	if (params.claudeSessionId) {
 		args.push(

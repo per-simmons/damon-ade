@@ -7,6 +7,7 @@ import {
 	removeAppEnvVars,
 	SHELL_CRASH_THRESHOLD_MS,
 	sanitizeEnv,
+	setWorkflowEnvResolver,
 } from "./env";
 
 describe("env", () => {
@@ -732,6 +733,45 @@ describe("env", () => {
 					themeType: "light",
 				});
 				expect(result.COLORFGBG).toBe("0;15");
+			});
+		});
+
+		describe("multi-model workflow", () => {
+			afterEach(() => setWorkflowEnvResolver(null));
+
+			it("adds the project's workflow and keeps it through the terminal-host filter", () => {
+				const seen: Array<{ rootPath?: string; workspacePath?: string }> = [];
+				setWorkflowEnvResolver((project) => {
+					seen.push(project);
+					return {
+						SUPERSET_PROJECT_KEY: "shop-0123456789",
+						SUPERSET_WORKFLOW_AGENTS:
+							"/home/pat/.ade/workflow/projects/shop/agents.json",
+						SUPERSET_WORKFLOW_TASKS_DIR:
+							"/home/pat/.ade/workflow/projects/shop/tasks",
+					};
+				});
+				const result = buildTerminalEnv({
+					...baseParams,
+					rootPath: "/repos/shop",
+					workspacePath: "/repos/shop-feature",
+				});
+				expect(seen).toEqual([
+					{ rootPath: "/repos/shop", workspacePath: "/repos/shop-feature" },
+				]);
+				const filtered = buildSafeEnv(result);
+				expect(filtered.SUPERSET_PROJECT_KEY).toBe("shop-0123456789");
+				expect(filtered.SUPERSET_WORKFLOW_AGENTS).toContain("agents.json");
+				expect(filtered.SUPERSET_WORKFLOW_TASKS_DIR).toContain("tasks");
+			});
+
+			it("still creates the terminal when the workflow setup fails", () => {
+				setWorkflowEnvResolver(() => {
+					throw new Error("disk full");
+				});
+				const result = buildTerminalEnv(baseParams);
+				expect(result.SUPERSET_PANE_ID).toBe(baseParams.paneId);
+				expect(result.SUPERSET_PROJECT_KEY).toBeUndefined();
 			});
 		});
 

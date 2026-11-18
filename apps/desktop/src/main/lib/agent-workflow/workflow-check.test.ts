@@ -1,137 +1,96 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { observedModelsByRole } from "../../../../scripts/ade-workflow";
+import { ensureProjectWorkflow, portablePath } from "./project-workflow";
 import {
-	upgradeAgentWorkflow,
-	writeAgentWorkflowFiles,
-} from "./agent-workflow";
-import {
-	checkAgentWorkflow,
+	checkAgentsFile,
 	checkClaudeCliSupport,
 	isPlausibleModel,
 	modelMatches,
-	parseFrontmatter,
 } from "./workflow-check";
+import { defaultWorkflowSettings } from "./workflow-settings";
 
-let worktree: string;
-
+let home: string;
+let root: string;
 beforeEach(() => {
-	worktree = mkdtempSync(join(tmpdir(), "ade-workflow-check-"));
-	mkdirSync(join(worktree, ".git", "info"), { recursive: true });
-	mkdirSync(join(worktree, ".claude"), { recursive: true });
-	writeFileSync(join(worktree, "CLAUDE.md"), "@memory/AGENT.md\n", "utf8");
-	writeFileSync(join(worktree, ".claude", "settings.json"), "{}\n", "utf8");
+	home = mkdtempSync(join(tmpdir(), "ade-check-home-"));
+	root = mkdtempSync(join(tmpdir(), "ade-check-project-"));
 });
-
 afterEach(() => {
-	rmSync(worktree, { recursive: true, force: true });
+	rmSync(home, { recursive: true, force: true });
+	rmSync(root, { recursive: true, force: true });
 });
 
-const role = (check: ReturnType<typeof checkAgentWorkflow>, name: string) =>
-	check.roles.find((r) => r.name === name);
+const expected = () => defaultWorkflowSettings().roles;
 
-describe("checkAgentWorkflow", () => {
-	it("reports every role on its configured model after an upgrade", () => {
-		upgradeAgentWorkflow(worktree);
-		const check = checkAgentWorkflow(worktree);
+describe("checkAgentsFile", () => {
+	it("passes for a freshly generated project", () => {
+		const project = ensureProjectWorkflow(home, root);
+		const check = checkAgentsFile(
+			project.agentsFile,
+			expected(),
+			portablePath(project.tasksDir),
+		);
 		expect(check.ok).toBe(true);
-		const models = Object.fromEntries(
-			check.roles.map((r) => [r.name, `${r.state}:${r.actual?.model}`]),
-		);
-		expect(models).toEqual({
-			planner: "default:fable",
-			architect: "default:fable",
-			implementer: "default:sonnet",
-			quick: "default:haiku",
-			reviewer: "default:sonnet",
+		expect(
+			Object.fromEntries(check.roles.map((r) => [r.name, r.model])),
+		).toEqual({
+			planner: "opus",
+			architect: "fable",
+			implementer: "sonnet",
+			quick: "haiku",
+			reviewer: "sonnet",
 		});
-		expect(check.mainModel.actual).toBe("sonnet");
-		expect(check.bridgePointer).toBe(true);
-		expect(check.adeExcluded).toBe(true);
-		expect(check.commands.every((c) => c.state === "default")).toBe(true);
 	});
 
-	it("keeps a valid customization and reports the model actually used", () => {
-		writeAgentWorkflowFiles(worktree);
-		writeFileSync(
-			join(worktree, ".claude", "agents", "implementer.md"),
-			"---\nname: implementer\ndescription: mine\nmodel: opus\neffort: high\nmaxTurns: 60\n---\nMy instructions.\n",
-			"utf8",
+	it("reports routing that differs from the settings", () => {
+		const project = ensureProjectWorkflow(home, root);
+		const json = JSON.parse(readFileSync(project.agentsFile, "utf8"));
+		json.quick.model = "opus";
+		json.reviewer.maxTurns = 0;
+		delete json.architect;
+		writeFileSync(project.agentsFile, JSON.stringify(json), "utf8");
+		const check = checkAgentsFile(
+			project.agentsFile,
+			expected(),
+			portablePath(project.tasksDir),
 		);
-		const check = checkAgentWorkflow(worktree);
-		const implementer = role(check, "implementer");
-		expect(implementer?.state).toBe("customized");
-		expect(implementer?.actual).toMatchObject({
-			model: "opus",
-			effort: "high",
-			maxTurns: "60",
-		});
-		expect(implementer?.expected.model).toBe("sonnet");
-		expect(check.ok).toBe(true);
-	});
-
-	it("flags values Claude Code would reject or misread", () => {
-		writeAgentWorkflowFiles(worktree);
-		writeFileSync(
-			join(worktree, ".claude", "agents", "quick.md"),
-			"---\nname: quick\ndescription: x\nmodel: gpt-9\neffort: extreme\nmaxTurns: 0\ntools: Read, Teleport\n---\nx\n",
-			"utf8",
-		);
-		writeFileSync(
-			join(worktree, ".claude", "agents", "reviewer.md"),
-			"No frontmatter at all.\n",
-			"utf8",
-		);
-		const check = checkAgentWorkflow(worktree);
 		expect(check.ok).toBe(false);
-		expect(role(check, "quick")?.state).toBe("invalid");
-		expect(role(check, "quick")?.problems).toEqual([
-			'unrecognized model "gpt-9"',
-			'invalid effort "extreme"',
-			'maxTurns must be a positive integer, not "0"',
-			'unknown tool "Teleport"',
-		]);
-		expect(role(check, "reviewer")?.state).toBe("invalid");
-	});
-
-	it("reports missing files and a missing workflow pointer", () => {
-		const check = checkAgentWorkflow(worktree);
-		expect(check.ok).toBe(false);
-		expect(check.roles.every((r) => r.state === "missing")).toBe(true);
-		expect(check.bridgePointer).toBe(false);
-		expect(check.adeExcluded).toBe(false);
-		expect(check.mainModel.actual).toBeUndefined();
-	});
-
-	it("flags a command that dropped $ARGUMENTS", () => {
-		writeAgentWorkflowFiles(worktree);
-		writeFileSync(
-			join(worktree, ".claude", "commands", "build.md"),
-			"---\ndescription: x\n---\nBuild it.\n",
-			"utf8",
+		const problems = Object.fromEntries(
+			check.roles.map((r) => [r.name, r.problems]),
 		);
-		const build = checkAgentWorkflow(worktree).commands.find(
-			(c) => c.name === "build",
-		);
-		expect(build?.state).toBe("invalid");
+		expect(problems.quick).toEqual(["model is opus, settings say haiku"]);
+		expect(problems.reviewer).toEqual(["maxTurns must be a positive integer"]);
+		expect(problems.architect).toEqual(["missing"]);
 	});
 
-	it("reports invalid settings JSON", () => {
-		writeFileSync(join(worktree, ".claude", "settings.json"), "{", "utf8");
-		expect(checkAgentWorkflow(worktree).mainModel.problems).toEqual([
-			".claude/settings.json is not valid JSON",
+	it("reports prompts that point at another project's task folder", () => {
+		const project = ensureProjectWorkflow(home, root);
+		const check = checkAgentsFile(project.agentsFile, expected(), "/elsewhere");
+		expect(check.roles[0].problems).toContain(
+			"prompt does not point at this project's task folder",
+		);
+	});
+
+	it("reports a missing or broken file", () => {
+		expect(
+			checkAgentsFile(join(home, "nope.json"), expected(), "/x").problems,
+		).toEqual(["agents.json is missing"]);
+		const broken = join(home, "broken.json");
+		writeFileSync(broken, "{", "utf8");
+		expect(checkAgentsFile(broken, expected(), "/x").problems).toEqual([
+			"agents.json is not valid JSON",
 		]);
 	});
 });
 
-describe("helpers", () => {
+describe("models", () => {
 	it("accepts aliases and model IDs, rejects others", () => {
 		for (const model of [
 			"fable",
 			"sonnet",
-			"haiku",
 			"inherit",
 			"opus[1m]",
 			"claude-sonnet-5-5",
@@ -143,94 +102,86 @@ describe("helpers", () => {
 		}
 	});
 
-	it("parses quoted and plain frontmatter values", () => {
-		expect(
-			parseFrontmatter('---\ndescription: "a: b"\nmodel: haiku\n---\nbody'),
-		).toEqual({ description: "a: b", model: "haiku" });
-		expect(parseFrontmatter("no frontmatter")).toBeUndefined();
+	it("matches an alias to any model of its tier and a full ID only to itself", () => {
+		expect(modelMatches("sonnet", "claude-sonnet-5-5")).toBe(true);
+		expect(modelMatches("fable", "claude-fable-5-2")).toBe(true);
+		expect(modelMatches("best", "claude-opus-5-5")).toBe(true);
+		expect(modelMatches("inherit", "claude-haiku-5-5")).toBe(true);
+		expect(modelMatches("sonnet", "claude-opus-5-5")).toBe(false);
+		expect(modelMatches("claude-sonnet-5-5", "claude-sonnet-5")).toBe(false);
 	});
+});
 
+describe("checkClaudeCliSupport", () => {
 	it("finds the markers in a CLI binary", () => {
-		const fake = join(worktree, "claude.bin");
+		const fake = join(home, "claude.bin");
 		writeFileSync(
 			fake,
-			"...has invalid effort '...ANTHROPIC_DEFAULT_FABLE_MODEL...",
+			"--agents <json> ... has invalid effort '...ANTHROPIC_DEFAULT_FABLE_MODEL...",
 			"utf8",
 		);
 		expect(checkClaudeCliSupport(fake)).toEqual({
 			binaryPath: fake,
+			supportsAgentsFlag: true,
 			supportsEffortField: true,
 			supportsMaxTurnsField: false,
 			knowsFableAlias: true,
 		});
-		expect(checkClaudeCliSupport(join(worktree, "nope"))).toBeUndefined();
-	});
-});
-
-describe("modelMatches", () => {
-	it("matches an alias to any model of its tier", () => {
-		expect(modelMatches("sonnet", "claude-sonnet-5-5")).toBe(true);
-		expect(modelMatches("sonnet", "claude-sonnet-5")).toBe(true);
-		expect(modelMatches("fable", "claude-fable-5-2")).toBe(true);
-		expect(modelMatches("opus[1m]", "claude-opus-5-5")).toBe(true);
-		expect(modelMatches("best", "claude-opus-5-5")).toBe(true);
-		expect(modelMatches("inherit", "claude-haiku-5-5")).toBe(true);
-	});
-
-	it("rejects another tier, and a different version for a full ID", () => {
-		expect(modelMatches("sonnet", "claude-opus-5-5")).toBe(false);
-		expect(modelMatches("haiku", "claude-sonnet-5-5")).toBe(false);
-		expect(modelMatches("claude-sonnet-5-5", "claude-sonnet-5")).toBe(false);
-		expect(modelMatches("claude-sonnet-5-5", "claude-sonnet-5-5")).toBe(true);
+		expect(checkClaudeCliSupport(join(home, "nope"))).toBeUndefined();
 	});
 });
 
 describe("observedModelsByRole", () => {
-	it("collects models per role for sessions run in the folder", () => {
-		const record = (model: string, agentType: string) => ({
-			id: `${model}-${agentType}-${Math.random()}`,
-			model,
-			agentType,
-			timestamp: "",
-			input: 1,
-			output: 1,
-			cacheRead: 0,
-			cacheWrite5m: 0,
-			cacheWrite1h: 0,
-		});
-		const session = (cwd: string, records: ReturnType<typeof record>[]) => ({
-			schemaVersion: 1,
-			sessionId: Math.random().toString(),
-			transcriptPath: "/t.jsonl",
-			cwd,
-			recordedAt: "",
-			activeMs: 0,
-			humanPrompts: 1,
-			subagentCalls: {},
-			apiErrors: 0,
-			taskSlugs: [],
-			tasks: {},
-			records,
-		});
+	const record = (model: string, agentType: string) => ({
+		id: `${model}-${agentType}-${Math.random()}`,
+		model,
+		agentType,
+		timestamp: "",
+		input: 1,
+		output: 1,
+		cacheRead: 0,
+		cacheWrite5m: 0,
+		cacheWrite1h: 0,
+	});
+	const session = (
+		extra: { projectKey?: string; cwd?: string },
+		records: ReturnType<typeof record>[],
+	) => ({
+		schemaVersion: 1,
+		sessionId: Math.random().toString(),
+		transcriptPath: "/t.jsonl",
+		recordedAt: "",
+		activeMs: 0,
+		humanPrompts: 1,
+		subagentCalls: {},
+		apiErrors: 0,
+		taskSlugs: [],
+		tasks: {},
+		records,
+		...extra,
+	});
+
+	it("uses the project key, or the root folder for older sessions", () => {
 		const observed = observedModelsByRole(
 			[
-				session(join(worktree, "/"), [
-					record("claude-sonnet-5-5", "main"),
-					record("claude-fable-5-2", "planner"),
-					record("claude-sonnet-5-5", "implementer"),
+				session({ projectKey: "app-1", cwd: "/somewhere/else" }, [
+					record("claude-opus-5-5", "planner"),
 				]),
-				session(join(tmpdir(), "elsewhere"), [
-					record("claude-opus-5-5", "main"),
+				session({ cwd: join(root, "/") }, [
+					record("claude-sonnet-5-5", "main"),
+				]),
+				session({ projectKey: "other-2", cwd: root }, [
+					record("claude-haiku-5-5", "quick"),
 				]),
 			],
-			worktree,
+			"app-1",
+			root,
 		);
 		expect(
 			Object.fromEntries([...observed].map(([k, v]) => [k, [...v]])),
 		).toEqual({
+			planner: ["claude-opus-5-5"],
 			main: ["claude-sonnet-5-5"],
-			planner: ["claude-fable-5-2"],
-			implementer: ["claude-sonnet-5-5"],
 		});
 	});
 });

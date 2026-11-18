@@ -109,6 +109,25 @@ describe("buildHeadlessArgs", () => {
 		]);
 	});
 
+	it("adds the project's workflow roles and task folder", () => {
+		const args = buildHeadlessArgs({
+			prompt: "go",
+			maxBudgetUsd: 1,
+			maxTurns: 1,
+			fresh: true,
+			workflow: { tasksDir: "/w/tasks", agentsJson: '{"planner":{}}' },
+		});
+		// --agents directly after --add-dir ends --add-dir's list of folders.
+		const at = args.indexOf("--add-dir");
+		expect(args.slice(at, at + 4)).toEqual([
+			"--add-dir",
+			"/w/tasks",
+			"--agents",
+			'{"planner":{}}',
+		]);
+		expect(args[args.length - 1]).toBe("go");
+	});
+
 	it("keeps a prompt that starts with a dash from being read as an option", () => {
 		const args = buildHeadlessArgs({
 			prompt: "--help me",

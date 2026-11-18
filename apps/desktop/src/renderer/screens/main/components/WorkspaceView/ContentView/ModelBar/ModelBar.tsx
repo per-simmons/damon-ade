@@ -14,6 +14,7 @@ import { BinaryInstallDialog } from "renderer/components/BinaryInstallDialog/Bin
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useRuntimeAvailability } from "renderer/stores/model-bar/useRuntimeAvailability";
 import { useAgentSession } from "renderer/stores/tabs/useAgentSession";
+import { TasksSheet } from "./components/TasksSheet";
 import { MODEL_BAR_MODELS, type ModelDescriptor } from "./models";
 
 /**
@@ -33,6 +34,7 @@ export function ModelBar() {
 	);
 
 	const [installBinary, setInstallBinary] = useState<AgentBinary | null>(null);
+	const [tasksOpen, setTasksOpen] = useState(false);
 
 	// Close the install dialog once a re-check confirms the tool is now present.
 	useEffect(() => {
@@ -124,6 +126,30 @@ export function ModelBar() {
 					);
 				})}
 			</div>
+
+			<div className="ml-auto">
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<button
+							type="button"
+							disabled={!ready}
+							onClick={() => setTasksOpen(true)}
+							className="flex h-7 items-center rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+						>
+							Tasks
+						</button>
+					</TooltipTrigger>
+					<TooltipContent side="bottom" showArrow={false}>
+						Plan, build and review tasks with the multi-model workflow
+					</TooltipContent>
+				</Tooltip>
+			</div>
+
+			<TasksSheet
+				workspaceId={workspaceId}
+				open={tasksOpen}
+				onOpenChange={setTasksOpen}
+			/>
 
 			<BinaryInstallDialog
 				binary={installBinary}

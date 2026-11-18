@@ -57,6 +57,7 @@ export function onSessionRecorded(
 export function scheduleSessionRecording(params: {
 	transcriptPath: string;
 	workspaceId?: string;
+	projectKey?: string;
 	metricsDir?: string;
 }): void {
 	const transcriptPath = params.transcriptPath.trim();
@@ -74,6 +75,7 @@ export function scheduleSessionRecording(params: {
 					transcriptPath,
 					metricsDir: params.metricsDir ?? getMetricsDir(),
 					workspaceId: params.workspaceId,
+					projectKey: params.projectKey,
 				});
 				if (!metrics) return;
 				for (const listener of listeners) {

@@ -3,7 +3,7 @@
  * Multi-model workflow tooling: configuration checks and M4 measurement.
  * Nothing here calls a model or spends tokens.
  *
- *   bun run workflow doctor [worktree...]        check agent files + installed CLI
+ *   bun run workflow doctor [project...]         check a project's workflow + installed CLI
  *   bun run workflow label <task>/<arm> [--cwd d] tag new sessions in a folder
  *   bun run workflow label --clear [--cwd d]
  *   bun run workflow import [--cwd d]            record every transcript for a folder
@@ -29,10 +29,16 @@ import {
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
-	checkAgentWorkflow,
+	ensureProjectWorkflow,
+	portablePath,
+} from "../src/main/lib/agent-workflow/project-workflow";
+import { listTasks } from "../src/main/lib/agent-workflow/tasks";
+import {
+	checkAgentsFile,
 	checkClaudeCliSupport,
 	modelMatches,
 } from "../src/main/lib/agent-workflow/workflow-check";
+import { loadWorkflowSettings } from "../src/main/lib/agent-workflow/workflow-settings";
 import {
 	costOf,
 	dedupeAcrossSessions,
@@ -134,6 +140,8 @@ function claudeVersion(): string | undefined {
 
 function doctor(args: Args): void {
 	const targets = args.positional.length ? args.positional : [process.cwd()];
+	const home = resolveHome(args);
+	const settings = loadWorkflowSettings(home);
 	let problems = 0;
 
 	const version = claudeVersion();
@@ -142,55 +150,54 @@ function doctor(args: Args): void {
 	const support = binary ? checkClaudeCliSupport(binary) : undefined;
 	if (support) {
 		const mark = (ok: boolean) => (ok ? "yes" : "not confirmed");
+		console.log(`  --agents flag: ${mark(support.supportsAgentsFlag)}`);
 		console.log(`  effort field: ${mark(support.supportsEffortField)}`);
 		console.log(`  maxTurns field: ${mark(support.supportsMaxTurnsField)}`);
 		console.log(`  fable alias: ${mark(support.knowsFableAlias)}`);
 	}
 
 	for (const target of targets) {
-		const check = checkAgentWorkflow(resolve(target));
-		console.log(`\n${check.worktreePath}`);
+		// Creates or refreshes the project's folder under the ADE home only;
+		// the project itself is not touched.
+		const project = ensureProjectWorkflow(home, resolve(target), settings);
+		const check = checkAgentsFile(
+			project.agentsFile,
+			Object.fromEntries(
+				Object.entries(settings.roles).map(([name, routing]) => [
+					name,
+					routing,
+				]),
+			),
+			portablePath(project.tasksDir),
+		);
+		console.log(`
+${project.root}`);
+		console.log(`  workflow folder: ${project.dir}`);
+		for (const problem of check.problems) console.log(`  !! ${problem}`);
 		for (const role of check.roles) {
-			const actual = role.actual
-				? `${role.actual.model ?? "(inherits)"} / ${role.actual.effort ?? "-"} / ${role.actual.maxTurns ?? "-"} turns`
-				: "";
 			console.log(
-				`  ${role.name.padEnd(12)} ${role.state.padEnd(11)} ${actual}${role.problems.length ? `  !! ${role.problems.join("; ")}` : ""}`,
+				`  ${role.name.padEnd(12)} ${role.model ?? "-"} / ${role.effort ?? "-"} / ${role.maxTurns ?? "-"} turns${role.problems.length ? `  !! ${role.problems.join("; ")}` : ""}`,
 			);
 		}
-		for (const command of check.commands) {
-			if (command.state !== "default") {
-				console.log(
-					`  /${command.name.padEnd(11)} ${command.state}${command.problems.length ? `  !! ${command.problems.join("; ")}` : ""}`,
-				);
-			}
-		}
-		console.log(
-			`  main session model: ${check.mainModel.actual ?? "(user default)"}${check.mainModel.problems.length ? `  !! ${check.mainModel.problems.join("; ")}` : ""}`,
-		);
-		console.log(
-			`  CLAUDE.md workflow pointer: ${check.bridgePointer ? "yes" : "no"}`,
-		);
-		console.log(
-			`  .ade/ git-excluded: ${check.adeExcluded === null ? "no .git folder" : check.adeExcluded ? "yes" : "no"}`,
-		);
+		console.log(`  tasks: ${listTasks(project).length}`);
 		if (!check.ok) problems++;
 
 		// Runtime confirmation: models actually used, from recorded transcripts.
 		const observed = observedModelsByRole(
-			loadSessions(join(resolveHome(args), "metrics")),
-			check.worktreePath,
+			loadSessions(join(home, "metrics")),
+			project.key,
+			project.root,
 		);
 		if (observed.size === 0) {
 			console.log(
-				"  models actually used: no recorded sessions in this folder yet",
+				"  models actually used: no recorded sessions in this project yet",
 			);
 			continue;
 		}
 		console.log("  models actually used (recorded sessions):");
 		for (const [role, models] of observed) {
-			const configured = check.roles.find((r) => r.name === role)?.actual
-				?.model;
+			const configured =
+				settings.roles[role as keyof typeof settings.roles]?.model;
 			const mismatched = configured
 				? [...models].filter((model) => !modelMatches(configured, model))
 				: [];
@@ -203,19 +210,27 @@ function doctor(args: Args): void {
 	process.exit(problems ? 1 : 0);
 }
 
-/** Models seen per role ("main" or subagent type) in sessions run in `cwd`. */
+/**
+ * Models seen per role ("main" or subagent type) in a project's sessions:
+ * those recorded with its key, or (sessions recorded before keys existed)
+ * run in its root folder.
+ */
 export function observedModelsByRole(
 	sessions: ReturnType<typeof loadSessions>,
-	cwd: string,
+	projectKey: string,
+	root: string,
 ): Map<string, Set<string>> {
 	const normalize = (path: string) =>
 		resolve(path)
 			.replace(/[\\/]+$/, "")
 			.toLowerCase();
-	const target = normalize(cwd);
+	const target = normalize(root);
 	const byRole = new Map<string, Set<string>>();
 	for (const session of sessions) {
-		if (!session.cwd || normalize(session.cwd) !== target) continue;
+		const inProject = session.projectKey
+			? session.projectKey === projectKey
+			: !!session.cwd && normalize(session.cwd) === target;
+		if (!inProject) continue;
 		for (const record of session.records) {
 			const models = byRole.get(record.agentType) ?? new Set<string>();
 			models.add(record.model);

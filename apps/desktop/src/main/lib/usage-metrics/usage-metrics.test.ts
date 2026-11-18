@@ -587,6 +587,7 @@ describe.if(bash !== null && !/System32/i.test(bash ?? ""))(
 						PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
 						CURL_OUT: out,
 						SUPERSET_TAB_ID: "tab-1",
+						SUPERSET_PROJECT_KEY: "shop-0123456789",
 						SUPERSET_DEBUG_HOOKS: "0",
 					},
 					encoding: "utf8",
@@ -599,6 +600,7 @@ describe.if(bash !== null && !/System32/i.test(bash ?? ""))(
 				expect(forwarded).toBeDefined();
 				expect(decodeHookString(forwarded as string)).toBe(windowsPath);
 				expect(args).toContain("eventType=Stop");
+				expect(args).toContain("projectKey=shop-0123456789");
 			} finally {
 				rmSync(dir, { recursive: true, force: true });
 			}

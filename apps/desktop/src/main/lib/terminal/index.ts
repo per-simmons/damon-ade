@@ -1,11 +1,19 @@
+import { workflowEnvFor } from "main/lib/agent-workflow/workflow-env";
+import { getSupersetHomeDir } from "main/lib/app-environment";
 import { getTerminalHostClient } from "main/lib/terminal-host/client";
 import type { ListSessionsResponse } from "main/lib/terminal-host/types";
 import { DaemonTerminalManager, getDaemonTerminalManager } from "./daemon";
-import { prewarmTerminalEnv } from "./env";
+import { prewarmTerminalEnv, setWorkflowEnvResolver } from "./env";
 import {
 	RECONCILE_STARTUP_TIMEOUT_MS,
 	reconcileWithTimeout,
 } from "./reconcile";
+
+// Every terminal's claude gets its project's workflow roles and task folder
+// (main process only; env.ts is shared with the terminal-host subprocess).
+setWorkflowEnvResolver((project) =>
+	workflowEnvFor(getSupersetHomeDir(), project),
+);
 
 export { DaemonTerminalManager, getDaemonTerminalManager };
 export type {

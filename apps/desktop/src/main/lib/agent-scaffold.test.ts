@@ -237,48 +237,24 @@ describe("Claude Code bridge", () => {
 	});
 });
 
-describe("multi-model task workflow", () => {
-	const agentId = "agent-workflow";
+describe("no workflow files in the agent's repository", () => {
+	const agentId = "agent-no-workflow";
 	beforeAll(async () => {
 		await makeAgent(agentId, "claude");
 	});
 
-	it("writes the role subagents and workflow commands", () => {
+	// The multi-model workflow is supplied by ADE at launch (--agents), so the
+	// scaffold must not write role files, commands or task folders.
+	it("writes no role, command or task files and no model setting", () => {
 		const wt = getAgentWorktreePath(agentId);
-		for (const name of [
-			"planner",
-			"architect",
-			"implementer",
-			"quick",
-			"reviewer",
-		]) {
-			expect(existsSync(join(wt, ".claude", "agents", `${name}.md`))).toBe(
-				true,
-			);
-		}
-		for (const name of ["plan", "build", "review", "escalate"]) {
-			expect(existsSync(join(wt, ".claude", "commands", `${name}.md`))).toBe(
-				true,
-			);
-		}
-	});
-
-	it("runs the main session on the coordinator model", () => {
-		const wt = getAgentWorktreePath(agentId);
+		expect(existsSync(join(wt, ".claude", "agents"))).toBe(false);
+		expect(existsSync(join(wt, ".claude", "commands"))).toBe(false);
+		expect(existsSync(join(wt, ".ade"))).toBe(false);
 		const settings = JSON.parse(
 			readFileSync(join(wt, ".claude", "settings.json"), "utf8"),
 		);
-		expect(settings.model).toBe("sonnet");
-		// The reflection Stop hook is still wired.
-		expect(settings.hooks.Stop).toHaveLength(1);
-	});
-
-	it("points CLAUDE.md at the workflow without dropping the memory imports", () => {
-		const wt = getAgentWorktreePath(agentId);
-		const claudeMd = readFileSync(join(wt, "CLAUDE.md"), "utf8");
-		expect(claudeMd).toContain("/plan, then /build, then /review");
-		expect(claudeMd).toContain(".ade/tasks/<slug>/");
-		expect(claudeMd).toContain("memory/AGENT.md");
+		expect(settings.model).toBeUndefined();
+		expect(readFileSync(join(wt, "CLAUDE.md"), "utf8")).not.toContain("/plan");
 	});
 });
 
@@ -288,10 +264,10 @@ describe("git-exclude of bridge files", () => {
 		await makeAgent(agentId, "claude");
 	});
 
-	it("adds the bridge files and task state to .git/info/exclude", () => {
+	it("adds the bridge files to .git/info/exclude", () => {
 		const wt = getAgentWorktreePath(agentId);
 		const exclude = readFileSync(join(wt, ".git", "info", "exclude"), "utf8");
-		for (const pat of ["CLAUDE.md", ".claude/", "AGENTS.md", ".ade/"]) {
+		for (const pat of ["CLAUDE.md", ".claude/", "AGENTS.md"]) {
 			expect(exclude).toContain(pat);
 		}
 	});

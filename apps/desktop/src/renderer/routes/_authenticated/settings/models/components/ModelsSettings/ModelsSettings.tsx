@@ -35,7 +35,6 @@ interface RoleDraft {
 }
 
 interface Draft {
-	mainModel: string;
 	roles: Record<RoleName, RoleDraft>;
 	sessionWarnUsd: string;
 	dailyWarnUsd: string;
@@ -44,7 +43,6 @@ interface Draft {
 }
 
 interface SettingsData {
-	mainModel: string;
 	roles: Record<RoleName, { model: string; effort: Effort; maxTurns: number }>;
 	budgets: {
 		sessionWarnUsd: number | null;
@@ -56,7 +54,6 @@ interface SettingsData {
 
 function toDraft(settings: SettingsData): Draft {
 	return {
-		mainModel: settings.mainModel,
 		roles: Object.fromEntries(
 			ROLES.map(({ name }) => [
 				name,
@@ -131,8 +128,8 @@ export function ModelsSettings({ visibleItems }: ModelsSettingsProps) {
 			setDraft(toDraft(result.settings));
 			utils.workflow.getSettings.invalidate();
 			toast.success(
-				result.sync.agents > 0
-					? `Saved. Updated ${result.sync.updated} of ${result.sync.agents} agents.`
+				result.projectsUpdated > 0
+					? `Saved. Applies to ${result.projectsUpdated} project(s) from the next session.`
 					: "Saved.",
 			);
 		},
@@ -151,7 +148,6 @@ export function ModelsSettings({ visibleItems }: ModelsSettingsProps) {
 
 	const handleSave = () => {
 		save.mutate({
-			mainModel: draft.mainModel,
 			roles: Object.fromEntries(
 				ROLES.map(({ name }) => [
 					name,
@@ -190,25 +186,10 @@ export function ModelsSettings({ visibleItems }: ModelsSettingsProps) {
 						<div>
 							<h3 className="text-sm font-medium">Workflow models</h3>
 							<p className="text-xs text-muted-foreground mt-1">
-								Applies to every agent when you save. Agent files you have
-								edited by hand are left as they are.
+								Applies to every project in ADE: each task stage runs on its
+								role's model, and Claude sessions can hand work to these roles.
+								Takes effect for sessions started after you save.
 							</p>
-						</div>
-
-						<div className="flex items-center justify-between">
-							<div className="space-y-0.5">
-								<Label htmlFor="main-model" className="text-sm font-medium">
-									Main session
-								</Label>
-								<p className="text-xs text-muted-foreground">
-									Coordinates the roles below
-								</p>
-							</div>
-							<ModelSelect
-								id="main-model"
-								value={draft.mainModel}
-								onChange={(mainModel) => setDraft({ ...draft, mainModel })}
-							/>
 						</div>
 
 						{ROLES.map((role) => (

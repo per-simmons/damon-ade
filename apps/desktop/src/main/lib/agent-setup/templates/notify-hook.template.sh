@@ -69,6 +69,7 @@ if [ "$DEBUG_HOOKS_ENABLED" = "1" ]; then
     --data-urlencode "workspaceId=$SUPERSET_WORKSPACE_ID" \
     --data-urlencode "sessionId=$SESSION_ID" \
     --data-urlencode "transcriptPath=$TRANSCRIPT_PATH" \
+    --data-urlencode "projectKey=$SUPERSET_PROJECT_KEY" \
     --data-urlencode "eventType=$EVENT_TYPE" \
     --data-urlencode "env=$SUPERSET_ENV" \
     --data-urlencode "version=$SUPERSET_HOOK_VERSION" \
@@ -82,6 +83,7 @@ else
     --data-urlencode "workspaceId=$SUPERSET_WORKSPACE_ID" \
     --data-urlencode "sessionId=$SESSION_ID" \
     --data-urlencode "transcriptPath=$TRANSCRIPT_PATH" \
+    --data-urlencode "projectKey=$SUPERSET_PROJECT_KEY" \
     --data-urlencode "eventType=$EVENT_TYPE" \
     --data-urlencode "env=$SUPERSET_ENV" \
     --data-urlencode "version=$SUPERSET_HOOK_VERSION" \

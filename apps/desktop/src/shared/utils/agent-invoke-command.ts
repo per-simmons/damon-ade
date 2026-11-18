@@ -63,7 +63,14 @@ export function readPromptFileInstruction(promptFile: string): string {
 	return `Read the file ${promptFile} and carry out the request in it exactly as written.`;
 }
 
-function promptArgument(promptFile: string, shell: InvokeShellKind): string {
+/**
+ * The shell argument that passes the prompt in `promptFile` to a program
+ * (see the module comment for why it is read from a file).
+ */
+export function promptArgument(
+	promptFile: string,
+	shell: InvokeShellKind,
+): string {
 	if (/[\r\n\0]/.test(promptFile)) {
 		throw new Error("Prompt file path contains a line break or NUL");
 	}

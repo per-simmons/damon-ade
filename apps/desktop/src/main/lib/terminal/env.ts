@@ -398,6 +398,24 @@ function linkSharedCodexAuth(codexHome: string): void {
 	}
 }
 
+export type WorkflowEnvResolver = (project: {
+	rootPath?: string;
+	workspacePath?: string;
+}) => Record<string, string> | null;
+
+/**
+ * Set by the main process (terminal/index.ts). env.ts is also loaded by the
+ * terminal-host subprocess for buildSafeEnv, so the workflow modules stay out
+ * of its static import graph.
+ */
+let workflowEnvResolver: WorkflowEnvResolver | null = null;
+
+export function setWorkflowEnvResolver(
+	resolver: WorkflowEnvResolver | null,
+): void {
+	workflowEnvResolver = resolver;
+}
+
 export function buildTerminalEnv(params: {
 	shell: string;
 	paneId: string;
@@ -456,6 +474,22 @@ export function buildTerminalEnv(params: {
 	};
 
 	delete terminalEnv.GOOGLE_API_KEY;
+
+	// The multi-model workflow for this terminal's project (any folder, ADE
+	// created or not): its key, its roles file and its task folder. ADE's
+	// claude wrapper turns these into --agents / --add-dir. SUPERSET_-prefixed,
+	// so they survive the terminal-host's buildSafeEnv re-filter.
+	if (workflowEnvResolver) {
+		try {
+			Object.assign(
+				terminalEnv,
+				workflowEnvResolver({ rootPath, workspacePath }) ?? {},
+			);
+		} catch (error) {
+			// Never block terminal creation on the workflow.
+			console.warn("[terminal-env] Workflow setup failed:", error);
+		}
+	}
 
 	// Codex isolates its config + generated AGENTS.md under a per-agent CODEX_HOME.
 	// We only point Codex at the right home here; launch-time regeneration of

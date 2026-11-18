@@ -50,11 +50,56 @@ function createClaudeSettings(): string {
 	return settingsPath;
 }
 
+/**
+ * Claude Code subcommands. The workflow flags are only added to sessions;
+ * `claude update`, `claude mcp list` and the like would reject them.
+ */
+export const CLAUDE_SUBCOMMANDS = [
+	"agents",
+	"auth",
+	"completion",
+	"config",
+	"doctor",
+	"help",
+	"install",
+	"mcp",
+	"migrate-installer",
+	"plugin",
+	"plugins",
+	"remote-control",
+	"setup-token",
+	"update",
+	"upgrade",
+];
+
+/**
+ * The wrapper's exec line. In a session it adds the terminal's project
+ * workflow (see agent-workflow/workflow-env.ts): `--add-dir <task folder>` so
+ * the agents can write plans there, then `--agents <roles JSON>`.
+ * `--add-dir` takes several values, so `--agents` must follow it to end the
+ * list before the user's own arguments.
+ */
+export function buildClaudeExecLine(settingsPath: string): string {
+	return `ADE_WORKFLOW_ARGS=()
+case "\${1:-}" in
+  ${CLAUDE_SUBCOMMANDS.join("|")}) ;;
+  *)
+    if [ -n "\${SUPERSET_WORKFLOW_AGENTS:-}" ] && [ -f "$SUPERSET_WORKFLOW_AGENTS" ]; then
+      if [ -n "\${SUPERSET_WORKFLOW_TASKS_DIR:-}" ]; then
+        ADE_WORKFLOW_ARGS+=(--add-dir "$SUPERSET_WORKFLOW_TASKS_DIR")
+      fi
+      ADE_WORKFLOW_ARGS+=(--agents "$(cat "$SUPERSET_WORKFLOW_AGENTS")")
+    fi
+    ;;
+esac
+exec "$REAL_BIN" --settings "${settingsPath}" "\${ADE_WORKFLOW_ARGS[@]}" "$@"`;
+}
+
 export function createClaudeWrapper(): void {
 	const settingsPath = createClaudeSettings();
 	const script = buildWrapperScript(
 		"claude",
-		`exec "$REAL_BIN" --settings "${settingsPath}" "$@"`,
+		buildClaudeExecLine(settingsPath),
 	);
 	createWrapper("claude", script);
 }

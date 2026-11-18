@@ -38,6 +38,8 @@ export interface SessionMetrics extends ParsedTranscript {
 	schemaVersion: number;
 	transcriptPath: string;
 	workspaceId?: string;
+	/** The ADE workflow project the session ran in (agent-workflow). */
+	projectKey?: string;
 	label?: string;
 	recordedAt: string;
 	tasks: Record<string, TaskProgressSnapshot>;
@@ -126,6 +128,7 @@ export function recordSessionUsage(params: {
 	transcriptPath: string;
 	metricsDir: string;
 	workspaceId?: string;
+	projectKey?: string;
 	now?: Date;
 }): SessionMetrics | undefined {
 	const parsed = parseTranscript(params.transcriptPath);
@@ -149,6 +152,7 @@ export function recordSessionUsage(params: {
 		schemaVersion: METRICS_SCHEMA_VERSION,
 		transcriptPath: params.transcriptPath,
 		workspaceId: params.workspaceId ?? previous?.workspaceId,
+		projectKey: params.projectKey ?? previous?.projectKey,
 		// The first label seen sticks, so changing .ade/run-label later only
 		// affects new sessions.
 		label: previous?.label ?? readRunLabel(parsed.cwd),
