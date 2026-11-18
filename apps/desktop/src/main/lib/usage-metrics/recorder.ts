@@ -1,5 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
+import { workflowProjectsDir } from "../agent-workflow/project-workflow";
 import { getSupersetHomeDir } from "../app-environment";
 import { recordSessionUsage, type SessionMetrics } from "./store";
 
@@ -76,6 +77,7 @@ export function scheduleSessionRecording(params: {
 					metricsDir: params.metricsDir ?? getMetricsDir(),
 					workspaceId: params.workspaceId,
 					projectKey: params.projectKey,
+					workflowProjectsDir: workflowProjectsDir(getSupersetHomeDir()),
 				});
 				if (!metrics) return;
 				for (const listener of listeners) {

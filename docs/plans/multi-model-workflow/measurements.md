@@ -34,7 +34,7 @@ Sessions started outside ADE terminals can be added afterwards with `bun run wor
 
    Name them T1, T2, ….
 3. For each task, write the exact prompt and the acceptance-check commands **before** any run. The checks decide success for every arm, so they must not depend on tests a run writes: use existing tests, typecheck, lint, or a script you write now.
-4. In each agent you will use, run `bun run workflow doctor <agent worktree>`. Every role should show its model (fable, fable, sonnet, haiku, sonnet) and no `!!` problems.
+4. For each project you will use, run `bun run workflow doctor <project folder>`. Every role should show its model (planner opus, architect fable, implementer sonnet, quick haiku, reviewer sonnet) and no `!!` problems.
 
 ## 3. Running a task
 
@@ -43,21 +43,21 @@ Run every task once per arm, each from the **same starting commit** on its own b
 **Before** starting the session, label the folder so its sessions are grouped:
 
 ```bash
-bun run workflow label T1/B --cwd <agent worktree>
+bun run workflow label T1/B --cwd <project folder>
 ```
 
 The arms:
 
 | Arm | What it is | How to run it |
 |---|---|---|
-| **A** | Current baseline | `claude --model opus --dangerously-skip-permissions`, give the prompt directly, no workflow commands. Temporarily rename `.claude/agents` to `.claude/agents.off` so Claude does not call the workflow subagents on its own. |
-| **A2** | Efficient single model | Same as A, but start with `CLAUDE_CODE_EFFORT_LEVEL=medium claude --model opus --dangerously-skip-permissions`. |
-| **B** | Multi-model workflow | `/plan <prompt>`, approve the plan, `/build`, `/review`. |
+| **A** | Current baseline | In the project's terminal: `SUPERSET_WORKFLOW_AGENTS= claude --model opus --dangerously-skip-permissions`, then give the prompt directly. The empty variable stops ADE from adding the workflow roles, so Claude cannot hand work to them. |
+| **A2** | Efficient single model | Same as A, but start with `SUPERSET_WORKFLOW_AGENTS= CLAUDE_CODE_EFFORT_LEVEL=medium claude --model opus --dangerously-skip-permissions`. |
+| **B** | Multi-model workflow | Model bar > **Tasks**: paste the prompt, leave the route on Automatic, Start, then run the stage buttons it offers until the task is done. |
 
 When the session is done, judge it with the acceptance checks. This runs the commands and records pass or fail:
 
 ```bash
-bun run workflow check T1/B --cwd <agent worktree> -- "bun run typecheck" "bun test src/feature"
+bun run workflow check T1/B --cwd <project folder> -- "bun run typecheck" "bun test src/feature"
 ```
 
 Or record a manual verdict:
@@ -66,7 +66,7 @@ Or record a manual verdict:
 bun run workflow result T1/B fail --note "login button missing"
 ```
 
-Clear the label when you finish a series: `bun run workflow label --clear --cwd <agent worktree>`.
+Clear the label when you finish a series: `bun run workflow label --clear --cwd <project folder>`.
 
 ## 4. Updating this report
 

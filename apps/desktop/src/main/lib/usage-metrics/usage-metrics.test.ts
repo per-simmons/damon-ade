@@ -352,6 +352,52 @@ describe("recordSessionUsage", () => {
 		expect(metrics?.label).toBeUndefined();
 	});
 
+	it("reads the label and task progress from the project's ADE folder", () => {
+		const projects = join(root, "ade-home", "workflow", "projects");
+		const taskDir = join(projects, "shop-0123456789", "tasks", "add-cart");
+		mkdirSync(join(taskDir, "escalations"), { recursive: true });
+		writeFileSync(
+			join(projects, "shop-0123456789", "run-label"),
+			"T3/B\n",
+			"utf8",
+		);
+		writeFileSync(
+			join(taskDir, "progress.md"),
+			"Status: in progress\n- [ ] 1. a (attempts: 2, escalations: 1)\n",
+			"utf8",
+		);
+		const repo = join(root, "shop-repo");
+		mkdirSync(repo, { recursive: true });
+		const path = join(projectDir, "sess-ade.jsonl");
+		writeJsonl(path, [
+			prompt("Build the cart", 0, repo),
+			assistant("ade-1", "claude-sonnet-5-5", 2, usage(1, 1), [
+				{
+					type: "tool_use",
+					name: "Read",
+					input: { file_path: `${taskDir.replace(/\\/g, "/")}/plan.md` },
+				},
+			]),
+		]);
+		const metrics = recordSessionUsage({
+			transcriptPath: path,
+			metricsDir: join(root, "metrics-ade"),
+			projectKey: "shop-0123456789",
+			workflowProjectsDir: projects,
+		});
+		expect(metrics?.projectKey).toBe("shop-0123456789");
+		expect(metrics?.label).toBe("T3/B");
+		expect(metrics?.taskSlugs).toEqual(["add-cart"]);
+		expect(metrics?.tasks["add-cart"]).toEqual({
+			status: "in progress",
+			attempts: 2,
+			escalations: 1,
+			escalationReports: 0,
+		});
+		// The project folder itself holds no workflow files.
+		expect(existsSync(join(repo, ".ade"))).toBe(false);
+	});
+
 	it("records nothing for a transcript with no responses yet", () => {
 		const path = join(projectDir, "sess-empty.jsonl");
 		writeJsonl(path, [prompt("hi", 0, cwd)]);

@@ -8,6 +8,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { projectKeyFor } from "../agent-workflow/project-workflow";
 import { type ParsedTranscript, parseTranscript } from "./transcript";
 
 /**
@@ -65,22 +66,33 @@ function resultsPath(metricsDir: string): string {
 	return join(metricsDir, "results.jsonl");
 }
 
-/** Read <cwd>/.ade/run-label; undefined when missing or not a valid label. */
-export function readRunLabel(cwd: string | undefined): string | undefined {
-	if (!cwd) return undefined;
+/** A run label file's label; undefined when missing or not a valid label. */
+export function readRunLabelFile(path: string): string | undefined {
 	try {
-		const label = readFileSync(join(cwd, ".ade", "run-label"), "utf8").trim();
+		const label = readFileSync(path, "utf8").trim();
 		return isValidRunLabel(label) ? label : undefined;
 	} catch {
 		return undefined;
 	}
 }
 
+/** Legacy location, inside the project: <cwd>/.ade/run-label. */
+export function readRunLabel(cwd: string | undefined): string | undefined {
+	return cwd ? readRunLabelFile(join(cwd, ".ade", "run-label")) : undefined;
+}
+
+/** A task's counters, from <cwd>/.ade/tasks/<slug> (legacy location). */
 export function readTaskProgress(
 	cwd: string,
 	slug: string,
 ): TaskProgressSnapshot | undefined {
-	const taskDir = join(cwd, ".ade", "tasks", slug);
+	return readTaskProgressDir(join(cwd, ".ade", "tasks", slug));
+}
+
+/** A task's counters from its folder's progress.md and escalations/. */
+export function readTaskProgressDir(
+	taskDir: string,
+): TaskProgressSnapshot | undefined {
 	let progress: string;
 	try {
 		progress = readFileSync(join(taskDir, "progress.md"), "utf8");
@@ -129,6 +141,11 @@ export function recordSessionUsage(params: {
 	metricsDir: string;
 	workspaceId?: string;
 	projectKey?: string;
+	/**
+	 * <ADE home>/workflow/projects: where the session's project keeps its run
+	 * label and task folders (agent-workflow/project-workflow.ts).
+	 */
+	workflowProjectsDir?: string;
 	now?: Date;
 }): SessionMetrics | undefined {
 	const parsed = parseTranscript(params.transcriptPath);
@@ -139,12 +156,23 @@ export function recordSessionUsage(params: {
 	const path = join(dir, `${parsed.sessionId}.json`);
 	const previous = existsSync(path) ? readSession(path) : undefined;
 
+	// Sessions from ADE terminals carry their project's key; others (imported
+	// transcripts) are attributed to the folder they ran in.
+	const projectKey =
+		params.projectKey ??
+		previous?.projectKey ??
+		(parsed.cwd ? projectKeyFor(parsed.cwd) : undefined);
+	const projectDir =
+		params.workflowProjectsDir && projectKey
+			? join(params.workflowProjectsDir, projectKey)
+			: undefined;
+
 	const tasks: Record<string, TaskProgressSnapshot> = {};
-	if (parsed.cwd) {
-		for (const slug of parsed.taskSlugs) {
-			const snapshot = readTaskProgress(parsed.cwd, slug);
-			if (snapshot) tasks[slug] = snapshot;
-		}
+	for (const slug of parsed.taskSlugs) {
+		const snapshot =
+			(projectDir && readTaskProgressDir(join(projectDir, "tasks", slug))) ||
+			(parsed.cwd ? readTaskProgress(parsed.cwd, slug) : undefined);
+		if (snapshot) tasks[slug] = snapshot;
 	}
 
 	const metrics: SessionMetrics = {
@@ -152,10 +180,16 @@ export function recordSessionUsage(params: {
 		schemaVersion: METRICS_SCHEMA_VERSION,
 		transcriptPath: params.transcriptPath,
 		workspaceId: params.workspaceId ?? previous?.workspaceId,
-		projectKey: params.projectKey ?? previous?.projectKey,
-		// The first label seen sticks, so changing .ade/run-label later only
-		// affects new sessions.
-		label: previous?.label ?? readRunLabel(parsed.cwd),
+		projectKey,
+		// The first label seen sticks, so changing the label later only affects
+		// new sessions. The project's ADE folder first, then the legacy in-repo
+		// file.
+		label:
+			previous?.label ??
+			(projectDir
+				? readRunLabelFile(join(projectDir, "run-label"))
+				: undefined) ??
+			readRunLabel(parsed.cwd),
 		recordedAt: (params.now ?? new Date()).toISOString(),
 		tasks,
 	};

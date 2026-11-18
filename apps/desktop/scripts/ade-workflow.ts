@@ -20,7 +20,6 @@
 import { spawnSync } from "node:child_process";
 import {
 	existsSync,
-	mkdirSync,
 	readdirSync,
 	readFileSync,
 	rmSync,
@@ -31,6 +30,7 @@ import { dirname, join, resolve } from "node:path";
 import {
 	ensureProjectWorkflow,
 	portablePath,
+	workflowProjectsDir,
 } from "../src/main/lib/agent-workflow/project-workflow";
 import { listTasks } from "../src/main/lib/agent-workflow/tasks";
 import {
@@ -240,9 +240,14 @@ export function observedModelsByRole(
 	return byRole;
 }
 
+/**
+ * Run labels live in the project's ADE workflow folder, so labelling a run
+ * never changes the project's files.
+ */
 function label(args: Args): void {
 	const cwd = resolve(flag(args, "cwd") ?? process.cwd());
-	const path = join(cwd, ".ade", "run-label");
+	const project = ensureProjectWorkflow(resolveHome(args), cwd);
+	const path = join(project.dir, "run-label");
 	if (args.flags.has("clear")) {
 		rmSync(path, { force: true });
 		console.log(`Cleared ${path}`);
@@ -252,7 +257,6 @@ function label(args: Args): void {
 	if (!value || !isValidRunLabel(value)) {
 		fail('label must look like "<task>/<arm>", e.g. T1/B');
 	}
-	mkdirSync(join(cwd, ".ade"), { recursive: true });
 	writeFileSync(path, `${value}\n`, "utf8");
 	console.log(
 		`New Claude Code sessions in ${cwd} will be recorded as ${value}.`,
@@ -263,7 +267,11 @@ function recordPaths(home: string, paths: string[]): void {
 	const metricsDir = join(home, "metrics");
 	let recorded = 0;
 	for (const path of paths) {
-		const metrics = recordSessionUsage({ transcriptPath: path, metricsDir });
+		const metrics = recordSessionUsage({
+			transcriptPath: path,
+			metricsDir,
+			workflowProjectsDir: workflowProjectsDir(home),
+		});
 		if (!metrics) continue;
 		recorded++;
 		const cost = costOf(metrics.records);

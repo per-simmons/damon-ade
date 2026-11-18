@@ -1,8 +1,59 @@
-# Plan: multi-model coding workflow for ADE agents
+# Plan: multi-model coding workflow in ADE
 
-Status: **M1–M3 and M5 done; M4 tooling done (2026-11-17). M4 runs need the user (billable).**
+Status: **v2 done (2026-11-17): the workflow works in any project opened in ADE (section 0). M4 runs need the user (billable).**
 Created: 2026-11-17
-Scope: `apps/desktop` agent scaffolding and agent invocation. No new orchestrator, no DB migration.
+Scope: `apps/desktop`. No new orchestrator, no DB migration.
+
+## 0. v2: any project, managed by ADE (2026-11-17)
+
+Sections 1–11 below record how the work got here (M1–M5). Where they describe files written into agent repositories, slash commands, `.ade/tasks` or a main-session model, **v2 replaces them**.
+
+### What was missing in v1
+
+- **Only scaffolded agents got the workflow,** and only by writing files into their repositories: `.claude/agents`, `.claude/commands`, a settings model, a CLAUDE.md note and `.ade/tasks`. A project opened in ADE got nothing.
+- **No task interface:** no place to describe a task, no automatic choice between planning and going straight to work, and stages ran only as typed slash commands.
+- **Usage was not grouped by project or task.**
+- **Defaults put planning on Fable;** the requirement is Opus for planning and Fable only for exceptional problems.
+- **Headless runs** bypassed ADE's wrapper and got no roles.
+
+### Design
+
+- **Per-project state outside the project.** `<ADE home>/workflow/projects/<key>/` holds:
+  - `agents.json`: the roles as Claude Code `--agents` JSON, generated from Settings
+  - `tasks/<slug>/`: task.json, task.md, plan.md, progress.md, escalations/
+  - `run-label`
+
+  The key is `<folder name>-<hash of root>`, so a reopened project finds its state and projects never mix. The root is the project's main repo, or an ADE agent's worktree.
+- **Every terminal gets its project's workflow.** `buildTerminalEnv` sets `SUPERSET_PROJECT_KEY`, `SUPERSET_WORKFLOW_AGENTS` and `SUPERSET_WORKFLOW_TASKS_DIR`; they survive the terminal host's `SUPERSET_` allowlist. ADE's `claude` wrapper adds `--add-dir <tasks> --agents <roles>` to sessions (not to subcommands such as `claude update`). Confirmed in the installed 2.1.193: `--agents` accepts description, prompt, tools, model, effort and maxTurns.
+- **Routing without an AI call.** `shared/utils/task-routing.ts` sends small, specified changes to `quick` (Haiku), focused changes to `implement` (Sonnet, no plan), and complex ones to `plan` (Opus plans, Sonnet builds and reviews). `exceptional` (Fable plans) is chosen by the user. Route and model can be overridden.
+- **Stages run on their role's model directly,** with no coordinator, each in a new terminal tab with a pinned `--session-id`. Inside Claude sessions, handoffs are automatic through the injected roles: blocked steps go to `architect` (Fable, at most 2 per step) and finished work to `reviewer` (at most 2 review rounds). Plans are reused; nothing is re-planned once plan.md exists.
+- **Tasks panel** (model bar > Tasks) in every workspace: describe a task with a live route preview, override route or model, and see each task's status, next stage, cost and models used, plus the project's total.
+- **Usage per project and per task.** The hook forwards the project key, and tasks match sessions by their pinned ids.
+- **Retired:** in-repo role and command files, the launch-time sync that wrote them, and the scaffold's workflow additions. ADE agents get only their memory files again. Old settings keys (mainModel, appliedMainModel) are ignored.
+
+### Integrations
+
+| Path | Shares the orchestration? | How |
+|---|---|---|
+| Claude Code terminals (model bar, presets, plain `claude`) | Yes | ADE's wrapper injects the roles and task folder. |
+| Task stages (Tasks panel) | Yes | Launch command with `--model` and a pinned session id, through the same wrapper. |
+| `/agent/invoke`, terminal mode | Yes | Runs `claude` through the wrapper. |
+| `/agent/invoke`, headless mode | Yes | `--add-dir` and `--agents` passed directly, plus the spending and turn caps. |
+| Codex terminals | Partly (adapter) | Stages run single-agent on Codex's own model. Codex has no subagents, so handoffs stop and ADE offers the next stage. |
+| Built-in chat (mastracode) | No | Needs a provider-specific adapter: mastracode routes by its own modes and subagents through `harness.switchModel`. Not wired. |
+| Agent scaffolding | Not needed | Agents are covered by the terminal path; the scaffold writes no workflow files. |
+| Agent registry `model` | Yes | Still applied per invoke. |
+
+### Verification (no billable calls)
+
+- **End to end in bash** through ADE's real wrapper script and a fake `claude` (`orchestration.e2e.test.ts`):
+  - a pre-existing project with its own CLAUDE.md and `.claude/agents` gets the roles in a plain session
+  - a planned task's stages run on opus, sonnet, sonnet and fable with pinned sessions
+  - the project's files stay byte-identical
+  - `claude update` and `claude mcp list` get no extra flags
+  - a newly scaffolded ADE agent gets its own isolated workflow and no workflow files in its repository
+- **Unit tests:** router, project keys and isolation, tasks and next stage, stage models and overrides, Codex prompts, terminal env through the terminal-host filter, hook and headless wiring.
+- **`bun run workflow doctor <any folder>`** on this repo: all roles correct, CLI support confirmed, repository unchanged.
 
 ## 1. Goal
 

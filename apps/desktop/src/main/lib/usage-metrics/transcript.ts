@@ -92,7 +92,9 @@ export function transcriptPathFor(cwd: string, sessionId: string): string {
 	);
 }
 
-const TASK_SLUG = /\.ade[\\/]+tasks[\\/]+([a-z0-9][a-z0-9-]*)/g;
+/** A task folder: in ADE's workflow folder, or the legacy in-repo .ade/tasks. */
+const TASK_SLUG =
+	/(?:\.ade|[\\/]workflow[\\/]+projects[\\/]+[\w.-]+)[\\/]+tasks[\\/]+([a-z0-9][a-z0-9-]*)/g;
 
 /** Parse JSONL, skipping blank and malformed lines (the last one may be mid-write). */
 export function readJsonl(path: string): TranscriptLine[] {
