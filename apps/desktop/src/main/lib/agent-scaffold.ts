@@ -13,6 +13,12 @@ import {
 	getAgentMemoryDir,
 	getAgentWorktreePath,
 } from "./agent-home";
+import {
+	WORKFLOW_BRIDGE_POINTER,
+	WORKFLOW_EXCLUDES,
+	WORKFLOW_MAIN_MODEL,
+	writeAgentWorkflowFiles,
+} from "./agent-workflow";
 
 /**
  * Memory scaffold written on agent creation (ADE Phase E, docs/memory.md).
@@ -267,7 +273,7 @@ A single command or check that proves the skill worked.
 const CLAUDE_BRIDGE = `@{{agent_home}}/memory/AGENT.md
 @{{agent_home}}/memory/USER.md
 <!-- MEMORY.md is loaded via Claude Code native auto-memory (autoMemoryDirectory). -->
-`;
+${WORKFLOW_BRIDGE_POINTER}`;
 
 // Claude Code Stop-hook script: the native analog of Hermes' post-turn
 // background review (agent/background_review.py). When the agent tries to stop,
@@ -306,7 +312,12 @@ process.exit(0);
 }
 
 /** Bridge files written into the worktree (git-excluded, never committed). */
-const BRIDGE_EXCLUDES = ["CLAUDE.md", ".claude/", "AGENTS.md"];
+const BRIDGE_EXCLUDES = [
+	"CLAUDE.md",
+	".claude/",
+	"AGENTS.md",
+	...WORKFLOW_EXCLUDES,
+];
 
 /**
  * Regenerate <agent-home>/.codex/AGENTS.md from the canonical memory files.
@@ -410,6 +421,9 @@ export function scaffoldAgentMemory({
 		join(claudeDir, "settings.json"),
 		`${JSON.stringify(
 			{
+				// Coordinator model for the main session; the workflow subagents pin
+				// their own models. /model or `claude --model` still override it.
+				model: WORKFLOW_MAIN_MODEL,
 				autoMemoryDirectory: join(memoryDir),
 				autoMemoryEnabled: true,
 				hooks: {
@@ -431,6 +445,10 @@ export function scaffoldAgentMemory({
 			2,
 		)}\n`,
 	);
+
+	// Multi-model task workflow: role subagents + /plan, /build, /review,
+	// /escalate (docs/plans/multi-model-workflow/plan.md).
+	writeAgentWorkflowFiles(worktreePath);
 
 	// Keep the generated bridge files out of the repo (local, per-worktree).
 	// Guard against a duplicate block when re-run by the backfill.
