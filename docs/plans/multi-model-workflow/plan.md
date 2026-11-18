@@ -1,6 +1,6 @@
 # Plan: multi-model coding workflow for ADE agents
 
-Status: **M1–M3 done (2026-11-17); M4 measurement sheet ready, runs pending (user)**
+Status: **M1–M3 and M5 done; M4 tooling done (2026-11-17). M4 runs need the user (billable).**
 Created: 2026-11-17
 Scope: `apps/desktop` agent scaffolding and agent invocation. No new orchestrator, no DB migration.
 
@@ -198,7 +198,7 @@ Store results in `docs/plans/multi-model-workflow/measurements.md`. Optional sec
 
 ### M4 — Measure and tune
 
-**Sheet:** [measurements.md](measurements.md) has the setup checklist, run protocol, recording tables and decision rule. The runs themselves need the user's real tasks and spend their tokens or plan usage.
+**Sheet:** [measurements.md](measurements.md) is the protocol and the generated report. The runs themselves need the user's real tasks and spend their tokens or plan usage.
 
 - Re-run the M0 tasks with `/plan` → `/build` → `/review`. Record the same metrics.
 - Compare cost/usage per completed task.
@@ -206,16 +206,50 @@ Store results in `docs/plans/multi-model-workflow/measurements.md`. Optional sec
 
 Report measured numbers separately from estimates.
 
-### M5 — Optional, only if M4 justifies it
+**Tooling (done 2026-11-17).** Usage is recorded automatically; nothing is typed in by hand:
+- **Recording.** On every Stop, the notify hook forwards `transcript_path`, and ADE rebuilds that session's summary from the transcript and its subagents' transcripts (`main/lib/usage-metrics`). Each summary has the model per response and per role, all five token categories, active/wall time, escalations, review rounds, retries, API errors and task progress.
+  - Responses are keyed by API message id, so resumed or forked sessions are not double-counted.
+  - Interactive sessions have no JSON output mode; the transcript holds the same data.
+- **Commands** (`bun run workflow ...`): `label` tags runs, `check`/`result` record pass or fail, `import`/`record` add other sessions, and `report --update measurements.md` writes the results.
+- **Report.** Cost per success for each arm counts all spending (failed runs included) and applies the decision rule.
+- **Verified against real data.** This repo's own transcript was imported (179 Opus 5.5 responses; subagents correctly attributed to Haiku 5.5).
 
-- Opt-in OpenTelemetry capture: set `CLAUDE_CODE_ENABLE_TELEMETRY` and an OTLP endpoint on ADE's local notifications server in `buildTerminalEnv` to store per-model cost per agent/task.
-- Headless budgeted runs (`claude -p --max-budget-usd`) for unattended invokes.
-- A settings screen mapping role → model.
+### M5 — Model routing settings and cost controls (done 2026-11-17)
+
+- **Settings > Models & Cost.** Model, effort and turn limit per role and for the main session, stored in `<ADE home>/workflow-settings.json`.
+  - Saving and every launch re-apply it to all agents, but only to unedited ADE files.
+  - The main model changes only where it still holds ADE's last value (`appliedMainModel`).
+- **Cost warnings.** A desktop notification when a session or the day passes its estimated threshold (defaults $10 and $50). Interactive sessions cannot be capped from outside, so these are warnings.
+- **Headless runs with a hard cap.** `/agent/invoke` with `mode: "headless"` runs `claude -p --max-budget-usd --max-turns`.
+  - Limits come from settings (defaults $5 and 50 turns); a request may lower them, not raise them.
+  - One run per agent at a time.
+  - Launched with an argument array and no shell.
+  - Logged to `metrics/headless-runs.jsonl` with Claude Code's reported cost.
+- **Not done:** OpenTelemetry capture. Transcripts give the same per-model data with no collector to run.
+
+### Security hardening of M3 (done 2026-11-17)
+
+- Invoke prompts no longer go on the command line. They are written to a private file (0600, pruned after a day), and the command reads it:
+  - POSIX: `"$(cat -- '<file>')"`.
+  - PowerShell and cmd: an instruction to read the file.
+- Requests are validated strictly: types, NUL, length, and plain-token model and session ids.
+- Integration tests run the command through a real bash and Windows PowerShell with a fake `claude`.
+
+### Verification of role models (P3)
+
+- `bun run workflow doctor <agent worktree>` checks, with no model call:
+  - each role's file (default, customized, missing or invalid)
+  - the main model, the CLAUDE.md pointer and the `.ade/` exclude
+  - the installed CLI's support for the `effort` and `maxTurns` fields and the `fable` alias (all present in 2.1.193)
+- With recorded sessions, it also lists the models each role actually ran on and flags mismatches.
+- The first real arm-B run therefore confirms the routing from usage data.
 
 ## 7. User overrides
 
+- In the app: Settings > Models & Cost (all agents; edited files are left alone).
 - In session: `/model`, or name a model when asking for a subagent.
 - Per agent: edit `.claude/agents/*.md` or `.claude/settings.json` (never overwritten by ADE).
+- Per invoke: `model` in the `/agent/invoke` body, or `model` in `~/agents/registry.json`.
 - Machine-wide: `ANTHROPIC_DEFAULT_FABLE_MODEL` / `_SONNET_` / `_HAIKU_` change what each alias means.
 
 ## 8. Expected benefit (estimate, not measured)
