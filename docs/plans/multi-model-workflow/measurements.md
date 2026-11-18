@@ -1,108 +1,102 @@
 # M4: measuring the multi-model workflow
 
-Goal: find out, with real numbers, whether the workflow lowers the **cost (or usage) per successfully completed task** without lowering the success rate.
+Goal: find out, with real numbers, whether the workflow lowers the **cost per successfully completed task** without lowering the success rate.
 
-Everything in this file except the "How to fill it in" text is a blank to fill in. Nothing here is measured yet.
+Usage is now recorded automatically. You run the tasks and judge them; ADE records the rest. The results section at the end of this file is generated. Do not edit it by hand.
 
-## 1. Before the first run
+All commands below run from `apps/desktop` and spend no tokens. Only the task runs themselves (section 3) use your plan or API usage.
 
-- [ ] Update Claude Code: `claude update`, then `claude --version`. Record the version: ________
-  - 2.1.193 was installed on 2026-11-17. The docs used for the design describe a newer release, so the `effort` field and the `fable` alias may not work on 2.1.193.
-- [ ] Billing (decision D1): API key / Claude subscription (circle one).
-  - On a subscription, `/usage` dollar figures are list-price estimates. Use them to compare the two runs, not as money spent.
-- [ ] In an ADE agent's terminal, run `/agents`. Confirm planner, architect, implementer, quick and reviewer appear with the models fable, fable, sonnet, haiku and sonnet.
-- [ ] Run `/model` and confirm the main session shows Sonnet.
-- [ ] Pick the tasks (section 2) and write each one's acceptance checks **before** any run.
+## 1. What is recorded automatically
 
-## 2. Tasks
+Every time a Claude Code session in an ADE terminal stops, ADE reads that session's transcript and its subagents' transcripts. It stores one summary per session in `<ADE home>/metrics/sessions/`.
 
-Use 5–10 real tasks from your backlog, with a mix of sizes:
-- **S:** a one-file fix
-- **M:** a feature touching 2–5 files
-- **L:** a change across packages
+| Measured | From |
+|---|---|
+| Model actually used, per response and per role (main, planner, implementer, quick, reviewer, architect) | transcript `message.model` and the subagent's `meta.json` |
+| Input, output, cache-read, 5-minute and 1-hour cache-write tokens | transcript `message.usage` |
+| Estimated API-equivalent cost | list prices from the Anthropic pricing page (read 2026-11-17) |
+| Active time (prompt to last response, summed over turns) and wall time | transcript timestamps |
+| Escalations (architect calls), review rounds, step retries | Agent tool calls; `.ade/tasks/<slug>/progress.md` counters |
+| Workflow status (planned / in progress / blocked / done) | `progress.md` |
+| API errors | transcript error entries |
 
-Write each task as one fixed prompt, so both runs get the same words.
+Each response is counted once by its API message id, so repeated Stops and resumed or forked sessions are never double-counted.
 
-The checks decide success for **both** runs. They must not depend on tests either run writes: use existing tests, typecheck, lint, or a manual check you describe now.
+Sessions started outside ADE terminals can be added afterwards with `bun run workflow import --cwd <folder>`.
 
-| # | Size | Task prompt (exact text) | Acceptance checks (commands or manual steps) |
-|---|---|---|---|
-| T1 | | | |
-| T2 | | | |
-| T3 | | | |
-| T4 | | | |
-| T5 | | | |
+## 2. Before the first run
 
-## 3. The runs
+1. Update Claude Code if you want (`claude update`). The installed 2.1.193 already supports everything the workflow uses; `bun run workflow doctor` confirms this.
+2. Choose 5–10 real tasks with a mix of sizes:
+   - **S:** a one-file fix
+   - **M:** a feature touching 2–5 files
+   - **L:** a change across packages
 
-Run every task once in each arm, each time from the **same starting commit** in a clean checkout. For example, use `git switch -c m4-T1-A <start>` and `git switch -c m4-T1-B <start>`, so the second run never sees the first one's work.
+   Name them T1, T2, ….
+3. For each task, write the exact prompt and the acceptance-check commands **before** any run. The checks decide success for every arm, so they must not depend on tests a run writes: use existing tests, typecheck, lint, or a script you write now.
+4. In each agent you will use, run `bun run workflow doctor <agent worktree>`. Every role should show its model (fable, fable, sonnet, haiku, sonnet) and no `!!` problems.
 
-Start every run in a **new session** (or after `/clear`). `/usage` resets on `/clear`; read it at the end of the run, before closing the session.
+## 3. Running a task
 
-### Arm A: baseline (how you work today)
+Run every task once per arm, each from the **same starting commit** on its own branch, for example `git switch -c m4-T1-B <start>`.
 
-- Start Claude with the model you normally use (today's default is Opus 5.5): `claude --model opus --dangerously-skip-permissions`.
-- Give the task prompt directly. Do **not** use `/plan`, `/build` or `/review`.
-- The agent folder now contains the workflow subagents, and Claude may call them on its own. For a clean baseline, either:
-  - run Arm A in a plain checkout without `.claude/agents/`, or
-  - temporarily rename `.claude/agents/` to `.claude/agents.off/` and restore it afterwards.
+**Before** starting the session, label the folder so its sessions are grouped:
 
-### Arm A2 (optional): strong model at lower effort
+```bash
+bun run workflow label T1/B --cwd <agent worktree>
+```
 
-Anthropic's guidance is to measure this before trusting a multi-model setup: one model means one prompt cache.
+The arms:
 
-- `CLAUDE_CODE_EFFORT_LEVEL=medium claude --model opus --dangerously-skip-permissions`
-- Same rules as Arm A.
+| Arm | What it is | How to run it |
+|---|---|---|
+| **A** | Current baseline | `claude --model opus --dangerously-skip-permissions`, give the prompt directly, no workflow commands. Temporarily rename `.claude/agents` to `.claude/agents.off` so Claude does not call the workflow subagents on its own. |
+| **A2** | Efficient single model | Same as A, but start with `CLAUDE_CODE_EFFORT_LEVEL=medium claude --model opus --dangerously-skip-permissions`. |
+| **B** | Multi-model workflow | `/plan <prompt>`, approve the plan, `/build`, `/review`. |
 
-### Arm B: the workflow
+When the session is done, judge it with the acceptance checks. This runs the commands and records pass or fail:
 
-1. `/plan <task prompt>`. Read the plan; approve or answer its questions.
-2. `/build <slug>`. Repeat until the task's steps are all done.
-3. `/review <slug>`.
+```bash
+bun run workflow check T1/B --cwd <agent worktree> -- "bun run typecheck" "bun test src/feature"
+```
 
-The run is over when the reviewer passes it, or when it stops and asks you.
+Or record a manual verdict:
 
-## 4. What to record per run
+```bash
+bun run workflow result T1/B fail --note "login button missing"
+```
 
-From `/usage`, read the session's **Usage by model**. For each model, record the input, output, cache-read and cache-write tokens and the estimated cost; subagent usage is included.
+Clear the label when you finish a series: `bun run workflow label --clear --cwd <agent worktree>`.
 
-| Run | Task | Arm | Models used (tokens in / out / cache read / cache write) | Est. cost ($) | Wall time (min) | Checks pass? | Your corrections (#) | Escalations (#) | Review rounds (#) | Notes |
-|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | T1 | A | | | | | | – | – | |
-| 2 | T1 | B | | | | | | | | |
+## 4. Updating this report
 
-- **Checks pass?** Yes only if every acceptance check from section 2 passes when you run it yourself after the session.
-- **Your corrections:** count each time you had to step in: a fix, a re-prompt, or an answer the run could not continue without. Planning approvals in Arm B are not counted.
+```bash
+bun run workflow report --update ../../docs/plans/multi-model-workflow/measurements.md
+```
 
-## 5. Results
+`bun run workflow sessions` lists every recorded session with its label and estimated cost.
 
-Fill in after all runs.
-
-| Arm | Runs | Successful | Success rate | Total est. cost ($) | **Cost per success ($)** | Median wall time (min) | Corrections per run |
-|---|---|---|---|---|---|---|---|
-| A | | | | | | | |
-| A2 | | | | | | | |
-| B | | | | | | | |
-
-- **Cost per success** = total estimated cost of all runs in that arm (including failed ones) ÷ number of successful runs.
-- Use the Arm B per-model rows to see where its cost went:
-  - Fable share = planning + escalations
-  - Sonnet share = coordination, implementation, review
-  - Haiku share = quick edits
-
-## 6. Decision rule (proposal: confirm or change before looking at results)
+## 5. Decision rule (proposal: confirm or change before looking at results)
 
 Keep the workflow as the default if both hold:
-1. Arm B's success rate is at least Arm A's (or A2's, if run).
-2. Arm B's cost per success is at most **70%** of the better baseline.
+1. Arm B's success rate is at least the better baseline's (A or A2).
+2. Arm B's cost per success is at most **70%** of that baseline's.
+
+**Cost per success** = everything an arm spent (planning, implementation, testing, review, retries, escalations, and the failed runs) ÷ its number of passing runs.
 
 Otherwise:
-- If Fable is most of Arm B's cost, check escalation counts and lower the planner's effort or turn limit.
-- If B is slower or fails more often, compare its failed runs' `progress.md` and escalation reports to see which stage broke.
-- If A2 matches B on cost per success, prefer A2: it is simpler.
+- If Fable is most of arm B's cost, check escalation counts and lower the planner's effort or turn limit.
+- If B fails more often, read the failed runs' `progress.md` and escalation reports to see which stage broke.
+- If A2 matches B, prefer A2: one model is simpler and keeps one prompt cache.
 
-## 7. Caveats
+## 6. Caveats
 
-- `/usage` is a local estimate at list price. It is a fair comparison between arms, not an invoice.
-- With 5–10 tasks and one run each, a difference under about 20% may be noise. Re-run the tasks that changed the answer before deciding.
-- Prices used in the plan come from Anthropic's model table dated 2026-11-03. Check the pricing page before quoting dollar figures.
+- Costs are list-price estimates. On a Claude subscription they show relative usage, not charges.
+- Responses in fast mode or from models missing from the price table count as $0 and are listed as unpriced in the report.
+- With 5–10 tasks run once each, a difference under about 20% may be noise. Re-run the tasks that decide the outcome.
+
+## 7. Results
+
+<!-- m4-report:start -->
+_Not generated yet. Run `bun run workflow report --update ...` (section 4)._
+<!-- m4-report:end -->

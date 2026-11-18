@@ -13,3 +13,13 @@ export {
 	type WorkflowSubagent,
 	writeAgentWorkflowFiles,
 } from "./agent-workflow";
+export {
+	type ClaudeCliSupport,
+	checkAgentWorkflow,
+	checkClaudeCliSupport,
+	type FileState,
+	isPlausibleModel,
+	parseFrontmatter,
+	type RoleCheck,
+	type WorkflowCheck,
+} from "./workflow-check";

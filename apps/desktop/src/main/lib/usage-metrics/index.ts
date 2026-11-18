@@ -21,6 +21,16 @@ export {
 	scheduleSessionRecording,
 } from "./recorder";
 export {
+	ARM_DESCRIPTIONS,
+	compareArms,
+	MAX_COST_RATIO,
+	REPORT_END,
+	REPORT_START,
+	type ReportInput,
+	renderM4Report,
+	replaceReportSection,
+} from "./report";
+export {
 	appendRunResult,
 	isValidRunLabel,
 	loadRunResults,
