@@ -2,13 +2,13 @@
  * The shell ADE runs sessions in on Windows.
  *
  * Git Bash, when it can be found. Everything ADE types into a session is POSIX
- * shell: the runtime commands (`VAR=value claude ...` for the OpenRouter
- * models, `&&`-joined setup commands), the agent wrappers in ~/.ade/bin and
+ * shell: the runtime commands (`&&`-joined setup commands, the agent invoke
+ * command that reads its prompt with `$(cat ...)`), the agent wrappers in ~/.ade/bin and
  * the notify hooks are all bash. Claude Code on Windows itself needs Git Bash,
  * and Git is already an ADE prerequisite, so it is the shell that makes every
  * runtime work unchanged.
  *
- * Without Git Bash, PowerShell: the plain runtimes (claude, codex, opencode)
+ * Without Git Bash, PowerShell: the runtimes (claude, codex)
  * still start, but the bash wrappers and hooks do not run.
  *
  * Never C:\Windows\System32\bash.exe: that is WSL, a different machine as far

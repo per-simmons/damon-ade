@@ -1,12 +1,7 @@
-import { type AgentType } from "./agent-command";
+import type { AgentType } from "./agent-command";
 
-/**
- * The external CLIs ADE shells out to. Several agent runtimes share one binary:
- * the OpenRouter-proxied runtimes (kimi / minimax / glm) all drive the `claude`
- * CLI (see AGENT_PRESET_COMMANDS), so availability of those runtimes gates on
- * `claude` being installed.
- */
-export type AgentBinary = "claude" | "codex" | "opencode" | "gemini" | "git";
+/** The external CLIs ADE shells out to. */
+export type AgentBinary = "claude" | "codex" | "git";
 
 /**
  * Maps an agent runtime to the external binary its launch command invokes. Used
@@ -16,15 +11,6 @@ export type AgentBinary = "claude" | "codex" | "opencode" | "gemini" | "git";
 export const RUNTIME_BINARY: Record<AgentType, AgentBinary> = {
 	claude: "claude",
 	codex: "codex",
-	gemini: "gemini",
-	opencode: "opencode",
-	// copilot / cursor-agent aren't offered in the pickers yet; map them to their
-	// own binary name so a future availability check is a one-line change.
-	copilot: "codex",
-	"cursor-agent": "codex",
-	kimi: "claude",
-	minimax: "claude",
-	glm: "claude",
 };
 
 export interface BinaryInstallInfo {
@@ -54,17 +40,6 @@ export const BINARY_INSTALL: Record<AgentBinary, BinaryInstallInfo> = {
 		command: "npm i -g @openai/codex",
 		url: "https://developers.openai.com/codex/cli",
 	},
-	opencode: {
-		label: "OpenCode",
-		command: "npm i -g opencode-ai",
-		url: "https://opencode.ai/docs",
-		note: "Or: curl -fsSL https://opencode.ai/install | bash",
-	},
-	gemini: {
-		label: "Gemini CLI",
-		command: "npm i -g @google/gemini-cli",
-		url: "https://github.com/google-gemini/gemini-cli",
-	},
 	git: {
 		label: "Git",
 		command: "xcode-select --install",
@@ -77,7 +52,6 @@ export const BINARY_INSTALL: Record<AgentBinary, BinaryInstallInfo> = {
 export const CHECKED_BINARIES = [
 	"claude",
 	"codex",
-	"opencode",
 	"git",
 ] as const satisfies readonly AgentBinary[];
 

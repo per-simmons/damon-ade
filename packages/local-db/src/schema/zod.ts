@@ -100,17 +100,7 @@ export type WorkspaceType = z.infer<typeof workspaceTypeSchema>;
  * AGENT_PRESET_COMMANDS (the runtime -> launch-command map). Kept in sync
  * manually because local-db does not depend on @superset/shared.
  */
-export const AGENT_RUNTIMES = [
-	"claude",
-	"codex",
-	"gemini",
-	"opencode",
-	"copilot",
-	"cursor-agent",
-	"kimi",
-	"minimax",
-	"glm",
-] as const;
+export const AGENT_RUNTIMES = ["claude", "codex"] as const;
 
 export const agentRuntimeSchema = z.enum(AGENT_RUNTIMES);
 

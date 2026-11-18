@@ -136,7 +136,7 @@ export const createStatusProcedures = () => {
 				return { iconUrl };
 			}),
 
-		// ADE: set which CLI drives this agent (claude/codex/opencode/...).
+		// ADE: set which CLI drives this agent (claude or codex).
 		setRuntime: publicProcedure
 			.input(z.object({ id: z.string(), runtime: z.enum(AGENT_RUNTIMES) }))
 			.mutation(({ input }) => {

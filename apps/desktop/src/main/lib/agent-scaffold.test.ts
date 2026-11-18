@@ -1,8 +1,7 @@
-import { beforeAll, afterAll, describe, expect, it, mock } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, it, mock } from "bun:test";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { rmSync } from "node:fs";
 import { workspaces, worktrees } from "@superset/local-db";
 
 /**
@@ -14,7 +13,10 @@ import { workspaces, worktrees } from "@superset/local-db";
  * SUPERSET_HOME_DIR at load, so all path helpers resolve under TEST_HOME.
  */
 
-const TEST_HOME = join(tmpdir(), `ade-scaffold-test-${process.pid}-${Date.now()}`);
+const TEST_HOME = join(
+	tmpdir(),
+	`ade-scaffold-test-${process.pid}-${Date.now()}`,
+);
 process.env.ADE_HOME_DIR = TEST_HOME;
 
 // Deferred (dynamic) imports so the env override above wins over module load.
@@ -46,7 +48,7 @@ afterAll(() => {
 	rmSync(TEST_HOME, { recursive: true, force: true });
 });
 
-async function makeAgent(agentId: string, runtime: "claude" | "codex" | "opencode") {
+async function makeAgent(agentId: string, runtime: "claude" | "codex") {
 	await setupAgentRepo({ agentId, source: { type: "init" } });
 	scaffoldAgentMemory({
 		agentId,
@@ -64,7 +66,12 @@ describe("scaffoldAgentMemory — canonical layout", () => {
 
 	it("writes the canonical memory/ files (AGENT/USER/MEMORY + protocol)", () => {
 		const mem = getAgentMemoryDir(agentId);
-		for (const f of ["AGENT.md", "USER.md", "MEMORY.md", ".writeback-protocol.md"]) {
+		for (const f of [
+			"AGENT.md",
+			"USER.md",
+			"MEMORY.md",
+			".writeback-protocol.md",
+		]) {
 			expect(existsSync(join(mem, f))).toBe(true);
 		}
 	});
@@ -127,7 +134,10 @@ describe("scaffoldAgentMemory — canonical layout", () => {
 	});
 
 	it("AGENT.md invites the agent to build its role when none is given", () => {
-		const agentMd = readFileSync(join(getAgentMemoryDir(agentId), "AGENT.md"), "utf8");
+		const agentMd = readFileSync(
+			join(getAgentMemoryDir(agentId), "AGENT.md"),
+			"utf8",
+		);
 		expect(agentMd).toContain("## Role");
 		expect(agentMd).toContain("Not set yet");
 	});
@@ -152,7 +162,10 @@ describe("optional role seeds the AGENT.md persona", () => {
 	});
 
 	it("writes the provided role into AGENT.md's Role section", () => {
-		const agentMd = readFileSync(join(getAgentMemoryDir(agentId), "AGENT.md"), "utf8");
+		const agentMd = readFileSync(
+			join(getAgentMemoryDir(agentId), "AGENT.md"),
+			"utf8",
+		);
 		expect(agentMd).toContain("## Role");
 		expect(agentMd).toContain("Owns the billing service");
 		expect(agentMd).not.toContain("Not set yet");
@@ -164,12 +177,19 @@ describe("Claude Code session-reflection hook (Hermes learning-loop analog)", ()
 	const agentId = "agent-reflect";
 	beforeAll(async () => {
 		await setupAgentRepo({ agentId, source: { type: "init" } });
-		scaffoldAgentMemory({ agentId, agentName: "Reflecty", runtime: "claude", userName: "Pat" });
+		scaffoldAgentMemory({
+			agentId,
+			agentName: "Reflecty",
+			runtime: "claude",
+			userName: "Pat",
+		});
 	});
 
 	it("wires a Stop hook that runs the reflection script", () => {
 		const wt = getAgentWorktreePath(agentId);
-		const settings = JSON.parse(readFileSync(join(wt, ".claude", "settings.json"), "utf8"));
+		const settings = JSON.parse(
+			readFileSync(join(wt, ".claude", "settings.json"), "utf8"),
+		);
 		const stop = settings.hooks?.Stop;
 		expect(Array.isArray(stop)).toBe(true);
 		const cmd = stop[0].hooks[0].command as string;
@@ -179,7 +199,10 @@ describe("Claude Code session-reflection hook (Hermes learning-loop analog)", ()
 
 	it("hook script guards against an infinite stop loop and blocks otherwise", () => {
 		const wt = getAgentWorktreePath(agentId);
-		const script = readFileSync(join(wt, ".claude", "reflect-on-stop.mjs"), "utf8");
+		const script = readFileSync(
+			join(wt, ".claude", "reflect-on-stop.mjs"),
+			"utf8",
+		);
 		// The loop guard (Claude Code sets stop_hook_active on the injected turn).
 		expect(script).toContain("stop_hook_active");
 		// The self-continuation contract: decision:block feeds `reason` to the model.
@@ -214,25 +237,48 @@ describe("Claude Code bridge", () => {
 	});
 });
 
-describe("OpenCode bridge", () => {
-	const agentId = "agent-oc";
+describe("multi-model task workflow", () => {
+	const agentId = "agent-workflow";
 	beforeAll(async () => {
-		await makeAgent(agentId, "opencode");
+		await makeAgent(agentId, "claude");
 	});
 
-	it("opencode.json instructions[] reference the sibling canonical files", () => {
+	it("writes the role subagents and workflow commands", () => {
 		const wt = getAgentWorktreePath(agentId);
-		const cfg = JSON.parse(readFileSync(join(wt, "opencode.json"), "utf8"));
-		expect(cfg.instructions).toEqual([
-			"../memory/AGENT.md",
-			"../memory/USER.md",
-			"../memory/MEMORY.md",
-			"../memory/.writeback-protocol.md",
-		]);
-		// Sanity: those relative paths resolve to the real canonical files.
-		for (const rel of cfg.instructions) {
-			expect(existsSync(join(wt, rel))).toBe(true);
+		for (const name of [
+			"planner",
+			"architect",
+			"implementer",
+			"quick",
+			"reviewer",
+		]) {
+			expect(existsSync(join(wt, ".claude", "agents", `${name}.md`))).toBe(
+				true,
+			);
 		}
+		for (const name of ["plan", "build", "review", "escalate"]) {
+			expect(existsSync(join(wt, ".claude", "commands", `${name}.md`))).toBe(
+				true,
+			);
+		}
+	});
+
+	it("runs the main session on the coordinator model", () => {
+		const wt = getAgentWorktreePath(agentId);
+		const settings = JSON.parse(
+			readFileSync(join(wt, ".claude", "settings.json"), "utf8"),
+		);
+		expect(settings.model).toBe("sonnet");
+		// The reflection Stop hook is still wired.
+		expect(settings.hooks.Stop).toHaveLength(1);
+	});
+
+	it("points CLAUDE.md at the workflow without dropping the memory imports", () => {
+		const wt = getAgentWorktreePath(agentId);
+		const claudeMd = readFileSync(join(wt, "CLAUDE.md"), "utf8");
+		expect(claudeMd).toContain("/plan, then /build, then /review");
+		expect(claudeMd).toContain(".ade/tasks/<slug>/");
+		expect(claudeMd).toContain("memory/AGENT.md");
 	});
 });
 
@@ -242,10 +288,10 @@ describe("git-exclude of bridge files", () => {
 		await makeAgent(agentId, "claude");
 	});
 
-	it("adds the bridge files to .git/info/exclude", () => {
+	it("adds the bridge files and task state to .git/info/exclude", () => {
 		const wt = getAgentWorktreePath(agentId);
 		const exclude = readFileSync(join(wt, ".git", "info", "exclude"), "utf8");
-		for (const pat of ["CLAUDE.md", ".claude/", "opencode.json", "AGENTS.md"]) {
+		for (const pat of ["CLAUDE.md", ".claude/", "AGENTS.md", ".ade/"]) {
 			expect(exclude).toContain(pat);
 		}
 	});
@@ -258,11 +304,16 @@ describe("Codex bridge regen", () => {
 	});
 
 	it("generates .codex/AGENTS.md at scaffold time for codex runtime", () => {
-		expect(existsSync(join(getAgentCodexHome(agentId), "AGENTS.md"))).toBe(true);
+		expect(existsSync(join(getAgentCodexHome(agentId), "AGENTS.md"))).toBe(
+			true,
+		);
 	});
 
 	it("concatenates AGENT + USER + MEMORY + protocol from canonical files", () => {
-		const agents = readFileSync(join(getAgentCodexHome(agentId), "AGENTS.md"), "utf8");
+		const agents = readFileSync(
+			join(getAgentCodexHome(agentId), "AGENTS.md"),
+			"utf8",
+		);
 		// Distinctive markers from each source file.
 		expect(agents).toContain("autonomous coding agent"); // AGENT.md
 		expect(agents).toContain("User profile"); // USER.md
@@ -290,9 +341,16 @@ describe("Codex bridge regen", () => {
 		const marker = "LEARNED-FACT-XYZ";
 		const memoryPath = join(mem, "MEMORY.md");
 		const before = readFileSync(memoryPath, "utf8");
-		require("node:fs").writeFileSync(memoryPath, `${before}\n- ${marker}\n`, "utf8");
+		require("node:fs").writeFileSync(
+			memoryPath,
+			`${before}\n- ${marker}\n`,
+			"utf8",
+		);
 		regenerateCodexAgentsMd(agentId);
-		const agents = readFileSync(join(getAgentCodexHome(agentId), "AGENTS.md"), "utf8");
+		const agents = readFileSync(
+			join(getAgentCodexHome(agentId), "AGENTS.md"),
+			"utf8",
+		);
 		expect(agents).toContain(marker);
 	});
 });
@@ -315,15 +373,30 @@ describe("scaffoldAgentMemory — idempotent re-run (backfill safety)", () => {
 		fs.writeFileSync(join(wt, "CLAUDE.md"), editedBridge, "utf8");
 
 		// Re-run scaffold (this is exactly what the backfill invokes).
-		scaffoldAgentMemory({ agentId, agentName: "Testy", runtime: "claude", userName: "Pat" });
+		scaffoldAgentMemory({
+			agentId,
+			agentName: "Testy",
+			runtime: "claude",
+			userName: "Pat",
+		});
 
 		expect(readFileSync(join(mem, "USER.md"), "utf8")).toBe(editedUser);
 		expect(readFileSync(join(wt, "CLAUDE.md"), "utf8")).toBe(editedBridge);
 	});
 
 	it("does not duplicate the .git/info/exclude block across re-runs", () => {
-		const excludePath = join(getAgentWorktreePath(agentId), ".git", "info", "exclude");
-		scaffoldAgentMemory({ agentId, agentName: "Testy", runtime: "claude", userName: "Pat" });
+		const excludePath = join(
+			getAgentWorktreePath(agentId),
+			".git",
+			"info",
+			"exclude",
+		);
+		scaffoldAgentMemory({
+			agentId,
+			agentName: "Testy",
+			runtime: "claude",
+			userName: "Pat",
+		});
 		const exclude = readFileSync(excludePath, "utf8");
 		expect(count(exclude, "# ADE agent bridge files")).toBe(1);
 	});
@@ -349,19 +422,27 @@ describe("external worktree (local-path agents) — bridges honor the override",
 
 	it("writes bridge files into the EXTERNAL worktree, not the derived one", () => {
 		expect(fs.existsSync(join(externalWt, "CLAUDE.md"))).toBe(true);
-		expect(fs.existsSync(join(externalWt, "opencode.json"))).toBe(true);
-		expect(fs.existsSync(join(externalWt, ".claude", "settings.json"))).toBe(true);
+		expect(fs.existsSync(join(externalWt, ".claude", "settings.json"))).toBe(
+			true,
+		);
 		// The derived worktree dir must not have been created/populated.
-		expect(fs.existsSync(join(getAgentWorktreePath(agentId), "CLAUDE.md"))).toBe(false);
+		expect(
+			fs.existsSync(join(getAgentWorktreePath(agentId), "CLAUDE.md")),
+		).toBe(false);
 	});
 
 	it("git-excludes the bridges in the external repo", () => {
-		const exclude = readFileSync(join(externalWt, ".git", "info", "exclude"), "utf8");
+		const exclude = readFileSync(
+			join(externalWt, ".git", "info", "exclude"),
+			"utf8",
+		);
 		expect(exclude).toContain("# ADE agent bridge files");
 	});
 
 	it("keeps canonical memory under <agent-home>, not the external worktree", () => {
-		expect(fs.existsSync(join(getAgentMemoryDir(agentId), "AGENT.md"))).toBe(true);
+		expect(fs.existsSync(join(getAgentMemoryDir(agentId), "AGENT.md"))).toBe(
+			true,
+		);
 		expect(fs.existsSync(join(externalWt, "memory", "AGENT.md"))).toBe(false);
 	});
 });
@@ -401,7 +482,12 @@ describe("backfillAgentMemory — one-time migration of pre-flip agents", () => 
 			{ id: EMPTY, name: "Empty", runtime: "claude", deletingAt: null },
 			{ id: AUTHORED, name: "Authored", runtime: "opencode", deletingAt: null },
 			{ id: NO_REPO, name: "NoRepo", runtime: "claude", deletingAt: null },
-			{ id: DELETING, name: "Deleting", runtime: "codex", deletingAt: Date.now() },
+			{
+				id: DELETING,
+				name: "Deleting",
+				runtime: "codex",
+				deletingAt: Date.now(),
+			},
 			{ id: "bf-nullrt", name: "NullRt", runtime: null, deletingAt: null },
 			{
 				id: EXTERNAL,
@@ -438,7 +524,9 @@ describe("backfillAgentMemory — one-time migration of pre-flip agents", () => 
 		expect(fs.existsSync(join(mem, "AGENT.md"))).toBe(true);
 		expect(fs.existsSync(join(mem, "USER.md"))).toBe(true);
 		// Bridge for its runtime (claude) is written too.
-		expect(fs.existsSync(join(getAgentWorktreePath(EMPTY), "CLAUDE.md"))).toBe(true);
+		expect(fs.existsSync(join(getAgentWorktreePath(EMPTY), "CLAUDE.md"))).toBe(
+			true,
+		);
 	});
 
 	it("leaves an already-authored memory untouched (skips it entirely)", () => {
@@ -451,21 +539,32 @@ describe("backfillAgentMemory — one-time migration of pre-flip agents", () => 
 	});
 
 	it("skips an agent with no repo yet", () => {
-		expect(fs.existsSync(join(getAgentMemoryDir(NO_REPO), "AGENT.md"))).toBe(false);
+		expect(fs.existsSync(join(getAgentMemoryDir(NO_REPO), "AGENT.md"))).toBe(
+			false,
+		);
 	});
 
 	it("skips an agent marked for deletion", () => {
-		expect(fs.existsSync(join(getAgentMemoryDir(DELETING), "AGENT.md"))).toBe(false);
+		expect(fs.existsSync(join(getAgentMemoryDir(DELETING), "AGENT.md"))).toBe(
+			false,
+		);
 	});
 
 	it("scaffolds a local-path agent using its EXTERNAL worktree from the DB", () => {
 		// Memory scaffolded under the derived agent-home (as for any agent).
-		expect(fs.existsSync(join(getAgentMemoryDir(EXTERNAL), "AGENT.md"))).toBe(true);
+		expect(fs.existsSync(join(getAgentMemoryDir(EXTERNAL), "AGENT.md"))).toBe(
+			true,
+		);
 		// Bridges written into the EXTERNAL repo, not the derived worktree dir.
 		expect(fs.existsSync(join(EXTERNAL_WT, "CLAUDE.md"))).toBe(true);
-		expect(fs.existsSync(join(getAgentWorktreePath(EXTERNAL), "CLAUDE.md"))).toBe(false);
+		expect(
+			fs.existsSync(join(getAgentWorktreePath(EXTERNAL), "CLAUDE.md")),
+		).toBe(false);
 		// Git-excluded in the external repo.
-		const exclude = readFileSync(join(EXTERNAL_WT, ".git", "info", "exclude"), "utf8");
+		const exclude = readFileSync(
+			join(EXTERNAL_WT, ".git", "info", "exclude"),
+			"utf8",
+		);
 		expect(exclude).toContain("# ADE agent bridge files");
 	});
 
@@ -477,8 +576,15 @@ describe("backfillAgentMemory — one-time migration of pre-flip agents", () => 
 		backfill();
 		// Memory is now non-empty, so the second run skips it — edit preserved.
 		expect(readFileSync(userPath, "utf8")).toBe(edited);
-		const excludePath = join(getAgentWorktreePath(EMPTY), ".git", "info", "exclude");
-		expect(count(readFileSync(excludePath, "utf8"), "# ADE agent bridge files")).toBe(1);
+		const excludePath = join(
+			getAgentWorktreePath(EMPTY),
+			".git",
+			"info",
+			"exclude",
+		);
+		expect(
+			count(readFileSync(excludePath, "utf8"), "# ADE agent bridge files"),
+		).toBe(1);
 	});
 });
 
@@ -552,8 +658,12 @@ describe("backfill on staged null-worktree agents (boot-hang regression)", () =>
 
 	it("returns without hanging and scaffolds none of the staged agents", () => {
 		for (const id of ids) {
-			expect(fs.existsSync(join(getAgentMemoryDir(id), "AGENT.md"))).toBe(false);
-			expect(fs.existsSync(join(getAgentWorktreePath(id), "CLAUDE.md"))).toBe(false);
+			expect(fs.existsSync(join(getAgentMemoryDir(id), "AGENT.md"))).toBe(
+				false,
+			);
+			expect(fs.existsSync(join(getAgentWorktreePath(id), "CLAUDE.md"))).toBe(
+				false,
+			);
 		}
 	});
 

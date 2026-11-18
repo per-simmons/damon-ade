@@ -30,7 +30,8 @@
 		"generate:routes": "tsr generate",
 		"pretypecheck": "bun run generate:routes",
 		"typecheck": "tsc --noEmit",
-		"test": "bun test"
+		"test": "bun test",
+		"workflow": "bun scripts/ade-workflow.ts"
 	},
 	"dependencies": {
 		"@ai-sdk/react": "^3.0.0",

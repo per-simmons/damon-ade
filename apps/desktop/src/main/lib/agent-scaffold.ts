@@ -13,6 +13,16 @@ import {
 	getAgentMemoryDir,
 	getAgentWorktreePath,
 } from "./agent-home";
+import {
+	WORKFLOW_BRIDGE_POINTER,
+	WORKFLOW_EXCLUDES,
+	writeAgentWorkflowFiles,
+} from "./agent-workflow";
+import {
+	loadWorkflowSettings,
+	resolveSubagents,
+} from "./agent-workflow/workflow-settings";
+import { getSupersetHomeDir } from "./app-environment";
 
 /**
  * Memory scaffold written on agent creation (ADE Phase E, docs/memory.md).
@@ -45,7 +55,7 @@ export interface ScaffoldParams {
 	role?: string;
 	/**
 	 * Absolute worktree path the per-runtime bridge files (CLAUDE.md,
-	 * .claude/, opencode.json, .git/info/exclude) are written into. Defaults to
+	 * .claude/, .git/info/exclude) are written into. Defaults to
 	 * the derived <agent-home>/worktree. The local-path creation flow stores an
 	 * EXTERNAL repo path on the workspace's worktrees row — for those agents the
 	 * caller must pass that path so bridges land in the real repo, not a
@@ -56,10 +66,7 @@ export interface ScaffoldParams {
 	worktreePath?: string;
 }
 
-function sub(
-	template: string,
-	vars: Record<string, string>,
-): string {
+function sub(template: string, vars: Record<string, string>): string {
 	return template.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? "");
 }
 
@@ -270,7 +277,7 @@ A single command or check that proves the skill worked.
 const CLAUDE_BRIDGE = `@{{agent_home}}/memory/AGENT.md
 @{{agent_home}}/memory/USER.md
 <!-- MEMORY.md is loaded via Claude Code native auto-memory (autoMemoryDirectory). -->
-`;
+${WORKFLOW_BRIDGE_POINTER}`;
 
 // Claude Code Stop-hook script: the native analog of Hermes' post-turn
 // background review (agent/background_review.py). When the agent tries to stop,
@@ -309,7 +316,12 @@ process.exit(0);
 }
 
 /** Bridge files written into the worktree (git-excluded, never committed). */
-const BRIDGE_EXCLUDES = ["CLAUDE.md", ".claude/", "opencode.json", "AGENTS.md"];
+const BRIDGE_EXCLUDES = [
+	"CLAUDE.md",
+	".claude/",
+	"AGENTS.md",
+	...WORKFLOW_EXCLUDES,
+];
 
 /**
  * Regenerate <agent-home>/.codex/AGENTS.md from the canonical memory files.
@@ -322,7 +334,12 @@ export function regenerateCodexAgentsMd(agentId: string): void {
 	mkdirSync(codexHome, { recursive: true });
 
 	const parts: string[] = [];
-	for (const file of ["AGENT.md", "USER.md", "MEMORY.md", ".writeback-protocol.md"]) {
+	for (const file of [
+		"AGENT.md",
+		"USER.md",
+		"MEMORY.md",
+		".writeback-protocol.md",
+	]) {
 		const p = join(memoryDir, file);
 		if (existsSync(p)) {
 			parts.push(readFileSync(p, "utf8"));
@@ -368,6 +385,8 @@ export function scaffoldAgentMemory({
 		worktreePathOverride?.trim() || getAgentWorktreePath(agentId);
 	const skillsDir = join(agentHome, "skills");
 	const resolvedUserName = userName?.trim() || "the user";
+	// Model routing from Settings > Models (defaults when never changed).
+	const workflowSettings = loadWorkflowSettings(getSupersetHomeDir());
 
 	const vars: Record<string, string> = {
 		agent_name: agentName,
@@ -401,13 +420,16 @@ export function scaffoldAgentMemory({
 	mkdirSync(claudeDir, { recursive: true });
 	// Session-reflection hook script + settings that wire it as a Stop hook and
 	// point native auto-memory at the canonical dir. Both are Claude-Code-only
-	// surfaces; harmless to the other runtimes.
+	// surfaces; harmless to Codex.
 	const reflectHookPath = join(claudeDir, "reflect-on-stop.mjs");
 	writeIfEmpty(reflectHookPath, reflectHookScript(agentHome, resolvedUserName));
 	writeIfEmpty(
 		join(claudeDir, "settings.json"),
 		`${JSON.stringify(
 			{
+				// Coordinator model for the main session; the workflow subagents pin
+				// their own models. /model or `claude --model` still override it.
+				model: workflowSettings.mainModel,
 				autoMemoryDirectory: join(memoryDir),
 				autoMemoryEnabled: true,
 				hooks: {
@@ -429,22 +451,10 @@ export function scaffoldAgentMemory({
 			2,
 		)}\n`,
 	);
-	writeIfEmpty(
-		join(worktreePath, "opencode.json"),
-		`${JSON.stringify(
-			{
-				$schema: "https://opencode.ai/config.json",
-				instructions: [
-					"../memory/AGENT.md",
-					"../memory/USER.md",
-					"../memory/MEMORY.md",
-					"../memory/.writeback-protocol.md",
-				],
-			},
-			null,
-			2,
-		)}\n`,
-	);
+
+	// Multi-model task workflow: role subagents + /plan, /build, /review,
+	// /escalate (docs/plans/multi-model-workflow/plan.md).
+	writeAgentWorkflowFiles(worktreePath, resolveSubagents(workflowSettings));
 
 	// Keep the generated bridge files out of the repo (local, per-worktree).
 	// Guard against a duplicate block when re-run by the backfill.

@@ -100,7 +100,7 @@ export function register(server: McpServer) {
 					.enum(AGENT_TYPES)
 					.optional()
 					.describe(
-						'AI agent to use: "claude", "codex", "gemini", "opencode", "copilot", or "cursor-agent". Defaults to "claude".',
+						'AI agent to use: "claude" (Claude Code) or "codex". Defaults to "claude".',
 					),
 			},
 		},

@@ -1,12 +1,13 @@
-import { workspaces, worktrees } from "@superset/local-db";
 import type { AgentRuntime } from "@superset/local-db";
+import { workspaces, worktrees } from "@superset/local-db";
+import { toAgentType } from "@superset/shared/agent-command";
 import { eq } from "drizzle-orm";
 import { localDb } from "main/lib/local-db";
 import { workspaceInitManager } from "main/lib/workspace-init-manager";
-import { MEMORY_SCAFFOLD_ENABLED } from "./feature-flags";
 import { type AgentRepoSource, setupAgentRepo } from "./agent-repo";
 import { scaffoldAgentMemory } from "./agent-scaffold";
 import { resolveAgentWorktreePath } from "./agent-worktree";
+import { MEMORY_SCAFFOLD_ENABLED } from "./feature-flags";
 import { getUserName } from "./user-profile";
 
 /**
@@ -38,10 +39,7 @@ export function isAgentInit(agentId: string): boolean {
 }
 
 /** Start the background init job for a freshly-created agent. */
-export function beginAgentInit(
-	agentId: string,
-	ctx: AgentInitContext,
-): void {
+export function beginAgentInit(agentId: string, ctx: AgentInitContext): void {
 	contexts.set(agentId, ctx);
 	workspaceInitManager.clearJob(agentId);
 	workspaceInitManager.startJob(agentId, ctx.categoryId);
@@ -67,7 +65,7 @@ export function retryAgentInit(agentId: string): boolean {
 			categoryId: workspace.projectId,
 			worktreeId: workspace.worktreeId,
 			agentName: workspace.name,
-			runtime: workspace.runtime,
+			runtime: toAgentType(workspace.runtime),
 			source: { type: "init" },
 		};
 		contexts.set(agentId, ctx);

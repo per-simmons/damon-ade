@@ -19,7 +19,7 @@ export interface RuntimeAvailabilityHandle {
 }
 
 /**
- * Reads config.runtimeAvailability — which agent CLIs (claude / codex / opencode)
+ * Reads config.runtimeAvailability — which agent CLIs (claude / codex)
  * and git are installed. Backs the ModelBar "not detected" state, the NewAgentModal
  * runtime picker, and the create-agent git preflight.
  */

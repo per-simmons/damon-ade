@@ -10,9 +10,31 @@ import type {
 	AgentMessageEvent,
 } from "shared/notification-types";
 import { getAgentEntry } from "../agent-config/registry";
-import { localDb } from "../local-db";
+import {
+	getInvokePromptDir,
+	parseAgentInvokeRequest,
+	resolveClaudeExecutable,
+	runHeadlessClaude,
+	shellKindFor,
+	writeInvokePromptFile,
+} from "../agent-invoke";
+import {
+	type HeadlessFinished,
+	startHeadlessInvoke,
+} from "../agent-invoke/headless-invoke";
+import { findRealBinary } from "../agent-setup/utils";
+import { loadWorkflowSettings } from "../agent-workflow/workflow-settings";
+import { getSupersetHomeDir } from "../app-environment";
 import { appState } from "../app-state";
-import { HOOK_PROTOCOL_VERSION } from "../terminal/env";
+import { localDb } from "../local-db";
+import { getDefaultShell, HOOK_PROTOCOL_VERSION } from "../terminal/env";
+import {
+	appendHeadlessRun,
+	decodeHookString,
+	getMetricsDir,
+	scheduleSessionRecording,
+	transcriptPathFor,
+} from "../usage-metrics";
 import { mapEventType } from "./map-event-type";
 
 // Re-export types for backwards compatibility
@@ -99,6 +121,40 @@ function resolvePaneId(
 	return undefined;
 }
 
+/** Log a finished headless run and record its usage from the transcript. */
+function recordHeadlessRun(finished: HeadlessFinished): void {
+	const { result } = finished;
+	const report = result.report;
+	appendHeadlessRun(getMetricsDir(), {
+		at: new Date().toISOString(),
+		agent: finished.agent,
+		cwd: finished.cwd,
+		model: finished.model,
+		maxBudgetUsd: finished.maxBudgetUsd,
+		maxTurns: finished.maxTurns,
+		exitCode: result.exitCode,
+		timedOut: result.timedOut,
+		durationMs: result.durationMs,
+		sessionId: report?.sessionId,
+		reportedCostUsd: report?.totalCostUsd,
+		numTurns: report?.numTurns,
+		isError: report?.isError,
+		subtype: report?.subtype,
+		error:
+			result.parseError ??
+			(result.exitCode === 0 ? undefined : result.stderrTail),
+	});
+	console.log(
+		`[notifications] headless run for ${finished.agent} finished: exit ${result.exitCode}, ${report?.subtype ?? "no result"}, reported $${report?.totalCostUsd?.toFixed(4) ?? "?"}`,
+	);
+	// Headless runs bypass ADE's terminal hooks, so record usage directly.
+	if (report?.sessionId) {
+		scheduleSessionRecording({
+			transcriptPath: transcriptPathFor(finished.cwd, report.sessionId),
+		});
+	}
+}
+
 // Agent lifecycle hook
 app.get("/hook/complete", (req, res) => {
 	const {
@@ -106,6 +162,7 @@ app.get("/hook/complete", (req, res) => {
 		tabId,
 		workspaceId,
 		sessionId,
+		transcriptPath,
 		eventType,
 		env: clientEnv,
 		version,
@@ -167,6 +224,15 @@ app.get("/hook/complete", (req, res) => {
 
 	notificationsEmitter.emit(NOTIFICATION_EVENTS.AGENT_LIFECYCLE, event);
 
+	// Claude Code sends its transcript path; record the session's token usage
+	// from it once the turn has stopped (debounced, off the request path).
+	if (mappedEventType === "Stop" && typeof transcriptPath === "string") {
+		scheduleSessionRecording({
+			transcriptPath: decodeHookString(transcriptPath),
+			workspaceId: typeof workspaceId === "string" ? workspaceId : undefined,
+		});
+	}
+
 	res.json({ success: true, paneId: resolvedPaneId, tabId });
 });
 
@@ -176,47 +242,62 @@ app.get("/hook/complete", (req, res) => {
  * runtime, identity+skills+MCP read from the agent's folder) and open/focus that
  * agent's chat-mastra tab in ADE so the user watches it work.
  *
- *   POST /agent/invoke  { agent, prompt, model? }
+ *   POST /agent/invoke
+ *   { agent, prompt, tab?, claudeSessionId?, fresh?, model?,
+ *     mode?: "terminal" | "headless", maxBudgetUsd? }
+ *
+ * mode "headless" runs `claude -p` in the background with a hard spending and
+ * turn cap (Settings > Models & Cost) and answers 202 straight away.
+ *
+ * Validation, the prompt file and the shell choice live in main/lib/agent-invoke.
  */
 app.post("/agent/invoke", async (req, res) => {
-	const { agent, prompt, tab, claudeSessionId, fresh } = (req.body ?? {}) as {
-		agent?: string;
-		prompt?: string;
-		tab?: string;
-		claudeSessionId?: string;
-		fresh?: boolean;
-	};
-
-	if (!agent || !prompt) {
+	const parsed = parseAgentInvokeRequest(req.body, getAgentEntry);
+	if (!parsed.ok) {
 		return res
-			.status(400)
-			.json({ success: false, error: "agent and prompt are required" });
+			.status(parsed.status)
+			.json({ success: false, error: parsed.error });
+	}
+	const request = parsed.request;
+	if (request.ignoredRegistryModel) {
+		console.warn(
+			`[notifications] /agent/invoke: ignoring registry model for ${request.agent}; it is not a plain model name`,
+		);
 	}
 
-	const entry = getAgentEntry(agent);
-	if (!entry) {
-		return res
-			.status(404)
-			.json({ success: false, error: `Unknown agent: ${agent}` });
+	if (request.mode === "headless") {
+		const started = startHeadlessInvoke(request, {
+			limits: () => loadWorkflowSettings(getSupersetHomeDir()).budgets,
+			findExecutable: () => resolveClaudeExecutable(findRealBinary("claude")),
+			run: runHeadlessClaude,
+			onFinished: recordHeadlessRun,
+		});
+		return res.status(started.status).json(started.body);
 	}
 
 	try {
+		// The prompt goes to a private file, never onto the command line.
+		const promptFile = writeInvokePromptFile(
+			getInvokePromptDir(getSupersetHomeDir()),
+			request.prompt,
+		);
+
 		// Tell the renderer to open a terminal in the agent's folder and run
 		// `claude` with the prompt. The agent works live in the terminal on Pat's
 		// subscription; claude's own hooks fire Start/Stop (dot + review toast)
 		// and its terminal title auto-names the tab.
 		const invokeEvent: AgentInvokeEvent = {
-			agentName: agent,
-			sessionId: entry.sessionId,
-			workspaceId: entry.workspaceId,
-			prompt,
-			cwd: entry.cwd,
-			tabTitle: typeof tab === "string" && tab.trim() ? tab.trim() : undefined,
-			claudeSessionId:
-				typeof claudeSessionId === "string" && claudeSessionId.trim()
-					? claudeSessionId.trim()
-					: undefined,
-			fresh: fresh !== false,
+			agentName: request.agent,
+			sessionId: request.entry.sessionId,
+			workspaceId: request.entry.workspaceId,
+			prompt: request.prompt,
+			promptFile,
+			shell: shellKindFor(getDefaultShell()),
+			cwd: request.entry.cwd,
+			tabTitle: request.tabTitle,
+			claudeSessionId: request.claudeSessionId,
+			fresh: request.fresh,
+			model: request.model,
 		};
 		notificationsEmitter.emit(NOTIFICATION_EVENTS.AGENT_INVOKE, invokeEvent);
 
@@ -225,7 +306,11 @@ app.post("/agent/invoke", async (req, res) => {
 		// claude's hooks light the rail dot + fire the review toast, and the user
 		// clicks in when they're ready.
 
-		res.json({ success: true, agent, sessionId: entry.sessionId });
+		res.json({
+			success: true,
+			agent: request.agent,
+			sessionId: request.entry.sessionId,
+		});
 	} catch (error) {
 		console.error("[notifications] /agent/invoke failed:", error);
 		res.status(500).json({ success: false, error: String(error) });
@@ -241,13 +326,7 @@ app.post("/agent/invoke", async (req, res) => {
  *   POST /agent/message  { agent, content, conversation?, role?, metadata? }
  */
 app.post("/agent/message", (req, res) => {
-	const {
-		agent,
-		content,
-		conversation,
-		role,
-		metadata,
-	} = (req.body ?? {}) as {
+	const { agent, content, conversation, role, metadata } = (req.body ?? {}) as {
 		agent?: string;
 		content?: string;
 		conversation?: string;

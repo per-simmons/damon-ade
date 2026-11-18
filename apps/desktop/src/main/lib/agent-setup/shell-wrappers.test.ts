@@ -51,8 +51,6 @@ describe("shell-wrappers", () => {
 		expect(zshrc).toContain("_superset_prepend_bin()");
 		expect(zshrc).toContain(`claude() { "${SHIM_BIN_DIR}/claude" "$@"; }`);
 		expect(zshrc).toContain(`codex() { "${SHIM_BIN_DIR}/codex" "$@"; }`);
-		expect(zshrc).toContain(`opencode() { "${SHIM_BIN_DIR}/opencode" "$@"; }`);
-		expect(zshrc).toContain(`copilot() { "${SHIM_BIN_DIR}/copilot" "$@"; }`);
 		expect(zshrc).toContain(
 			`mastracode() { "${SHIM_BIN_DIR}/mastracode" "$@"; }`,
 		);
@@ -62,7 +60,6 @@ describe("shell-wrappers", () => {
 		expect(zlogin).toContain('source "$_superset_home/.zlogin"');
 		expect(zlogin).toContain("_superset_prepend_bin()");
 		expect(zlogin).toContain(`claude() { "${SHIM_BIN_DIR}/claude" "$@"; }`);
-		expect(zlogin).toContain(`copilot() { "${SHIM_BIN_DIR}/copilot" "$@"; }`);
 		expect(zlogin).toContain(
 			`mastracode() { "${SHIM_BIN_DIR}/mastracode" "$@"; }`,
 		);
@@ -76,8 +73,6 @@ describe("shell-wrappers", () => {
 		expect(rcfile).toContain("_superset_prepend_bin()");
 		expect(rcfile).toContain(`claude() { "${SHIM_BIN_DIR}/claude" "$@"; }`);
 		expect(rcfile).toContain(`codex() { "${SHIM_BIN_DIR}/codex" "$@"; }`);
-		expect(rcfile).toContain(`opencode() { "${SHIM_BIN_DIR}/opencode" "$@"; }`);
-		expect(rcfile).toContain(`copilot() { "${SHIM_BIN_DIR}/copilot" "$@"; }`);
 		expect(rcfile).toContain(
 			`mastracode() { "${SHIM_BIN_DIR}/mastracode" "$@"; }`,
 		);
