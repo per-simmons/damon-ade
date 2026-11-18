@@ -20,6 +20,7 @@ import { getSupersetHomeDir } from "../app-environment";
 import { appState } from "../app-state";
 import { localDb } from "../local-db";
 import { getDefaultShell, HOOK_PROTOCOL_VERSION } from "../terminal/env";
+import { scheduleSessionRecording } from "../usage-metrics";
 import { mapEventType } from "./map-event-type";
 
 // Re-export types for backwards compatibility
@@ -113,6 +114,7 @@ app.get("/hook/complete", (req, res) => {
 		tabId,
 		workspaceId,
 		sessionId,
+		transcriptPath,
 		eventType,
 		env: clientEnv,
 		version,
@@ -173,6 +175,15 @@ app.get("/hook/complete", (req, res) => {
 	}
 
 	notificationsEmitter.emit(NOTIFICATION_EVENTS.AGENT_LIFECYCLE, event);
+
+	// Claude Code sends its transcript path; record the session's token usage
+	// from it once the turn has stopped (debounced, off the request path).
+	if (mappedEventType === "Stop" && typeof transcriptPath === "string") {
+		scheduleSessionRecording({
+			rawTranscriptPath: transcriptPath,
+			workspaceId: typeof workspaceId === "string" ? workspaceId : undefined,
+		});
+	}
 
 	res.json({ success: true, paneId: resolvedPaneId, tabId });
 });
