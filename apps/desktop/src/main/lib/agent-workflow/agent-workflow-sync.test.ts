@@ -56,7 +56,7 @@ function makeRepo(id: string): void {
 	);
 }
 
-let sync: () => void;
+let sync: (homeDir?: string) => unknown;
 
 beforeAll(async () => {
 	makeRepo(OLD);
@@ -85,7 +85,7 @@ beforeAll(async () => {
 	}));
 	delete process.env.ADE_MEMORY_SCAFFOLD;
 	sync = (await import("./agent-workflow-sync")).syncAgentWorkflowFiles;
-	sync();
+	sync(join(ROOT, "ade-home"));
 });
 
 afterAll(() => {
@@ -124,7 +124,38 @@ describe("syncAgentWorkflowFiles", () => {
 			join(worktreeOf(OLD), ".git", "info", "exclude"),
 		];
 		const before = files.map((file) => readFileSync(file, "utf8"));
-		sync();
+		sync(join(ROOT, "ade-home"));
 		expect(files.map((file) => readFileSync(file, "utf8"))).toEqual(before);
+	});
+
+	it("applies routing saved in workflow-settings.json on the next launch", () => {
+		const home = join(ROOT, "ade-home");
+		mkdirSync(home, { recursive: true });
+		writeFileSync(
+			join(home, "workflow-settings.json"),
+			JSON.stringify({
+				mainModel: "opus",
+				roles: { implementer: { model: "claude-sonnet-5-5", maxTurns: 25 } },
+			}),
+			"utf8",
+		);
+		sync(home);
+
+		const implementer = readFileSync(
+			join(worktreeOf(OLD), ".claude", "agents", "implementer.md"),
+			"utf8",
+		);
+		expect(implementer).toContain("model: claude-sonnet-5-5\n");
+		expect(implementer).toContain("maxTurns: 25\n");
+		expect(
+			JSON.parse(
+				readFileSync(join(worktreeOf(OLD), ".claude", "settings.json"), "utf8"),
+			).model,
+		).toBe("opus");
+		// ADE records the main model it wrote.
+		expect(
+			JSON.parse(readFileSync(join(home, "workflow-settings.json"), "utf8"))
+				.appliedMainModel,
+		).toBe("opus");
 	});
 });

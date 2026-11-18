@@ -8,6 +8,11 @@ export {
 	summarizeRuns,
 } from "./aggregate";
 export {
+	type CostAlert,
+	type CostBudgets,
+	createCostAlertListener,
+} from "./cost-alerts";
+export {
 	estimateCost,
 	MODEL_PRICES,
 	type ModelPrice,

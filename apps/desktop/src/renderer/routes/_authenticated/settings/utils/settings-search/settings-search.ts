@@ -57,6 +57,9 @@ export const SETTING_ITEM_ID = {
 
 	// Permissions
 	PERMISSIONS_FULL_DISK_ACCESS: "permissions-full-disk-access",
+	MODELS_ROUTING: "models-routing",
+	MODELS_COST: "models-cost",
+
 	PERMISSIONS_ACCESSIBILITY: "permissions-accessibility",
 	PERMISSIONS_MICROPHONE: "permissions-microphone",
 	PERMISSIONS_APPLE_EVENTS: "permissions-apple-events",
@@ -479,6 +482,42 @@ export const SETTINGS_ITEMS: SettingsItem[] = [
 			"chat",
 			"terminal",
 			"url",
+		],
+	},
+	{
+		id: SETTING_ITEM_ID.MODELS_ROUTING,
+		section: "models",
+		title: "Workflow models",
+		description:
+			"Which model the planner, architect, implementer, quick and reviewer roles use",
+		keywords: [
+			"model",
+			"models",
+			"fable",
+			"opus",
+			"sonnet",
+			"haiku",
+			"planner",
+			"implementer",
+			"reviewer",
+			"routing",
+			"effort",
+			"workflow",
+		],
+	},
+	{
+		id: SETTING_ITEM_ID.MODELS_COST,
+		section: "models",
+		title: "Cost warnings",
+		description: "Warn when a session or a day passes an estimated cost",
+		keywords: [
+			"cost",
+			"budget",
+			"spend",
+			"usage",
+			"tokens",
+			"warning",
+			"limit",
 		],
 	},
 	{

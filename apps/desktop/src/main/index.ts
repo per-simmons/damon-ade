@@ -20,6 +20,7 @@ import { getWorkspaceName } from "shared/env.shared";
 import { backfillAgentMemory } from "./lib/agent-memory-backfill";
 import { setupAgentHooks } from "./lib/agent-setup";
 import { syncAgentWorkflowFiles } from "./lib/agent-workflow/agent-workflow-sync";
+import { loadWorkflowSettings } from "./lib/agent-workflow/workflow-settings";
 import { SUPERSET_HOME_DIR } from "./lib/app-environment";
 import { initAppState } from "./lib/app-state";
 import { startAppStateWatcher } from "./lib/app-state/watcher";
@@ -37,6 +38,12 @@ import {
 	reconcileDaemonSessions,
 } from "./lib/terminal";
 import { disposeTray, initTray } from "./lib/tray";
+import {
+	createCostAlertListener,
+	getMetricsDir,
+	loadSessions,
+	onSessionRecorded,
+} from "./lib/usage-metrics";
 import { MainWindow } from "./windows/main";
 
 console.log("[main] Local database ready:", !!localDb);
@@ -325,6 +332,21 @@ if (!gotTheLock) {
 				console.error("[main] Workflow sync failed:", error);
 			}
 		}, 0);
+
+		// Spending warnings (Settings > Models), checked each time a Claude
+		// session's usage is recorded from its transcript.
+		onSessionRecorded(
+			createCostAlertListener({
+				getBudgets: () => loadWorkflowSettings(SUPERSET_HOME_DIR).budgets,
+				loadAllSessions: () => loadSessions(getMetricsDir()),
+				notify: (alert) => {
+					console.log(`[usage-metrics] ${alert.title}: ${alert.body}`);
+					if (Notification.isSupported()) {
+						new Notification({ title: alert.title, body: alert.body }).show();
+					}
+				},
+			}),
+		);
 
 		// Process any deep links from cold start
 		const coldStartUrl = findDeepLinkInArgv(process.argv);

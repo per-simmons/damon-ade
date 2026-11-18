@@ -22,6 +22,7 @@ import { createSyncRouter } from "./sync";
 import { createTerminalRouter } from "./terminal";
 import { createUiStateRouter } from "./ui-state";
 import { createWindowRouter } from "./window";
+import { createWorkflowRouter } from "./workflow";
 import { createWorkspacesRouter } from "./workspaces";
 
 export const createAppRouter = (getWindow: () => BrowserWindow | null) => {
@@ -49,6 +50,7 @@ export const createAppRouter = (getWindow: () => BrowserWindow | null) => {
 		uiState: createUiStateRouter(),
 		sync: createSyncRouter(),
 		ringtone: createRingtoneRouter(getWindow),
+		workflow: createWorkflowRouter(),
 	});
 };
 

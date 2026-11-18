@@ -3,9 +3,17 @@ import { join } from "node:path";
 import { workspaces } from "@superset/local-db";
 import { isNotNull } from "drizzle-orm";
 import { resolveAgentWorktreePath } from "../agent-worktree";
+import { getSupersetHomeDir } from "../app-environment";
 import { MEMORY_SCAFFOLD_ENABLED } from "../feature-flags";
 import { localDb } from "../local-db";
-import { upgradeAgentWorkflow } from "./agent-workflow";
+import { upgradeAgentWorkflow, WORKFLOW_MAIN_MODEL } from "./agent-workflow";
+import {
+	applyRouting,
+	loadWorkflowSettings,
+	resolveSubagents,
+	saveWorkflowSettings,
+	workflowSettingsPath,
+} from "./workflow-settings";
 
 /**
  * Launch-time sync that brings agents created before the multi-model workflow
@@ -23,8 +31,26 @@ import { upgradeAgentWorkflow } from "./agent-workflow";
  * Runs after backfillAgentMemory, so an agent the backfill just scaffolded is
  * already current and this is a no-op for it.
  */
-export function syncAgentWorkflowFiles(): void {
-	if (!MEMORY_SCAFFOLD_ENABLED) return;
+export interface WorkflowSyncResult {
+	agents: number;
+	updated: number;
+}
+
+/**
+ * Also applies model routing from <ADE home>/workflow-settings.json: unedited
+ * role files get the configured model, effort and turn limit, and the main
+ * session model follows the setting where it still holds ADE's last value.
+ * Called at launch and after the settings page saves.
+ */
+export function syncAgentWorkflowFiles(
+	homeDir: string = getSupersetHomeDir(),
+): WorkflowSyncResult {
+	const result: WorkflowSyncResult = { agents: 0, updated: 0 };
+	if (!MEMORY_SCAFFOLD_ENABLED) return result;
+
+	const settings = loadWorkflowSettings(homeDir);
+	const subagents = resolveSubagents(settings);
+	const previousMainModel = settings.appliedMainModel ?? WORKFLOW_MAIN_MODEL;
 
 	let agents: Array<typeof workspaces.$inferSelect>;
 	try {
@@ -35,19 +61,25 @@ export function syncAgentWorkflowFiles(): void {
 			.all();
 	} catch (error) {
 		console.error("[workflow-sync] Failed to list agents:", error);
-		return;
+		return result;
 	}
 
-	let updated = 0;
 	for (const agent of agents) {
 		try {
 			if (!agent.runtime || agent.deletingAt) continue;
 			const worktreePath = resolveAgentWorktreePath(agent.id, agent.worktreeId);
 			if (!existsSync(join(worktreePath, ".git"))) continue;
 
-			const changes = upgradeAgentWorkflow(worktreePath);
+			result.agents++;
+			const changes = [
+				...upgradeAgentWorkflow(worktreePath, {
+					subagents,
+					mainModel: settings.mainModel,
+				}),
+				...applyRouting(worktreePath, settings, previousMainModel),
+			];
 			if (changes.length > 0) {
-				updated++;
+				result.updated++;
 				console.log(
 					`[workflow-sync] ${agent.id}: updated ${changes.join(", ")}`,
 				);
@@ -57,7 +89,20 @@ export function syncAgentWorkflowFiles(): void {
 		}
 	}
 
-	if (updated > 0) {
-		console.log(`[workflow-sync] Updated ${updated} agent(s).`);
+	// Remember which main model ADE has now written, so the next change can
+	// tell ADE's value apart from one the user set by hand.
+	if (
+		settings.appliedMainModel !== settings.mainModel &&
+		existsSync(workflowSettingsPath(homeDir))
+	) {
+		saveWorkflowSettings(homeDir, {
+			...settings,
+			appliedMainModel: settings.mainModel,
+		});
 	}
+
+	if (result.updated > 0) {
+		console.log(`[workflow-sync] Updated ${result.updated} agent(s).`);
+	}
+	return result;
 }

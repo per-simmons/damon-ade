@@ -16,9 +16,13 @@ import {
 import {
 	WORKFLOW_BRIDGE_POINTER,
 	WORKFLOW_EXCLUDES,
-	WORKFLOW_MAIN_MODEL,
 	writeAgentWorkflowFiles,
 } from "./agent-workflow";
+import {
+	loadWorkflowSettings,
+	resolveSubagents,
+} from "./agent-workflow/workflow-settings";
+import { getSupersetHomeDir } from "./app-environment";
 
 /**
  * Memory scaffold written on agent creation (ADE Phase E, docs/memory.md).
@@ -381,6 +385,8 @@ export function scaffoldAgentMemory({
 		worktreePathOverride?.trim() || getAgentWorktreePath(agentId);
 	const skillsDir = join(agentHome, "skills");
 	const resolvedUserName = userName?.trim() || "the user";
+	// Model routing from Settings > Models (defaults when never changed).
+	const workflowSettings = loadWorkflowSettings(getSupersetHomeDir());
 
 	const vars: Record<string, string> = {
 		agent_name: agentName,
@@ -423,7 +429,7 @@ export function scaffoldAgentMemory({
 			{
 				// Coordinator model for the main session; the workflow subagents pin
 				// their own models. /model or `claude --model` still override it.
-				model: WORKFLOW_MAIN_MODEL,
+				model: workflowSettings.mainModel,
 				autoMemoryDirectory: join(memoryDir),
 				autoMemoryEnabled: true,
 				hooks: {
@@ -448,7 +454,7 @@ export function scaffoldAgentMemory({
 
 	// Multi-model task workflow: role subagents + /plan, /build, /review,
 	// /escalate (docs/plans/multi-model-workflow/plan.md).
-	writeAgentWorkflowFiles(worktreePath);
+	writeAgentWorkflowFiles(worktreePath, resolveSubagents(workflowSettings));
 
 	// Keep the generated bridge files out of the repo (local, per-worktree).
 	// Guard against a duplicate block when re-run by the backfill.

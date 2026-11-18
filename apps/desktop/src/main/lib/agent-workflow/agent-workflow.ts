@@ -350,16 +350,20 @@ function writeIfEmpty(path: string, content: string): boolean {
 /**
  * Write the workflow subagents and commands into `<worktreePath>/.claude/`.
  * Existing non-empty files are left untouched. Returns the paths written,
- * relative to the worktree.
+ * relative to the worktree. `subagents` carries the user's model routing
+ * (see workflow-settings.ts); it defaults to the built-in roles.
  */
-export function writeAgentWorkflowFiles(worktreePath: string): string[] {
+export function writeAgentWorkflowFiles(
+	worktreePath: string,
+	subagents: WorkflowSubagent[] = WORKFLOW_SUBAGENTS,
+): string[] {
 	const agentsDir = join(worktreePath, ".claude", "agents");
 	const commandsDir = join(worktreePath, ".claude", "commands");
 	mkdirSync(agentsDir, { recursive: true });
 	mkdirSync(commandsDir, { recursive: true });
 
 	const written: string[] = [];
-	for (const agent of WORKFLOW_SUBAGENTS) {
+	for (const agent of subagents) {
 		const rel = join(".claude", "agents", `${agent.name}.md`);
 		if (writeIfEmpty(join(worktreePath, rel), renderSubagent(agent))) {
 			written.push(rel);
@@ -396,8 +400,12 @@ function isDirectory(path: string): boolean {
  * scaffold to create; an unparseable settings.json is left untouched.
  * Returns a short description of each change, for logging and tests.
  */
-export function upgradeAgentWorkflow(worktreePath: string): string[] {
-	const changes = writeAgentWorkflowFiles(worktreePath);
+export function upgradeAgentWorkflow(
+	worktreePath: string,
+	options: { subagents?: WorkflowSubagent[]; mainModel?: string } = {},
+): string[] {
+	const changes = writeAgentWorkflowFiles(worktreePath, options.subagents);
+	const mainModel = options.mainModel ?? WORKFLOW_MAIN_MODEL;
 
 	const settingsPath = join(worktreePath, ".claude", "settings.json");
 	if (existsSync(settingsPath)) {
@@ -411,7 +419,7 @@ export function upgradeAgentWorkflow(worktreePath: string): string[] {
 			) {
 				writeFileSync(
 					settingsPath,
-					`${JSON.stringify({ model: WORKFLOW_MAIN_MODEL, ...settings }, null, 2)}\n`,
+					`${JSON.stringify({ model: mainModel, ...settings }, null, 2)}\n`,
 					"utf8",
 				);
 				changes.push(join(".claude", "settings.json"));
