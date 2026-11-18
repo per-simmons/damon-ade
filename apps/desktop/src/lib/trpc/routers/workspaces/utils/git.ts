@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, rename } from "node:fs/promises";
+import { mkdir, rename, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -648,6 +648,31 @@ export async function deleteLocalBranch({
 	}
 }
 
+/**
+ * rename(), retried briefly on Windows while the folder is still in use.
+ *
+ * Deleting an agent kills its sessions first, and on Windows a directory can't
+ * be renamed while any process still has it (or anything in it) open, such as
+ * a shell that is still exiting with it as its working directory. That fails
+ * with EBUSY or EPERM for a moment and then clears, so wait it out (about 3 s
+ * at most) instead of failing the delete.
+ */
+async function renameWhenReleased(from: string, to: string): Promise<void> {
+	const delaysMs =
+		process.platform === "win32" ? [100, 200, 300, 400, 500, 700, 800] : [];
+	for (let attempt = 0; ; attempt++) {
+		try {
+			await rename(from, to);
+			return;
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			const busy = code === "EBUSY" || code === "EPERM" || code === "EACCES";
+			if (!busy || attempt >= delaysMs.length) throw error;
+			await new Promise((r) => setTimeout(r, delaysMs[attempt]));
+		}
+	}
+}
+
 export async function removeWorktree(
 	mainRepoPath: string,
 	worktreePath: string,
@@ -661,12 +686,25 @@ export async function removeWorktree(
 			dirname(worktreePath),
 			`.ade-delete-${randomUUID()}`,
 		);
-		await rename(worktreePath, tempPath);
+		await renameWhenReleased(worktreePath, tempPath);
 
 		await execFileAsync("git", ["-C", mainRepoPath, "worktree", "prune"], {
 			env,
 			timeout: 10_000,
 		});
+
+		// Windows has no /bin/rm, and the macOS hang below doesn't apply there.
+		if (process.platform === "win32") {
+			rm(tempPath, { recursive: true, force: true, maxRetries: 5 }).catch(
+				(err: Error) => {
+					console.error(
+						`[removeWorktree] Background cleanup of ${tempPath} failed:`,
+						err.message,
+					);
+				},
+			);
+			return;
+		}
 
 		// Delete the moved directory in the background — don't block the caller.
 		// Use spawned `rm -rf` instead of Node's fs.rm which can hang on macOS
