@@ -7,6 +7,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import type { TaskHistory } from "main/lib/project-history/types";
 import {
 	classifyTask,
 	slugForTask,
@@ -186,6 +187,11 @@ export interface TaskRecord {
 	evidenceStart?: number;
 	/** Explicit moves between worktrees or branches. */
 	moves?: Array<{ at: string; from: string; to: string }>;
+	/**
+	 * Earlier conversations this task draws on (excerpts in history.md in the
+	 * task folder). Absent when the task was created without history.
+	 */
+	history?: TaskHistory;
 }
 
 const MAX_DESCRIPTION_LENGTH = 20_000;

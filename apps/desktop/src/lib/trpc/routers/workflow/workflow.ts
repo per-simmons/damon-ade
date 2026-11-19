@@ -25,12 +25,14 @@ import {
 	readTaskFiles,
 	refreshAllProjectWorkflows,
 	saveProjectChecks,
+	saveTask,
 	saveWorkflowSettings,
 	stageModel,
 	suggestChecks,
 	TaskController,
 	type TaskIdentity,
 	type TaskRecord,
+	taskDir,
 	taskSpend,
 	validateWorkflowSettings,
 } from "main/lib/agent-workflow";
@@ -41,6 +43,11 @@ import {
 } from "main/lib/agent-workflow/service";
 import { getSupersetHomeDir } from "main/lib/app-environment";
 import { localDb } from "main/lib/local-db";
+import {
+	buildTaskHistory,
+	clearTaskHistory,
+	eligibleConversations,
+} from "main/lib/project-history";
 import {
 	costOf,
 	dedupeAcrossSessions,
@@ -178,6 +185,29 @@ async function guarded<T>(fn: () => Promise<T> | T): Promise<T> {
 	}
 }
 
+/**
+ * Choose the task's history excerpts (deterministic search, no model) and
+ * record which conversations they came from. A task with no relevant
+ * excerpts records an empty history, so the panel can say so.
+ */
+function withHistory(
+	project: ProjectWorkflow,
+	task: TaskRecord,
+	excluded: string[],
+): TaskRecord {
+	const history = buildTaskHistory({
+		project,
+		taskDir: taskDir(project, task.slug),
+		query: `${task.title}
+${task.description}`,
+		worktreePath: task.identity.worktreePath,
+		excluded,
+	});
+	const updated = { ...task, history };
+	saveTask(project, updated);
+	return updated;
+}
+
 interface Probes {
 	/** The workspace's branch now. */
 	branchNow: string | undefined;
@@ -241,6 +271,16 @@ function describeTask(
 		/** Set when this workspace is not the task's worktree or branch. */
 		mismatch: mismatch ?? null,
 		moves: task.moves ?? [],
+		/** Earlier conversations this task draws on (history.md). */
+		history: task.history
+			? {
+					builtAt: task.history.builtAt,
+					excerpts: task.history.excerpts,
+					sources: task.history.sources,
+					excluded: task.history.excluded,
+					file: `${project.tasksDir}/${task.slug}/history.md`,
+				}
+			: null,
 		spend,
 		next: next ?? null,
 		manualBlockers,
@@ -307,6 +347,19 @@ export const createWorkflowRouter = (
 	}
 
 	const taskInput = z.object({ workspaceId: z.string(), slug: z.string() });
+
+	/** A task whose history may change: not while a run is using it. */
+	function historyTask(workspaceId: string, slug: string) {
+		const found = taskFor(workspaceId, slug);
+		if (activeRun(found.task)) {
+			throw new TRPCError({
+				code: "CONFLICT",
+				message:
+					"Wait for the current run to finish before changing its history",
+			});
+		}
+		return found;
+	}
 
 	return router({
 		getSettings: publicProcedure.query(() => ({
@@ -428,6 +481,9 @@ export const createWorkflowRouter = (
 						tasksDir: project.tasksDir,
 					},
 					worktreePath: ctx.worktreePath,
+					/** Imported conversations a new task here would search. */
+					historyAvailable: eligibleConversations(project, ctx.worktreePath)
+						.length,
 					runtime: ctx.runtime,
 					/** Managed stages always run on Claude Code, even in Codex workspaces. */
 					executor: "claude-code" as const,
@@ -513,13 +569,15 @@ export const createWorkflowRouter = (
 					description: z.string().min(1).max(20_000),
 					route: z.enum(TASK_ROUTES).optional(),
 					mode: z.enum(["auto", "manual"]).default("auto"),
+					/** Give the task excerpts of the project's imported history. */
+					useHistory: z.boolean().default(true),
 				}),
 			)
 			.mutation(({ input }) =>
 				guarded(async () => {
 					const ctx = deps.resolveWorkspace(input.workspaceId);
 					const execution = loadWorkflowSettings(deps.homeDir()).execution;
-					const task = createTask(ctx.project, {
+					const created = createTask(ctx.project, {
 						description: input.description,
 						route: input.route,
 						mode: input.mode,
@@ -531,6 +589,9 @@ export const createWorkflowRouter = (
 							maxEscalations: execution.maxEscalations,
 						},
 					});
+					const task = input.useHistory
+						? withHistory(ctx.project, created, [])
+						: created;
 					const started =
 						input.mode === "auto"
 							? await deps.controller().start(ctx.project, task.slug)
@@ -544,6 +605,56 @@ export const createWorkflowRouter = (
 					};
 				}),
 			),
+
+		/**
+		 * Choose the task's history again from the project's current imports
+		 * (after importing, refreshing or removing conversations).
+		 */
+		refreshTaskHistory: publicProcedure.input(taskInput).mutation(({ input }) =>
+			guarded(() => {
+				const { ctx, task } = historyTask(input.workspaceId, input.slug);
+				const updated = withHistory(
+					ctx.project,
+					task,
+					task.history?.excluded ?? [],
+				);
+				return { excerpts: updated.history?.excerpts ?? 0 };
+			}),
+		),
+
+		/** Stop using one conversation in this task (the import is kept). */
+		excludeTaskHistory: publicProcedure
+			.input(
+				z.object({
+					workspaceId: z.string(),
+					slug: z.string(),
+					conversationId: z.string(),
+				}),
+			)
+			.mutation(({ input }) =>
+				guarded(() => {
+					const { ctx, task } = historyTask(input.workspaceId, input.slug);
+					const excluded = [
+						...new Set([
+							...(task.history?.excluded ?? []),
+							input.conversationId,
+						]),
+					];
+					const updated = withHistory(ctx.project, task, excluded);
+					return { excerpts: updated.history?.excerpts ?? 0 };
+				}),
+			),
+
+		/** Run this task without any project history. */
+		clearTaskHistory: publicProcedure.input(taskInput).mutation(({ input }) =>
+			guarded(() => {
+				const { ctx, task } = historyTask(input.workspaceId, input.slug);
+				clearTaskHistory(taskDir(ctx.project, task.slug));
+				const { history: _history, ...rest } = task;
+				saveTask(ctx.project, rest);
+				return { cleared: true };
+			}),
+		),
 
 		start: publicProcedure.input(taskInput).mutation(({ input }) =>
 			guarded(async () => {

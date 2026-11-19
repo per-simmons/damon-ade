@@ -88,6 +88,7 @@ export {
 	type TaskRun,
 	type TaskStage,
 	type TaskState,
+	taskDir,
 	withTaskLock,
 } from "./tasks";
 export {

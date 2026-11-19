@@ -14,6 +14,10 @@ import { createMenuRouter } from "./menu";
 import { createNotificationsRouter } from "./notifications";
 import { createPermissionsRouter } from "./permissions";
 import { createPortsRouter } from "./ports";
+import {
+	createDefaultProjectHistoryDeps,
+	createProjectHistoryRouter,
+} from "./project-history";
 import { createProjectsRouter } from "./projects";
 import { createResourceMetricsRouter } from "./resource-metrics";
 import { createRingtoneRouter } from "./ringtone";
@@ -51,6 +55,9 @@ export const createAppRouter = (getWindow: () => BrowserWindow | null) => {
 		sync: createSyncRouter(),
 		ringtone: createRingtoneRouter(getWindow),
 		workflow: createWorkflowRouter(),
+		projectHistory: createProjectHistoryRouter(
+			createDefaultProjectHistoryDeps(getWindow),
+		),
 	});
 };
 
