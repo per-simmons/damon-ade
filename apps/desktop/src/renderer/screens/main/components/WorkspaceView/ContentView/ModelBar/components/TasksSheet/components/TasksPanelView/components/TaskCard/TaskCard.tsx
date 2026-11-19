@@ -50,8 +50,11 @@ export function TaskCard({ task, actions }: TaskCardProps) {
 		(task.state === "needs-input" && task.planQuestions.length === 0);
 	const showSteps =
 		!finished && !elsewhere && (task.mode === "manual" || stopped) && !running;
-	// Uncertain costs count at their cap, as in ADE's budget decisions.
-	const budgetSpent = task.spend.worstCaseUsd >= task.limits.budgetUsd;
+	// Uncertain costs count at their cap, as in ADE's budget decisions. A run
+	// in progress always counts at its cap (the rest of the budget), so the
+	// budget prompt waits until it has finished and reported its cost.
+	const budgetSpent =
+		!running && task.spend.worstCaseUsd >= task.limits.budgetUsd;
 
 	return (
 		<div

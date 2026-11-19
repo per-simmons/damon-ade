@@ -624,6 +624,21 @@ describe.if(bash !== null && git !== null)("Auto mode, end to end", () => {
 		);
 		const child = Number(readFileSync(fake.childPidFile, "utf8"));
 
+		// While it runs, its cost counts at its cap (the whole budget), but the
+		// card must not ask to raise the budget for a normal run in progress.
+		const runningHtml = renderToStaticMarkup(
+			<m.panel.TasksPanelView
+				data={await tasksOf("ws-cancel")}
+				checks={undefined}
+				description=""
+				preview={undefined}
+				actions={noActions}
+			/>,
+		);
+		expect(runningHtml).toContain("Running");
+		expect(runningHtml).toContain("run(s) uncertain");
+		expect(runningHtml).not.toContain("Raise budget");
+
 		const result = await caller.cancel({
 			workspaceId: "ws-cancel",
 			slug: created.slug,
