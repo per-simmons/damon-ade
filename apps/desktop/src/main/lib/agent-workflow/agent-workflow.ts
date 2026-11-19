@@ -13,6 +13,16 @@
  * - architect (fable) is only called for exceptional problems: escalations.
  */
 
+/**
+ * Prefix of the role names ADE passes to Claude Code (ade-planner, ...), so a
+ * project's own planner/implementer/reviewer agents are never overridden.
+ */
+export const ADE_ROLE_PREFIX = "ade-";
+
+export function adeRoleName(role: string): string {
+	return `${ADE_ROLE_PREFIX}${role}`;
+}
+
 /** Replaced with the project's absolute task folder when roles are rendered. */
 export const TASKS_DIR_PLACEHOLDER = "{{TASKS_DIR}}";
 
@@ -68,7 +78,11 @@ Slug: <slug> | Created: <YYYY-MM-DD> | Status: planned
 - [ ] <criterion> — verified by: <check>
 ## Validation commands
 ## Out of scope
+## Questions for the user
+None
 \`\`\`
+
+Under "Questions for the user", list only decisions you cannot make from the code and the task (for example a product choice). Write "None" when there are none: ADE pauses the task for the user while any question is listed.
 
 ## progress.md format
 \`\`\`
@@ -238,7 +252,7 @@ export function buildAgentsDefinition(
 ): Record<string, AgentDefinition> {
 	return Object.fromEntries(
 		subagents.map((agent) => [
-			agent.name,
+			adeRoleName(agent.name),
 			{
 				description: agent.description,
 				prompt: fillTasksDir(agent.prompt, tasksDir),

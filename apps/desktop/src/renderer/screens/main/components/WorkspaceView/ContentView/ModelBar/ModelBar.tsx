@@ -86,7 +86,7 @@ export function ModelBar() {
 									aria-label={
 										missing
 											? `${model.label} — not detected, click to install`
-											: `New session — ${model.label}`
+											: `New interactive ${model.label} session (not a managed task)`
 									}
 									disabled={!ready}
 									onClick={() => handleModelClick(model)}
@@ -120,7 +120,7 @@ export function ModelBar() {
 							<TooltipContent side="bottom" showArrow={false}>
 								{missing
 									? `${model.label} not detected — click to install`
-									: `${model.label}${model.isDefault ? " · default" : ""}`}
+									: `New interactive ${model.label} session${model.isDefault ? " · default" : ""}. For Auto, use Tasks.`}
 							</TooltipContent>
 						</Tooltip>
 					);
@@ -140,7 +140,8 @@ export function ModelBar() {
 						</button>
 					</TooltipTrigger>
 					<TooltipContent side="bottom" showArrow={false}>
-						Plan, build and review tasks with the multi-model workflow
+						Auto: describe a task; ADE runs it through checks and review to a
+						verified finish
 					</TooltipContent>
 				</Tooltip>
 			</div>

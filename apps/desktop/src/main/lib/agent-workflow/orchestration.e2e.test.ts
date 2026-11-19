@@ -79,11 +79,9 @@ function flag(argv: string[], name: string): string | undefined {
 
 let workflowEnvFor: typeof import("./workflow-env").workflowEnvFor;
 let createTask: typeof import("./tasks").createTask;
-let listTasks: typeof import("./tasks").listTasks;
-let getTask: typeof import("./tasks").getTask;
-let prepareStageLaunch: typeof import("./stage-launch").prepareStageLaunch;
+let listTaskRecords: typeof import("./tasks").listTaskRecords;
+let captureIdentity: typeof import("./identity").captureIdentity;
 let projectWorkflowFor: typeof import("./project-workflow").projectWorkflowFor;
-let defaultWorkflowSettings: typeof import("./workflow-settings").defaultWorkflowSettings;
 
 beforeAll(async () => {
 	root = mkdtempSync(join(tmpdir(), "ade-e2e-"));
@@ -115,10 +113,9 @@ beforeAll(async () => {
 	);
 
 	({ workflowEnvFor } = await import("./workflow-env"));
-	({ createTask, listTasks, getTask } = await import("./tasks"));
-	({ prepareStageLaunch } = await import("./stage-launch"));
+	({ createTask, listTaskRecords } = await import("./tasks"));
+	({ captureIdentity } = await import("./identity"));
 	({ projectWorkflowFor } = await import("./project-workflow"));
-	({ defaultWorkflowSettings } = await import("./workflow-settings"));
 });
 
 afterAll(() => {
@@ -159,57 +156,41 @@ describe.if(usableBash)("multi-model workflow in any project", () => {
 		const project = projectWorkflowFor(TEST_HOME, existing);
 		expect(tasksDir).toBe(project.tasksDir.replace(/\\/g, "/"));
 		const agents = JSON.parse(flag(argv, "--agents") ?? "{}");
+		// ADE's roles are namespaced: the project's own agents (my-helper, or
+		// one it might call "reviewer") keep their names and definitions.
 		expect(Object.keys(agents).sort()).toEqual([
-			"architect",
-			"implementer",
-			"planner",
-			"quick",
-			"reviewer",
+			"ade-architect",
+			"ade-implementer",
+			"ade-planner",
+			"ade-quick",
+			"ade-reviewer",
 		]);
-		expect(agents.planner.model).toBe("opus");
-		expect(agents.architect.model).toBe("fable");
-		expect(agents.implementer.prompt).toContain(tasksDir);
+		expect(agents["ade-planner"].model).toBe("opus");
+		expect(agents["ade-architect"].model).toBe("fable");
+		expect(agents["ade-implementer"].prompt).toContain(tasksDir);
 		// ADE's hooks are still passed, and the user's prompt arrives last.
 		expect(flag(argv, "--settings")).toBe(settingsPath);
 		expect(argv[argv.length - 1]).toBe("fix the checkout bug");
 	});
 
-	it("runs a planned task's stages on their models through the same wrapper", () => {
-		const env = workflowEnvFor(TEST_HOME, { rootPath: existing }) ?? {};
+	it("keeps a task's files in ADE's project folder, not in the repository", () => {
 		const project = projectWorkflowFor(TEST_HOME, existing);
 		const task = createTask(project, {
 			description: "Refactor the cart and migrate its database schema",
+			identity: captureIdentity("ws-shop", existing),
+			limits: {
+				budgetUsd: 10,
+				maxCorrections: 2,
+				maxReviewRounds: 3,
+				maxEscalations: 2,
+			},
 		});
 		expect(task.route).toBe("plan");
-
-		const settings = defaultWorkflowSettings();
-		for (const [stage, model] of [
-			["plan", "opus"],
-			["build", "sonnet"],
-			["review", "sonnet"],
-			["escalate", "fable"],
-		] as const) {
-			const launch = prepareStageLaunch({
-				homeDir: TEST_HOME,
-				project,
-				slug: task.slug,
-				stage,
-				settings,
-				shell: "posix",
-				runtime: "claude",
-			});
-			const argv = runClaude(launch.command, existing, env);
-			expect(flag(argv, "--model")).toBe(model);
-			expect(flag(argv, "--session-id")).toBe(launch.sessionId);
-			expect(flag(argv, "--agents")).toBeDefined();
-			expect(argv[argv.length - 1]).toContain(`ADE task "${task.title}"`);
-		}
-		expect(getTask(project, task.slug)?.stages.map((s) => s.model)).toEqual([
-			"opus",
-			"sonnet",
-			"sonnet",
-			"fable",
-		]);
+		expect(task.mode).toBe("auto");
+		expect(task.identity.worktreePath).toBe(existing);
+		expect(existsSync(join(project.tasksDir, task.slug, "task.json"))).toBe(
+			true,
+		);
 	});
 
 	it("leaves the existing project's files exactly as they were", () => {
@@ -273,7 +254,9 @@ describe.if(usableBash)("multi-model workflow in any project", () => {
 		// No workflow files in the agent's repository, and no tasks shared.
 		expect(existsSync(join(worktree, ".claude", "agents"))).toBe(false);
 		expect(existsSync(join(worktree, ".ade"))).toBe(false);
-		expect(listTasks(agentProject)).toHaveLength(0);
-		expect(listTasks(projectWorkflowFor(TEST_HOME, existing))).toHaveLength(1);
+		expect(listTaskRecords(agentProject)).toHaveLength(0);
+		expect(
+			listTaskRecords(projectWorkflowFor(TEST_HOME, existing)),
+		).toHaveLength(1);
 	});
 });

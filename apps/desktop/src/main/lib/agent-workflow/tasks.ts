@@ -16,30 +16,138 @@ import type { ProjectWorkflow } from "./project-workflow";
 
 /**
  * Tasks of one project, stored in its workflow folder (project-workflow.ts).
- * task.json is ADE's record (route, stages launched, which Claude session ran
- * each one); plan.md and progress.md are written by the agents.
+ * task.json is ADE's record: mode, state, where the task runs, every run with
+ * its outcome, and the counters that bound retries. plan.md, progress.md and
+ * escalations/ are written by the agents; ADE treats them as inputs, never as
+ * proof of completion.
  */
 
-export const TASK_STAGES = [
+/** Stages that run a model. "fix" is a correction after failed checks/review. */
+export const MODEL_STAGES = [
 	"quick",
 	"implement",
 	"plan",
 	"build",
+	"fix",
 	"review",
 	"escalate",
 ] as const;
-export type TaskStage = (typeof TASK_STAGES)[number];
+export type ModelStage = (typeof MODEL_STAGES)[number];
 
-export interface StageLaunch {
-	stage: TaskStage;
-	at: string;
-	model: string;
-	runtime: "claude" | "codex";
-	/** Claude session id ADE pinned with --session-id (claude runtime). */
+/** Everything a run can be: a model stage, or ADE running the checks. */
+export const RUN_KINDS = [...MODEL_STAGES, "checks"] as const;
+export type RunKind = (typeof RUN_KINDS)[number];
+
+/** Kept for callers of the first version; equals MODEL_STAGES. */
+export const TASK_STAGES = MODEL_STAGES;
+export type TaskStage = ModelStage;
+
+export type ExecutionMode = "auto" | "manual";
+
+export const RUN_STATUSES = [
+	"queued",
+	"running",
+	"succeeded",
+	"failed",
+	"cancelled",
+	"blocked",
+	"interrupted",
+] as const;
+export type RunStatus = (typeof RUN_STATUSES)[number];
+
+export type TaskState =
+	| "idle"
+	| "running"
+	| "paused"
+	| "needs-input"
+	| "blocked"
+	| "done"
+	| "failed"
+	| "cancelled";
+
+export interface CheckResult {
+	command: string;
+	exitCode: number | null;
+	timedOut: boolean;
+	durationMs: number;
+	/** Last part of the output. */
+	outputTail: string;
+}
+
+export type CostState =
+	| "pending"
+	| "reported"
+	| "estimated"
+	| "partial"
+	| "unknown";
+
+export interface TaskRun {
+	id: string;
+	kind: RunKind;
+	status: RunStatus;
+	/** Attempt number of this kind within the task (1-based). */
+	attempt: number;
+	queuedAt: string;
+	startedAt?: string;
+	endedAt?: string;
+	/** Model passed to the CLI, and the one the run reported using. */
+	model?: string;
+	observedModels?: string[];
+	effort?: string;
+	maxTurns?: number;
+	permissionMode?: string;
+	maxBudgetUsd?: number;
 	sessionId?: string;
+	/** Set when this run is a cheaper-model retry of an unavailable model. */
+	fallbackFrom?: string;
+	exitCode?: number | null;
+	/** Cost Claude Code reported for the run (includes its subagents). */
+	reportedCostUsd?: number;
+	/** ADE's running estimate from streamed usage, while and after it runs. */
+	liveCostUsd?: number;
+	costState?: CostState;
+	unpricedModels?: string[];
+	/** Machine-readable reason a run did not succeed. */
+	failure?:
+		| "launch"
+		| "model-unavailable"
+		| "rate-limited"
+		| "auth"
+		| "max-turns"
+		| "budget"
+		| "timeout"
+		| "cancelled"
+		| "error"
+		| "interrupted";
+	error?: string;
+	/** Reviewer verdict, parsed from the review run's final text. */
+	verdict?: "PASS" | "FAIL";
+	/** Checks run by ADE (kind "checks"). */
+	checks?: CheckResult[];
+	/** The run's final text, trimmed. */
+	summary?: string;
+}
+
+/** Where the task runs, and the state of the tree when it was created. */
+export interface TaskIdentity {
+	workspaceId: string;
+	worktreePath: string;
+	branch?: string;
+	/** HEAD when the task was created; the task's changes are relative to it. */
+	baselineHead?: string;
+	/** Files already changed when the task was created: path -> content hash. */
+	baselineDirty: Record<string, string>;
+}
+
+export interface TaskLimits {
+	budgetUsd: number;
+	maxCorrections: number;
+	maxReviewRounds: number;
+	maxEscalations: number;
 }
 
 export interface TaskRecord {
+	version: 2;
 	slug: string;
 	title: string;
 	description: string;
@@ -47,54 +155,118 @@ export interface TaskRecord {
 	/** How the route was chosen: the router's reasons, or "chosen by you". */
 	routeReasons: string[];
 	createdAt: string;
-	stages: StageLaunch[];
-}
-
-export interface TaskSummary extends TaskRecord {
-	/** From progress.md, else derived from the stages launched. */
-	status: string;
-	hasPlan: boolean;
-	openEscalations: number;
-	/** The stage the UI should offer next. */
-	nextStage: TaskStage | null;
+	mode: ExecutionMode;
+	state: TaskState;
+	/** Why the task is paused, blocked, failed or needs input. */
+	stateReason?: string;
+	/** Auto mode: do not start another run (set by Pause). */
+	pauseRequested?: boolean;
+	/** The user's answers to the plan's questions. */
+	answers?: string;
+	/**
+	 * A failed run the user resumed past: its failure no longer blocks, and
+	 * the stage may be tried again.
+	 */
+	acknowledgedRunId?: string;
+	identity: TaskIdentity;
+	limits: TaskLimits;
+	runs: TaskRun[];
 }
 
 const MAX_DESCRIPTION_LENGTH = 20_000;
+const SLUG = /^[a-z0-9][a-z0-9-]*$/;
 
-function taskDir(project: ProjectWorkflow, slug: string): string {
+export function taskDir(project: ProjectWorkflow, slug: string): string {
 	return join(project.tasksDir, slug);
 }
 
 function writeJsonAtomic(path: string, value: unknown): void {
-	const tmp = `${path}.tmp`;
+	const tmp = `${path}.${process.pid}.tmp`;
 	writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 	renameSync(tmp, path);
 }
 
+interface LegacyLaunch {
+	stage: ModelStage;
+	at: string;
+	model: string;
+	runtime: string;
+	sessionId?: string;
+}
+
+/** Read task.json, upgrading a first-version record in memory. */
 function readTask(
 	project: ProjectWorkflow,
 	slug: string,
 ): TaskRecord | undefined {
+	let raw: Partial<TaskRecord> & { stages?: LegacyLaunch[] };
 	try {
-		return JSON.parse(
+		raw = JSON.parse(
 			readFileSync(join(taskDir(project, slug), "task.json"), "utf8"),
-		) as TaskRecord;
+		);
 	} catch {
 		return undefined;
 	}
+	if (raw.version === 2) return raw as TaskRecord;
+	// First version: launches were recorded without outcomes.
+	return {
+		version: 2,
+		slug: raw.slug ?? slug,
+		title: raw.title ?? slug,
+		description: raw.description ?? "",
+		route: raw.route ?? "implement",
+		routeReasons: raw.routeReasons ?? [],
+		createdAt: raw.createdAt ?? new Date(0).toISOString(),
+		mode: "manual",
+		state: "paused",
+		stateReason:
+			"Created before ADE tracked runs; check the work, then resume.",
+		identity: {
+			workspaceId: "",
+			worktreePath: project.root,
+			baselineDirty: {},
+		},
+		limits: {
+			budgetUsd: 10,
+			maxCorrections: 2,
+			maxReviewRounds: 3,
+			maxEscalations: 2,
+		},
+		runs: (raw.stages ?? []).map((launch, index) => ({
+			id: `legacy-${index + 1}`,
+			kind: launch.stage,
+			status: "interrupted" as const,
+			attempt: 1,
+			queuedAt: launch.at,
+			model: launch.model,
+			sessionId: launch.sessionId,
+			failure: "interrupted" as const,
+			error: "Launched in a terminal before ADE tracked outcomes",
+		})),
+	};
 }
 
 export function getTask(
 	project: ProjectWorkflow,
 	slug: string,
 ): TaskRecord | undefined {
-	if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) return undefined;
+	if (!SLUG.test(slug)) return undefined;
 	return readTask(project, slug);
+}
+
+export function saveTask(project: ProjectWorkflow, task: TaskRecord): void {
+	writeJsonAtomic(join(taskDir(project, task.slug), "task.json"), task);
 }
 
 export function createTask(
 	project: ProjectWorkflow,
-	input: { description: string; route?: TaskRoute },
+	input: {
+		description: string;
+		route?: TaskRoute;
+		mode?: ExecutionMode;
+		identity: TaskIdentity;
+		limits: TaskLimits;
+	},
 	now: Date = new Date(),
 ): TaskRecord {
 	const description = input.description.trim();
@@ -109,13 +281,18 @@ export function createTask(
 	const slug = slugForTask(description, existing);
 	const decision = classifyTask(description);
 	const task: TaskRecord = {
+		version: 2,
 		slug,
 		title: description.split("\n")[0].slice(0, 120),
 		description,
 		route: input.route ?? decision.route,
 		routeReasons: input.route ? ["chosen by you"] : decision.reasons,
 		createdAt: now.toISOString(),
-		stages: [],
+		mode: input.mode ?? "auto",
+		state: "idle",
+		identity: input.identity,
+		limits: input.limits,
+		runs: [],
 	};
 	const dir = taskDir(project, slug);
 	mkdirSync(join(dir, "escalations"), { recursive: true });
@@ -124,90 +301,111 @@ export function createTask(
 		`# ${task.title}\n\n${description}\n`,
 		"utf8",
 	);
-	writeJsonAtomic(join(dir, "task.json"), task);
+	saveTask(project, task);
 	return task;
-}
-
-export function recordStageLaunch(
-	project: ProjectWorkflow,
-	slug: string,
-	launch: StageLaunch,
-): TaskRecord {
-	const task = readTask(project, slug);
-	if (!task) throw new Error(`Unknown task: ${slug}`);
-	task.stages.push(launch);
-	writeJsonAtomic(join(taskDir(project, slug), "task.json"), task);
-	return task;
-}
-
-function openEscalations(dir: string): number {
-	try {
-		return readdirSync(join(dir, "escalations")).filter((name) => {
-			if (!name.endsWith(".md")) return false;
-			return !readFileSync(join(dir, "escalations", name), "utf8").includes(
-				"## Resolution",
-			);
-		}).length;
-	} catch {
-		return 0;
-	}
-}
-
-/** The stage to offer next, from the route and what has happened so far. */
-export function nextStageFor(
-	task: TaskRecord,
-	status: string,
-	hasPlan: boolean,
-	escalations: number,
-): TaskStage | null {
-	const done = /^done\b/i.test(status);
-	if (done) return null;
-	if (escalations > 0 || /^blocked\b/i.test(status)) return "escalate";
-	const launched = new Set(task.stages.map((s) => s.stage));
-	if (task.route === "quick") return launched.has("quick") ? "review" : "quick";
-	if (task.route === "implement") {
-		return launched.has("implement") ? "review" : "implement";
-	}
-	if (!hasPlan) return "plan";
-	if (!launched.has("build")) return "build";
-	return "review";
-}
-
-export function summarizeTask(
-	project: ProjectWorkflow,
-	task: TaskRecord,
-): TaskSummary {
-	const dir = taskDir(project, task.slug);
-	let status = "";
-	try {
-		status =
-			readFileSync(join(dir, "progress.md"), "utf8").match(
-				/^Status:\s*(.+?)\s*$/m,
-			)?.[1] ?? "";
-	} catch {
-		// No progress yet.
-	}
-	if (!status) {
-		const last = task.stages[task.stages.length - 1];
-		status = last ? `${last.stage} started` : "new";
-	}
-	const hasPlan = existsSync(join(dir, "plan.md"));
-	const escalations = openEscalations(dir);
-	return {
-		...task,
-		status,
-		hasPlan,
-		openEscalations: escalations,
-		nextStage: nextStageFor(task, status, hasPlan, escalations),
-	};
 }
 
 /** All tasks of a project, newest first. */
-export function listTasks(project: ProjectWorkflow): TaskSummary[] {
+export function listTaskRecords(project: ProjectWorkflow): TaskRecord[] {
 	if (!existsSync(project.tasksDir)) return [];
 	return readdirSync(project.tasksDir)
+		.filter((slug) => SLUG.test(slug))
 		.map((slug) => readTask(project, slug))
 		.filter((task): task is TaskRecord => task !== undefined)
-		.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-		.map((task) => summarizeTask(project, task));
+		.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/** What the agents have written in the task folder. */
+export interface TaskFiles {
+	hasPlan: boolean;
+	/** plan.md has a non-empty "Questions for the user" section. */
+	planQuestions: string[];
+	progressStatus?: string;
+	openEscalations: string[];
+}
+
+export function readTaskFiles(
+	project: ProjectWorkflow,
+	slug: string,
+): TaskFiles {
+	const dir = taskDir(project, slug);
+	let plan = "";
+	try {
+		plan = readFileSync(join(dir, "plan.md"), "utf8");
+	} catch {
+		// No plan.
+	}
+	const questionsSection =
+		plan.match(
+			/^##\s*Questions for the user\s*$([\s\S]*?)(?=^##\s|(?![\s\S]))/im,
+		)?.[1] ?? "";
+	const planQuestions = questionsSection
+		.split("\n")
+		.map((line) => line.replace(/^[-*\d.\s]+/, "").trim())
+		.filter((line) => line && !/^(none|n\/a|-)$/i.test(line));
+
+	let progressStatus: string | undefined;
+	try {
+		progressStatus = readFileSync(join(dir, "progress.md"), "utf8").match(
+			/^Status:\s*(.+?)\s*$/m,
+		)?.[1];
+	} catch {
+		// No progress yet.
+	}
+
+	const openEscalations: string[] = [];
+	try {
+		for (const name of readdirSync(join(dir, "escalations")).sort()) {
+			if (!name.endsWith(".md")) continue;
+			const text = readFileSync(join(dir, "escalations", name), "utf8");
+			if (!text.includes("## Resolution")) openEscalations.push(name);
+		}
+	} catch {
+		// No escalations folder.
+	}
+
+	return {
+		hasPlan: plan.trim().length > 0,
+		planQuestions,
+		progressStatus,
+		openEscalations,
+	};
+}
+
+/**
+ * Serializes work on one task within this process: every state change runs
+ * after the previous one finished, so clicks and run events cannot interleave.
+ */
+const taskQueues = new Map<string, Promise<unknown>>();
+
+export function withTaskLock<T>(
+	project: ProjectWorkflow,
+	slug: string,
+	fn: () => Promise<T> | T,
+): Promise<T> {
+	const key = `${project.key}/${slug}`;
+	const previous = taskQueues.get(key) ?? Promise.resolve();
+	const next = previous.then(fn, fn);
+	taskQueues.set(
+		key,
+		next.catch(() => undefined),
+	);
+	return next;
+}
+
+export function activeRun(task: TaskRecord): TaskRun | undefined {
+	return task.runs.find(
+		(run) => run.status === "queued" || run.status === "running",
+	);
+}
+
+export function countRuns(
+	task: TaskRecord,
+	kind: RunKind,
+	status?: RunStatus,
+): number {
+	return task.runs.filter(
+		(run) =>
+			run.kind === kind && (status === undefined || run.status === status),
+	).length;
 }

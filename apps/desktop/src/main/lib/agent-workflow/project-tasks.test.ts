@@ -13,16 +13,23 @@ import { join, relative } from "node:path";
 import {
 	ensureProjectWorkflow,
 	listWorkflowProjects,
+	type ProjectWorkflow,
 	portablePath,
 	projectKeyFor,
 	refreshAllProjectWorkflows,
 } from "./project-workflow";
-import { prepareStageLaunch, stageModel } from "./stage-launch";
-import { createTask, getTask, listTasks, summarizeTask } from "./tasks";
+import { buildResumeCommand, stageModel } from "./stage-launch";
+import {
+	createTask,
+	getTask,
+	listTaskRecords,
+	readTaskFiles,
+	type TaskIdentity,
+	withTaskLock,
+} from "./tasks";
 import {
 	defaultWorkflowSettings,
 	saveWorkflowSettings,
-	type WorkflowSettings,
 } from "./workflow-settings";
 
 let home: string;
@@ -43,15 +50,6 @@ function snapshot(dir: string): Record<string, string> {
 	return files;
 }
 
-function summaryOf(
-	project: ReturnType<typeof ensureProjectWorkflow>,
-	slug: string,
-) {
-	const task = getTask(project, slug);
-	if (!task) throw new Error(`missing task ${slug}`);
-	return summarizeTask(project, task);
-}
-
 function makeRepo(name: string): string {
 	const dir = join(mkdtempSync(join(tmpdir(), "ade-proj-")), name);
 	mkdirSync(join(dir, "src"), { recursive: true });
@@ -64,6 +62,30 @@ function makeRepo(name: string): string {
 		"utf8",
 	);
 	return dir;
+}
+
+const LIMITS = {
+	budgetUsd: 10,
+	maxCorrections: 2,
+	maxReviewRounds: 3,
+	maxEscalations: 2,
+};
+
+function identity(worktreePath: string): TaskIdentity {
+	return { workspaceId: "ws", worktreePath, baselineDirty: {} };
+}
+
+function newTask(
+	project: ProjectWorkflow,
+	description: string,
+	extra: { route?: "quick" | "implement" | "plan" | "exceptional" } = {},
+) {
+	return createTask(project, {
+		description,
+		identity: identity(project.root),
+		limits: LIMITS,
+		...extra,
+	});
 }
 
 beforeEach(() => {
@@ -91,7 +113,7 @@ describe("project workflow folders", () => {
 		const project = ensureProjectWorkflow(home, repoA);
 		expect(project.dir.startsWith(home)).toBe(true);
 		expect(project.tasksDir.startsWith(home)).toBe(true);
-		createTask(project, { description: "Fix the crash on empty lists" });
+		newTask(project, "Fix the crash on empty lists");
 		expect(snapshot(repoA)).toEqual(before);
 	});
 
@@ -110,8 +132,10 @@ describe("project workflow folders", () => {
 		expect(refreshAllProjectWorkflows(home)).toBe(2);
 		for (const project of [a, b]) {
 			const agents = JSON.parse(readFileSync(project.agentsFile, "utf8"));
-			expect(agents.implementer.model).toBe("opus");
-			expect(agents.planner.prompt).toContain(portablePath(project.tasksDir));
+			expect(agents["ade-implementer"].model).toBe("opus");
+			expect(agents["ade-planner"].prompt).toContain(
+				portablePath(project.tasksDir),
+			);
 		}
 	});
 });
@@ -119,12 +143,14 @@ describe("project workflow folders", () => {
 describe("tasks", () => {
 	it("routes new tasks automatically, or as the user chose", () => {
 		const project = ensureProjectWorkflow(home, repoA);
-		const auto = createTask(project, { description: "Fix typo in README" });
+		const auto = newTask(project, "Fix typo in README");
 		expect(auto.route).toBe("quick");
 		expect(auto.routeReasons.length).toBeGreaterThan(0);
+		expect(auto.mode).toBe("auto");
+		expect(auto.state).toBe("idle");
+		expect(auto.limits).toEqual(LIMITS);
 
-		const chosen = createTask(project, {
-			description: "Fix typo in README",
+		const chosen = newTask(project, "Fix typo in README", {
 			route: "exceptional",
 		});
 		expect(chosen.route).toBe("exceptional");
@@ -138,213 +164,136 @@ describe("tasks", () => {
 	it("keeps each project's tasks separate", () => {
 		const a = ensureProjectWorkflow(home, repoA);
 		const b = ensureProjectWorkflow(home, repoB);
-		createTask(a, { description: "Add checkout button" });
-		expect(listTasks(a)).toHaveLength(1);
-		expect(listTasks(b)).toHaveLength(0);
+		newTask(a, "Add checkout button");
+		expect(listTaskRecords(a)).toHaveLength(1);
+		expect(listTaskRecords(b)).toHaveLength(0);
 		// Reopening the project finds the same tasks.
-		expect(listTasks(ensureProjectWorkflow(home, repoA))[0].title).toBe(
+		expect(listTaskRecords(ensureProjectWorkflow(home, repoA))[0].title).toBe(
 			"Add checkout button",
 		);
 	});
 
 	it("rejects empty descriptions and unsafe slugs", () => {
 		const project = ensureProjectWorkflow(home, repoA);
-		expect(() => createTask(project, { description: "   " })).toThrow();
+		expect(() => newTask(project, "   ")).toThrow();
 		expect(getTask(project, "../../etc")).toBeUndefined();
 		expect(getTask(project, "missing")).toBeUndefined();
 	});
 
-	it("offers the next stage from the route and the task's files", () => {
+	it("reads the plan's questions and open escalations from the task folder", () => {
 		const project = ensureProjectWorkflow(home, repoA);
-		const task = createTask(project, {
-			description: "Refactor the session store and migrate the database schema",
+		const task = newTask(project, "Migrate the session store schema", {
+			route: "plan",
 		});
-		expect(task.route).toBe("plan");
 		const dir = join(project.tasksDir, task.slug);
-		const next = () => summaryOf(project, task.slug).nextStage;
-
-		expect(next()).toBe("plan");
-		writeFileSync(join(dir, "plan.md"), "# plan", "utf8");
-		expect(next()).toBe("build");
-
-		const settings = defaultWorkflowSettings();
-		prepareStageLaunch({
-			homeDir: home,
-			project,
-			slug: task.slug,
-			stage: "build",
-			settings,
-			shell: "posix",
-			runtime: "claude",
+		expect(readTaskFiles(project, task.slug)).toEqual({
+			hasPlan: false,
+			planQuestions: [],
+			progressStatus: undefined,
+			openEscalations: [],
 		});
-		expect(next()).toBe("review");
 
-		writeFileSync(join(dir, "escalations", "001.md"), "report", "utf8");
-		expect(next()).toBe("escalate");
-		expect(summaryOf(project, task.slug).openEscalations).toBe(1);
 		writeFileSync(
-			join(dir, "escalations", "001.md"),
-			"report\n## Resolution\nx",
+			join(dir, "plan.md"),
+			"# Plan\n\n## Steps\n1. a\n\n## Questions for the user\nNone\n",
 			"utf8",
 		);
-		writeFileSync(join(dir, "progress.md"), "# p\nStatus: blocked\n", "utf8");
-		expect(next()).toBe("escalate");
-		writeFileSync(join(dir, "progress.md"), "# p\nStatus: done\n", "utf8");
-		expect(next()).toBeNull();
-		expect(summaryOf(project, task.slug).status).toBe("done");
+		expect(readTaskFiles(project, task.slug).planQuestions).toEqual([]);
+		writeFileSync(
+			join(dir, "plan.md"),
+			"# Plan\n\n## Questions for the user\n- Keep the old table?\n- Which region?\n\n## Risks\n- none\n",
+			"utf8",
+		);
+		writeFileSync(join(dir, "progress.md"), "Status: blocked\n", "utf8");
+		writeFileSync(join(dir, "escalations", "001.md"), "stuck\n", "utf8");
+		writeFileSync(
+			join(dir, "escalations", "000.md"),
+			"old\n\n## Resolution\ndone\n",
+			"utf8",
+		);
+		expect(readTaskFiles(project, task.slug)).toEqual({
+			hasPlan: true,
+			planQuestions: ["Keep the old table?", "Which region?"],
+			progressStatus: "blocked",
+			openEscalations: ["001.md"],
+		});
 	});
 
-	it("offers review after a quick or direct implementation", () => {
+	it("upgrades a first-version task to a paused Manual task without replaying it", () => {
 		const project = ensureProjectWorkflow(home, repoA);
-		const quick = createTask(project, { description: "Fix typo in README" });
-		const settings = defaultWorkflowSettings();
-		expect(summarizeTask(project, quick).nextStage).toBe("quick");
-		prepareStageLaunch({
-			homeDir: home,
-			project,
-			slug: quick.slug,
-			stage: "quick",
-			settings,
-			shell: "posix",
-			runtime: "claude",
+		const dir = join(project.tasksDir, "old-task");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "task.json"),
+			JSON.stringify({
+				slug: "old-task",
+				title: "Old task",
+				description: "Old task",
+				route: "plan",
+				routeReasons: [],
+				createdAt: "2026-01-01T00:00:00.000Z",
+				stages: [
+					{
+						stage: "plan",
+						at: "2026-01-01T00:01:00.000Z",
+						model: "opus",
+						runtime: "claude",
+						sessionId: "s-1",
+					},
+				],
+			}),
+			"utf8",
+		);
+		const task = getTask(project, "old-task");
+		expect(task?.version).toBe(2);
+		expect(task?.mode).toBe("manual");
+		expect(task?.state).toBe("paused");
+		expect(task?.runs).toHaveLength(1);
+		expect(task?.runs[0].status).toBe("interrupted");
+		expect(task?.runs[0].model).toBe("opus");
+	});
+
+	it("serializes work on one task", async () => {
+		const project = ensureProjectWorkflow(home, repoA);
+		const order: string[] = [];
+		const slow = withTaskLock(project, "t", async () => {
+			order.push("a-start");
+			await new Promise((resolve) => setTimeout(resolve, 30));
+			order.push("a-end");
 		});
-		expect(summaryOf(project, quick.slug).nextStage).toBe("review");
+		const failing = withTaskLock(project, "t", () => {
+			order.push("b");
+			throw new Error("b failed");
+		});
+		const after = withTaskLock(project, "t", () => {
+			order.push("c");
+		});
+		await Promise.allSettled([slow, failing, after]);
+		// A failure does not break the queue, and nothing interleaves.
+		expect(order).toEqual(["a-start", "a-end", "b", "c"]);
+		await expect(failing).rejects.toThrow("b failed");
 	});
 });
 
-describe("stage launches", () => {
-	const settings: WorkflowSettings = defaultWorkflowSettings();
-
-	it("runs each stage on its role's model", () => {
-		const task = { route: "plan" as const };
-		expect(stageModel("quick", task, settings)).toBe("haiku");
-		expect(stageModel("implement", task, settings)).toBe("sonnet");
-		expect(stageModel("plan", task, settings)).toBe("opus");
-		expect(stageModel("build", task, settings)).toBe("sonnet");
-		expect(stageModel("review", task, settings)).toBe("sonnet");
-		expect(stageModel("escalate", task, settings)).toBe("fable");
-		// Exceptional tasks are planned by Fable.
+describe("stage models", () => {
+	it("runs each stage on its role's model, and Fable plans exceptional tasks", () => {
+		const settings = defaultWorkflowSettings();
+		const plain = { route: "plan" as const };
+		expect(stageModel("plan", plain, settings)).toBe("opus");
+		expect(stageModel("build", plain, settings)).toBe("sonnet");
+		expect(stageModel("fix", plain, settings)).toBe("sonnet");
+		expect(stageModel("review", plain, settings)).toBe("sonnet");
+		expect(stageModel("quick", plain, settings)).toBe("haiku");
+		expect(stageModel("escalate", plain, settings)).toBe("fable");
 		expect(stageModel("plan", { route: "exceptional" }, settings)).toBe(
 			"fable",
 		);
 	});
 
-	it("pins the session, passes the model, and records the launch", () => {
-		const project = ensureProjectWorkflow(home, repoA);
-		const task = createTask(project, {
-			description: "Redesign the notification architecture across runtimes",
-		});
-		const plan = prepareStageLaunch({
-			homeDir: home,
-			project,
-			slug: task.slug,
-			stage: "plan",
-			settings,
-			shell: "posix",
-			runtime: "claude",
-		});
-		expect(plan.model).toBe("opus");
-		expect(plan.command).toContain(`--session-id ${plan.sessionId} `);
-		expect(plan.command).toContain("--model opus ");
-		expect(plan.command.startsWith("claude ")).toBe(true);
-		const recorded = getTask(project, task.slug)?.stages ?? [];
-		expect(recorded).toHaveLength(1);
-		expect(recorded[0]).toMatchObject({
-			stage: "plan",
-			model: "opus",
-			runtime: "claude",
-			sessionId: plan.sessionId,
-		});
-
-		// The prompt file holds the task, its folder and the planner's job.
-		const promptFile = plan.command.match(/cat -- '([^']+)'/)?.[1] ?? "";
-		const prompt = readFileSync(promptFile, "utf8");
-		expect(prompt).toContain(portablePath(join(project.tasksDir, task.slug)));
-		expect(prompt).toContain("You are the planner");
-		expect(prompt).toContain("Redesign the notification architecture");
-	});
-
-	it("lets the user override the model, and rejects unsafe values", () => {
-		const project = ensureProjectWorkflow(home, repoA);
-		const task = createTask(project, {
-			description: "Fix the empty list crash",
-		});
-		const plan = prepareStageLaunch({
-			homeDir: home,
-			project,
-			slug: task.slug,
-			stage: "implement",
-			settings,
-			shell: "posix",
-			runtime: "claude",
-			modelOverride: "fable",
-		});
-		expect(plan.model).toBe("fable");
-		expect(plan.command).toContain("--model fable ");
-		expect(() =>
-			prepareStageLaunch({
-				homeDir: home,
-				project,
-				slug: task.slug,
-				stage: "implement",
-				settings,
-				shell: "posix",
-				runtime: "claude",
-				modelOverride: "opus; rm -rf ~",
-			}),
-		).toThrow();
-	});
-
-	it("hands off to the architect and reviewer inside Claude sessions only", () => {
-		const project = ensureProjectWorkflow(home, repoA);
-		const task = createTask(project, {
-			description: "Fix the empty list crash",
-		});
-		const read = (command: string) =>
-			readFileSync(command.match(/cat -- '([^']+)'/)?.[1] ?? "", "utf8");
-
-		const claude = prepareStageLaunch({
-			homeDir: home,
-			project,
-			slug: task.slug,
-			stage: "implement",
-			settings,
-			shell: "posix",
-			runtime: "claude",
-		});
-		expect(read(claude.command)).toContain("`architect` subagent");
-		expect(read(claude.command)).toContain("`reviewer` subagent");
-
-		const codex = prepareStageLaunch({
-			homeDir: home,
-			project,
-			slug: task.slug,
-			stage: "implement",
-			settings,
-			shell: "posix",
-			runtime: "codex",
-		});
-		expect(codex.command.startsWith("codex ")).toBe(true);
-		expect(codex.command).not.toContain("--model sonnet");
-		expect(codex.model).toBe("codex");
-		expect(read(codex.command)).not.toContain("subagent");
-		expect(read(codex.command)).toContain("The user escalates from ADE");
-	});
-
-	it("uses the new routing for launches after the settings change", () => {
-		const project = ensureProjectWorkflow(home, repoA);
-		const task = createTask(project, { description: "Fix typo in README" });
-		const cheaper = defaultWorkflowSettings();
-		cheaper.roles.quick.model = "claude-haiku-5-5";
-		const plan = prepareStageLaunch({
-			homeDir: home,
-			project,
-			slug: task.slug,
-			stage: "quick",
-			settings: cheaper,
-			shell: "posix",
-			runtime: "claude",
-		});
-		expect(plan.command).toContain("--model claude-haiku-5-5 ");
+	it("opens a run's session without a permission bypass", () => {
+		expect(buildResumeCommand("3f2b8c1e-9a4d")).toBe(
+			"claude --resume 3f2b8c1e-9a4d",
+		);
+		expect(() => buildResumeCommand("x; rm -rf ~")).toThrow();
 	});
 });

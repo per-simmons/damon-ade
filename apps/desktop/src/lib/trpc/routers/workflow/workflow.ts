@@ -1,34 +1,49 @@
 import { projects, workspaces } from "@superset/local-db";
 import { TRPCError } from "@trpc/server";
+import { observable } from "@trpc/server/observable";
 import { eq } from "drizzle-orm";
-import { shellKindFor } from "main/lib/agent-invoke";
 import {
+	activeRun,
+	buildResumeCommand,
+	captureIdentity,
 	createTask,
+	decideNext,
 	defaultWorkflowSettings,
 	EFFORT_LEVELS,
 	ensureProjectWorkflow,
 	getTask,
-	listTasks,
+	identityMismatch,
+	listTaskRecords,
+	loadProjectChecks,
 	loadWorkflowSettings,
+	PERMISSION_PROFILES,
 	type ProjectWorkflow,
-	prepareStageLaunch,
 	ROLE_NAMES,
+	RUN_KINDS,
+	readTaskFiles,
 	refreshAllProjectWorkflows,
+	saveProjectChecks,
 	saveWorkflowSettings,
 	stageModel,
-	TASK_STAGES,
+	suggestChecks,
+	TaskController,
+	type TaskIdentity,
+	type TaskRecord,
+	taskSpend,
 	validateWorkflowSettings,
-	type WorkflowRuntime,
 } from "main/lib/agent-workflow";
+import {
+	getTaskController,
+	type TaskChangeEvent,
+	workflowEvents,
+} from "main/lib/agent-workflow/service";
 import { getSupersetHomeDir } from "main/lib/app-environment";
 import { localDb } from "main/lib/local-db";
-import { getDefaultShell } from "main/lib/terminal/env";
 import {
 	costOf,
 	dedupeAcrossSessions,
 	getMetricsDir,
 	loadSessions,
-	type SessionMetrics,
 } from "main/lib/usage-metrics";
 import { classifyTask, TASK_ROUTES } from "shared/utils/task-routing";
 import { z } from "zod";
@@ -37,14 +52,30 @@ import { getWorkspacePath } from "../workspaces/utils/worktree";
 
 /**
  * The multi-model workflow in the app (Settings > Models & Cost, and the
- * Tasks panel of every workspace). Settings are app-wide; tasks, plans,
- * progress and usage are per project, in <ADE home>/workflow/projects/<key>.
+ * Tasks panel of every workspace). Settings are app-wide; tasks and usage are
+ * per project, in <ADE home>/workflow/projects/<key>.
+ *
+ * Every task action goes through the TaskController (agent-workflow/
+ * controller.ts): it owns the stages, runs them as child processes, holds the
+ * per-task lock and records each run's outcome. The router only resolves
+ * which project and worktree a request comes from, and refuses actions on a
+ * task that belongs to another worktree unless the user moves it.
  */
 
 const roleRoutingSchema = z.object({
 	model: z.string(),
 	effort: z.enum(EFFORT_LEVELS as [string, ...string[]]),
 	maxTurns: z.number(),
+});
+
+const executionSchema = z.object({
+	permissions: z.enum(PERMISSION_PROFILES),
+	taskBudgetUsd: z.number(),
+	maxCorrections: z.number(),
+	maxReviewRounds: z.number(),
+	maxEscalations: z.number(),
+	pinModels: z.boolean(),
+	cheaperFallback: z.boolean(),
 });
 
 const settingsInputSchema = z.object({
@@ -59,16 +90,27 @@ const settingsInputSchema = z.object({
 		headlessMaxBudgetUsd: z.number(),
 		headlessMaxTurns: z.number(),
 	}),
+	execution: executionSchema.optional(),
 });
 
 function localDay(date: Date): string {
 	return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
 }
 
-interface WorkspaceProject {
+export interface WorkspaceContext {
+	workspaceId: string;
 	project: ProjectWorkflow;
-	workspacePath: string;
-	runtime: WorkflowRuntime;
+	/** The workspace's own folder (its worktree). */
+	worktreePath: string;
+	runtime: "claude" | "codex";
+}
+
+export interface WorkflowRouterDeps {
+	homeDir: () => string;
+	resolveWorkspace: (workspaceId: string) => WorkspaceContext;
+	controller: () => TaskController;
+	captureIdentity: (workspaceId: string, worktreePath: string) => TaskIdentity;
+	events: NodeJS.EventEmitter;
 }
 
 /**
@@ -76,7 +118,7 @@ interface WorkspaceProject {
  * workspace's own folder when the project has none (ADE agents). Same rule as
  * the terminal environment, so the panel and the terminals agree.
  */
-function resolveWorkspaceProject(workspaceId: string): WorkspaceProject {
+function resolveWorkspaceFromDb(workspaceId: string): WorkspaceContext {
 	const workspace = localDb
 		.select()
 		.from(workspaces)
@@ -85,79 +127,169 @@ function resolveWorkspaceProject(workspaceId: string): WorkspaceProject {
 	if (!workspace) {
 		throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
 	}
-	const workspacePath = getWorkspacePath(workspace);
+	const worktreePath = getWorkspacePath(workspace);
 	const project = localDb
 		.select()
 		.from(projects)
 		.where(eq(projects.id, workspace.projectId))
 		.get();
-	const root = project?.mainRepoPath?.trim() || workspacePath;
-	if (!root || !workspacePath) {
+	const root = project?.mainRepoPath?.trim() || worktreePath;
+	if (!root || !worktreePath) {
 		throw new TRPCError({
 			code: "PRECONDITION_FAILED",
 			message: "This workspace has no folder yet",
 		});
 	}
 	return {
+		workspaceId,
 		project: ensureProjectWorkflow(getSupersetHomeDir(), root),
-		workspacePath,
+		worktreePath,
 		runtime: workspace.runtime === "codex" ? "codex" : "claude",
 	};
 }
 
-function sessionCosts(sessions: SessionMetrics[]) {
-	const owned = dedupeAcrossSessions(sessions);
-	return (session: SessionMetrics) =>
-		costOf(owned.get(session.sessionId) ?? []);
+export const defaultWorkflowRouterDeps: WorkflowRouterDeps = {
+	homeDir: getSupersetHomeDir,
+	resolveWorkspace: resolveWorkspaceFromDb,
+	controller: getTaskController,
+	captureIdentity,
+	events: workflowEvents,
+};
+
+function badRequest(error: unknown): TRPCError {
+	if (error instanceof TRPCError) return error;
+	return new TRPCError({
+		code: "BAD_REQUEST",
+		message: error instanceof Error ? error.message : String(error),
+	});
 }
 
-function launchStage(
-	workspaceId: string,
-	slug: string,
-	stage: (typeof TASK_STAGES)[number],
-	modelOverride?: string,
-) {
-	const { project, workspacePath, runtime } =
-		resolveWorkspaceProject(workspaceId);
+/** Runs `fn`, turning thrown errors into BAD_REQUEST. */
+async function guarded<T>(fn: () => Promise<T> | T): Promise<T> {
 	try {
-		const plan = prepareStageLaunch({
-			homeDir: getSupersetHomeDir(),
-			project,
-			slug,
-			stage,
-			settings: loadWorkflowSettings(getSupersetHomeDir()),
-			shell: shellKindFor(getDefaultShell()),
-			runtime,
-			modelOverride,
-		});
-		return {
-			command: plan.command,
-			cwd: workspacePath,
-			stage: plan.stage,
-			model: plan.model,
-			runtime: plan.runtime,
-			slug: plan.task.slug,
-		};
+		return await fn();
 	} catch (error) {
-		throw new TRPCError({
-			code: "BAD_REQUEST",
-			message: error instanceof Error ? error.message : String(error),
-		});
+		throw badRequest(error);
 	}
 }
 
-export const createWorkflowRouter = () =>
-	router({
+/** What the panel shows for one task. */
+function describeTask(
+	project: ProjectWorkflow,
+	task: TaskRecord,
+	ctx: WorkspaceContext,
+	settings: ReturnType<typeof loadWorkflowSettings>,
+	checks: { commands: string[] },
+) {
+	const files = readTaskFiles(project, task.slug);
+	const spend = taskSpend(task);
+	const mismatch = identityMismatch(task, ctx.workspaceId, ctx.worktreePath);
+	const next =
+		task.state === "done" || task.state === "cancelled" || activeRun(task)
+			? undefined
+			: decideNext(task, files, checks, settings);
+	const manualBlockers = Object.fromEntries(
+		RUN_KINDS.map((kind) => [
+			kind,
+			mismatch ??
+				TaskController.manualBlocker(task, files, checks, kind) ??
+				null,
+		]),
+	) as Record<(typeof RUN_KINDS)[number], string | null>;
+	return {
+		slug: task.slug,
+		title: task.title,
+		description: task.description,
+		route: task.route,
+		routeReasons: task.routeReasons,
+		createdAt: task.createdAt,
+		mode: task.mode,
+		state: task.state,
+		stateReason: task.stateReason ?? null,
+		pauseRequested: task.pauseRequested ?? false,
+		answers: task.answers ?? null,
+		planQuestions: files.planQuestions,
+		openEscalations: files.openEscalations,
+		limits: task.limits,
+		identity: {
+			worktreePath: task.identity.worktreePath,
+			branch: task.identity.branch ?? null,
+		},
+		/** Set when this workspace is not the task's worktree. */
+		mismatch: mismatch ?? null,
+		spend,
+		next: next ?? null,
+		manualBlockers,
+		nextModel:
+			next?.type === "run" ? stageModel(next.kind, task, settings) : null,
+		runs: task.runs.map((run) => ({
+			id: run.id,
+			kind: run.kind,
+			status: run.status,
+			attempt: run.attempt,
+			queuedAt: run.queuedAt,
+			startedAt: run.startedAt ?? null,
+			endedAt: run.endedAt ?? null,
+			model: run.model ?? null,
+			observedModels: run.observedModels ?? [],
+			effort: run.effort ?? null,
+			maxTurns: run.maxTurns ?? null,
+			permissionMode: run.permissionMode ?? null,
+			maxBudgetUsd: run.maxBudgetUsd ?? null,
+			sessionId: run.sessionId ?? null,
+			fallbackFrom: run.fallbackFrom ?? null,
+			reportedCostUsd: run.reportedCostUsd ?? null,
+			liveCostUsd: run.liveCostUsd ?? null,
+			costState: run.costState ?? (run.kind === "checks" ? null : "unknown"),
+			unpricedModels: run.unpricedModels ?? [],
+			failure: run.failure ?? null,
+			error: run.error ?? null,
+			verdict: run.verdict ?? null,
+			checks: run.checks ?? null,
+			summary: run.summary ? run.summary.slice(-1500) : null,
+		})),
+	};
+}
+
+export const createWorkflowRouter = (
+	deps: WorkflowRouterDeps = defaultWorkflowRouterDeps,
+) => {
+	/** The task, after checking it may be acted on from this workspace. */
+	function taskFor(
+		workspaceId: string,
+		slug: string,
+		options: { allowOtherWorktree?: boolean } = {},
+	): { ctx: WorkspaceContext; task: TaskRecord } {
+		const ctx = deps.resolveWorkspace(workspaceId);
+		const task = getTask(ctx.project, slug);
+		if (!task)
+			throw new TRPCError({ code: "NOT_FOUND", message: "Task not found" });
+		if (!options.allowOtherWorktree) {
+			const mismatch = identityMismatch(task, workspaceId, ctx.worktreePath);
+			if (mismatch)
+				throw new TRPCError({ code: "CONFLICT", message: mismatch });
+		}
+		return { ctx, task };
+	}
+
+	const taskInput = z.object({ workspaceId: z.string(), slug: z.string() });
+
+	return router({
 		getSettings: publicProcedure.query(() => ({
-			settings: loadWorkflowSettings(getSupersetHomeDir()),
+			settings: loadWorkflowSettings(deps.homeDir()),
 			defaults: defaultWorkflowSettings(),
 		})),
 
 		setSettings: publicProcedure
 			.input(settingsInputSchema)
 			.mutation(({ input }) => {
-				const home = getSupersetHomeDir();
-				const result = validateWorkflowSettings({ ...input, version: 1 });
+				const home = deps.homeDir();
+				const current = loadWorkflowSettings(home);
+				const result = validateWorkflowSettings({
+					...input,
+					execution: input.execution ?? current.execution,
+					version: 1,
+				});
 				if (!result.ok) {
 					throw new TRPCError({
 						code: "BAD_REQUEST",
@@ -165,13 +297,17 @@ export const createWorkflowRouter = () =>
 					});
 				}
 				saveWorkflowSettings(home, result.settings);
-				// Every project's roles file follows the new routing; sessions started
-				// from now on use it.
+				// Every project's roles file follows the new routing.
 				const projectsUpdated = refreshAllProjectWorkflows(home);
 				return { settings: result.settings, projectsUpdated };
 			}),
 
-		/** Estimated cost today and overall, from recorded sessions. */
+		/**
+		 * Interactive sessions recorded from transcripts: API-equivalent
+		 * estimates (on a subscription they are not charges). Unpriced
+		 * responses are counted so the total is never shown as complete when
+		 * it is not.
+		 */
 		getUsageSummary: publicProcedure.query(() => {
 			const sessions = loadSessions(getMetricsDir());
 			const owned = dedupeAcrossSessions(sessions);
@@ -181,40 +317,56 @@ export const createWorkflowRouter = () =>
 				const at = new Date(record.timestamp);
 				return !Number.isNaN(at.getTime()) && localDay(at) === today;
 			});
+			const allCost = costOf(all);
+			const todayCost = costOf(todays);
 			return {
 				sessions: sessions.length,
-				todayUsd: costOf(todays).usd,
-				allTimeUsd: costOf(all).usd,
+				todayUsd: todayCost.usd,
+				todayUnpriced: todayCost.unpricedMessages,
+				allTimeUsd: allCost.usd,
+				allTimeUnpriced: allCost.unpricedMessages,
 			};
 		}),
 
-		/** The Tasks panel: this workspace's project, its tasks and usage. */
+		/** The Tasks panel: this workspace's project, its tasks and spend. */
 		getProjectTasks: publicProcedure
 			.input(z.object({ workspaceId: z.string() }))
 			.query(({ input }) => {
-				const { project, runtime } = resolveWorkspaceProject(input.workspaceId);
-				const settings = loadWorkflowSettings(getSupersetHomeDir());
-				const sessions = loadSessions(getMetricsDir());
-				const cost = sessionCosts(sessions);
-				const bySessionId = new Map(sessions.map((s) => [s.sessionId, s]));
-				const projectSessions = sessions.filter(
-					(session) => session.projectKey === project.key,
+				const ctx = deps.resolveWorkspace(input.workspaceId);
+				const { project } = ctx;
+				const settings = loadWorkflowSettings(deps.homeDir());
+				const projectChecks = loadProjectChecks(project);
+				const approved = {
+					commands: projectChecks.approvedAt ? projectChecks.commands : [],
+				};
+				const tasks = listTaskRecords(project).map((task) =>
+					describeTask(project, task, ctx, settings, approved),
 				);
 
-				const tasks = listTasks(project).map((task) => {
-					const taskSessions = task.stages
-						.map((stage) => stage.sessionId && bySessionId.get(stage.sessionId))
-						.filter((session): session is SessionMetrics => !!session);
-					const costs = taskSessions.map(cost);
-					return {
-						...task,
-						usd: costs.reduce((sum, c) => sum + c.usd, 0),
-						models: [...new Set(costs.flatMap((c) => Object.keys(c.byModel)))],
-						nextStageModel: task.nextStage
-							? stageModel(task.nextStage, task, settings)
-							: null,
-					};
-				});
+				// Task runs: Claude Code's reported cost (each run once, child
+				// subagents included). Interactive sessions in this project:
+				// estimated from transcripts, kept separate.
+				const taskTotals = tasks.reduce(
+					(sum, task) => ({
+						usd: sum.usd + task.spend.usd,
+						pendingRuns: sum.pendingRuns + task.spend.pendingRuns,
+						unknownRuns: sum.unknownRuns + task.spend.unknownRuns,
+						partialRuns: sum.partialRuns + task.spend.partialRuns,
+					}),
+					{ usd: 0, pendingRuns: 0, unknownRuns: 0, partialRuns: 0 },
+				);
+				// Task runs' transcripts are recorded too (for reports); here they
+				// are already counted from task.json, so leave them out.
+				const runSessions = new Set(
+					tasks.flatMap((task) => task.runs.map((run) => run.sessionId)),
+				);
+				const sessions = loadSessions(getMetricsDir()).filter(
+					(session) =>
+						session.projectKey === project.key &&
+						!runSessions.has(session.sessionId),
+				);
+				const owned = dedupeAcrossSessions(sessions);
+				const sessionCost = costOf([...owned.values()].flat());
 
 				return {
 					project: {
@@ -223,21 +375,44 @@ export const createWorkflowRouter = () =>
 						root: project.root,
 						tasksDir: project.tasksDir,
 					},
-					runtime,
+					worktreePath: ctx.worktreePath,
+					runtime: ctx.runtime,
+					/** Managed stages always run on Claude Code, even in Codex workspaces. */
+					executor: "claude-code" as const,
+					permissions: settings.execution.permissions,
+					checks: {
+						commands: projectChecks.commands,
+						approved: !!projectChecks.approvedAt,
+					},
 					tasks,
 					usage: {
-						sessions: projectSessions.length,
-						usd: projectSessions.map(cost).reduce((sum, c) => sum + c.usd, 0),
+						tasks: taskTotals,
+						sessions: {
+							count: sessions.length,
+							usd: sessionCost.usd,
+							unpricedMessages: sessionCost.unpricedMessages,
+						},
 					},
 				};
 			}),
+
+		/** Pushes a refresh signal when any task changes. */
+		onTaskChanged: publicProcedure.subscription(() =>
+			observable<TaskChangeEvent>((emit) => {
+				const handler = (event: TaskChangeEvent) => emit.next(event);
+				deps.events.on("task-changed", handler);
+				return () => {
+					deps.events.off("task-changed", handler);
+				};
+			}),
+		),
 
 		/** Preview how a description would be routed, before creating it. */
 		classify: publicProcedure
 			.input(z.object({ description: z.string().max(20_000) }))
 			.query(({ input }) => {
 				const decision = classifyTask(input.description);
-				const settings = loadWorkflowSettings(getSupersetHomeDir());
+				const settings = loadWorkflowSettings(deps.homeDir());
 				const firstStage = decision.route === "plan" ? "plan" : decision.route;
 				return {
 					...decision,
@@ -245,64 +420,209 @@ export const createWorkflowRouter = () =>
 				};
 			}),
 
-		/** Create a task and return the command for its first stage. */
+		/** The project's check commands: saved, approved, and suggestions. */
+		getChecks: publicProcedure
+			.input(z.object({ workspaceId: z.string() }))
+			.query(({ input }) => {
+				const ctx = deps.resolveWorkspace(input.workspaceId);
+				const checks = loadProjectChecks(ctx.project);
+				return {
+					commands: checks.commands,
+					approved: !!checks.approvedAt,
+					suggestions: suggestChecks(ctx.worktreePath),
+				};
+			}),
+
+		/** Save and approve the commands ADE runs to verify every task. */
+		setChecks: publicProcedure
+			.input(
+				z.object({
+					workspaceId: z.string(),
+					commands: z.array(z.string()).max(10),
+				}),
+			)
+			.mutation(({ input }) =>
+				guarded(() => {
+					const ctx = deps.resolveWorkspace(input.workspaceId);
+					const saved = saveProjectChecks(ctx.project, input.commands);
+					return { commands: saved.commands, approved: !!saved.approvedAt };
+				}),
+			),
+
+		/**
+		 * One request in, one task out. In Auto mode ADE starts it at once and
+		 * keeps going to a verified finish; in Manual mode it waits for steps.
+		 * The result carries the task's state, so a failed launch is visible.
+		 */
 		createTask: publicProcedure
 			.input(
 				z.object({
 					workspaceId: z.string(),
 					description: z.string().min(1).max(20_000),
 					route: z.enum(TASK_ROUTES).optional(),
-					model: z.string().optional(),
+					mode: z.enum(["auto", "manual"]).default("auto"),
 				}),
 			)
-			.mutation(({ input }) => {
-				const { project } = resolveWorkspaceProject(input.workspaceId);
-				let task: ReturnType<typeof createTask>;
-				try {
-					task = createTask(project, {
+			.mutation(({ input }) =>
+				guarded(async () => {
+					const ctx = deps.resolveWorkspace(input.workspaceId);
+					const execution = loadWorkflowSettings(deps.homeDir()).execution;
+					const task = createTask(ctx.project, {
 						description: input.description,
 						route: input.route,
+						mode: input.mode,
+						identity: deps.captureIdentity(input.workspaceId, ctx.worktreePath),
+						limits: {
+							budgetUsd: execution.taskBudgetUsd,
+							maxCorrections: execution.maxCorrections,
+							maxReviewRounds: execution.maxReviewRounds,
+							maxEscalations: execution.maxEscalations,
+						},
 					});
-				} catch (error) {
-					throw new TRPCError({
-						code: "BAD_REQUEST",
-						message: error instanceof Error ? error.message : String(error),
-					});
-				}
-				const firstStage =
-					task.route === "quick"
-						? "quick"
-						: task.route === "implement"
-							? "implement"
-							: "plan";
-				return launchStage(
-					input.workspaceId,
-					task.slug,
-					firstStage,
-					input.model,
-				);
-			}),
+					const started =
+						input.mode === "auto"
+							? await deps.controller().start(ctx.project, task.slug)
+							: task;
+					return {
+						slug: started.slug,
+						route: started.route,
+						mode: started.mode,
+						state: started.state,
+						stateReason: started.stateReason ?? null,
+					};
+				}),
+			),
 
-		/** Return the command for a stage of an existing task. */
-		launchStage: publicProcedure
+		start: publicProcedure.input(taskInput).mutation(({ input }) =>
+			guarded(async () => {
+				const { ctx } = taskFor(input.workspaceId, input.slug);
+				const task = await deps.controller().start(ctx.project, input.slug);
+				return { state: task.state, stateReason: task.stateReason ?? null };
+			}),
+		),
+
+		resume: publicProcedure.input(taskInput).mutation(({ input }) =>
+			guarded(async () => {
+				const { ctx } = taskFor(input.workspaceId, input.slug);
+				const task = await deps.controller().resume(ctx.project, input.slug);
+				return { state: task.state, stateReason: task.stateReason ?? null };
+			}),
+		),
+
+		/** Pause and Cancel always work, from any worktree of the project. */
+		pause: publicProcedure.input(taskInput).mutation(({ input }) =>
+			guarded(async () => {
+				const { ctx } = taskFor(input.workspaceId, input.slug, {
+					allowOtherWorktree: true,
+				});
+				const task = await deps.controller().pause(ctx.project, input.slug);
+				return { state: task.state, stateReason: task.stateReason ?? null };
+			}),
+		),
+
+		cancel: publicProcedure.input(taskInput).mutation(({ input }) =>
+			guarded(async () => {
+				const { ctx } = taskFor(input.workspaceId, input.slug, {
+					allowOtherWorktree: true,
+				});
+				const task = await deps.controller().cancel(ctx.project, input.slug);
+				return { state: task.state, stateReason: task.stateReason ?? null };
+			}),
+		),
+
+		setMode: publicProcedure
+			.input(taskInput.extend({ mode: z.enum(["auto", "manual"]) }))
+			.mutation(({ input }) =>
+				guarded(async () => {
+					const { ctx } = taskFor(input.workspaceId, input.slug);
+					const task = await deps
+						.controller()
+						.setMode(ctx.project, input.slug, input.mode);
+					return { mode: task.mode, state: task.state };
+				}),
+			),
+
+		answer: publicProcedure
+			.input(taskInput.extend({ answers: z.string().min(1).max(10_000) }))
+			.mutation(({ input }) =>
+				guarded(async () => {
+					const { ctx } = taskFor(input.workspaceId, input.slug);
+					const task = await deps
+						.controller()
+						.answer(ctx.project, input.slug, input.answers);
+					return { state: task.state, stateReason: task.stateReason ?? null };
+				}),
+			),
+
+		setBudget: publicProcedure
+			.input(taskInput.extend({ budgetUsd: z.number().positive().max(10_000) }))
+			.mutation(({ input }) =>
+				guarded(async () => {
+					const { ctx } = taskFor(input.workspaceId, input.slug, {
+						allowOtherWorktree: true,
+					});
+					const task = await deps
+						.controller()
+						.setLimits(ctx.project, input.slug, { budgetUsd: input.budgetUsd });
+					return { limits: task.limits };
+				}),
+			),
+
+		/** Manual mode (or a paused Auto task): run one step. */
+		runStep: publicProcedure
 			.input(
-				z.object({
-					workspaceId: z.string(),
-					slug: z.string(),
-					stage: z.enum(TASK_STAGES),
-					model: z.string().optional(),
+				taskInput.extend({
+					kind: z.enum(RUN_KINDS),
+					model: z.string().max(100).optional(),
 				}),
 			)
-			.mutation(({ input }) => {
-				const { project } = resolveWorkspaceProject(input.workspaceId);
-				if (!getTask(project, input.slug)) {
-					throw new TRPCError({ code: "NOT_FOUND", message: "Task not found" });
+			.mutation(({ input }) =>
+				guarded(async () => {
+					const { ctx } = taskFor(input.workspaceId, input.slug);
+					const task = await deps
+						.controller()
+						.runStep(ctx.project, input.slug, input.kind, input.model);
+					return { state: task.state, stateReason: task.stateReason ?? null };
+				}),
+			),
+
+		/** Explicitly move a task from another worktree to this one. */
+		moveHere: publicProcedure.input(taskInput).mutation(({ input }) =>
+			guarded(async () => {
+				const { ctx } = taskFor(input.workspaceId, input.slug, {
+					allowOtherWorktree: true,
+				});
+				const task = await deps
+					.controller()
+					.adopt(
+						ctx.project,
+						input.slug,
+						deps.captureIdentity(input.workspaceId, ctx.worktreePath),
+					);
+				return { worktreePath: task.identity.worktreePath };
+			}),
+		),
+
+		/**
+		 * The command to open a run's Claude session in a terminal of the task's
+		 * worktree. Interactive: ADE's permissions, budget and turn limits do not
+		 * apply there (the panel says so).
+		 */
+		sessionCommand: publicProcedure
+			.input(taskInput.extend({ runId: z.string() }))
+			.query(({ input }) => {
+				const { task } = taskFor(input.workspaceId, input.slug);
+				const run = task.runs.find((r) => r.id === input.runId);
+				if (!run?.sessionId) {
+					throw new TRPCError({
+						code: "NOT_FOUND",
+						message: "This run has no session",
+					});
 				}
-				return launchStage(
-					input.workspaceId,
-					input.slug,
-					input.stage,
-					input.model,
-				);
+				return {
+					command: buildResumeCommand(run.sessionId),
+					cwd: task.identity.worktreePath,
+				};
 			}),
 	});
+};

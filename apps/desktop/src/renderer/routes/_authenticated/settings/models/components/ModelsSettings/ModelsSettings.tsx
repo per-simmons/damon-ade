@@ -9,6 +9,7 @@ import {
 	SelectValue,
 } from "@superset/ui/select";
 import { toast } from "@superset/ui/sonner";
+import { Switch } from "@superset/ui/switch";
 import { useEffect, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import {
@@ -40,7 +41,42 @@ interface Draft {
 	dailyWarnUsd: string;
 	headlessMaxBudgetUsd: string;
 	headlessMaxTurns: string;
+	execution: ExecutionDraft;
 }
+
+type PermissionProfile = "edits" | "edits-and-checks" | "bypass";
+
+interface ExecutionData {
+	permissions: PermissionProfile;
+	taskBudgetUsd: number;
+	maxCorrections: number;
+	maxReviewRounds: number;
+	maxEscalations: number;
+	pinModels: boolean;
+	cheaperFallback: boolean;
+}
+
+interface ExecutionDraft {
+	permissions: PermissionProfile;
+	taskBudgetUsd: string;
+	maxCorrections: string;
+	maxReviewRounds: string;
+	maxEscalations: string;
+	pinModels: boolean;
+	cheaperFallback: boolean;
+}
+
+type LimitKey =
+	| "taskBudgetUsd"
+	| "maxCorrections"
+	| "maxReviewRounds"
+	| "maxEscalations";
+
+const PERMISSION_LABELS: Record<PermissionProfile, string> = {
+	edits: "Edit files only",
+	"edits-and-checks": "Edit files and run the approved checks",
+	bypass: "Skip all permission checks (unsafe)",
+};
 
 interface SettingsData {
 	roles: Record<RoleName, { model: string; effort: Effort; maxTurns: number }>;
@@ -50,6 +86,7 @@ interface SettingsData {
 		headlessMaxBudgetUsd: number;
 		headlessMaxTurns: number;
 	};
+	execution: ExecutionData;
 }
 
 function toDraft(settings: SettingsData): Draft {
@@ -68,6 +105,15 @@ function toDraft(settings: SettingsData): Draft {
 		dailyWarnUsd: settings.budgets.dailyWarnUsd?.toString() ?? "",
 		headlessMaxBudgetUsd: String(settings.budgets.headlessMaxBudgetUsd),
 		headlessMaxTurns: String(settings.budgets.headlessMaxTurns),
+		execution: {
+			permissions: settings.execution.permissions,
+			taskBudgetUsd: String(settings.execution.taskBudgetUsd),
+			maxCorrections: String(settings.execution.maxCorrections),
+			maxReviewRounds: String(settings.execution.maxReviewRounds),
+			maxEscalations: String(settings.execution.maxEscalations),
+			pinModels: settings.execution.pinModels,
+			cheaperFallback: settings.execution.cheaperFallback,
+		},
 	};
 }
 
@@ -167,8 +213,37 @@ export function ModelsSettings({ visibleItems }: ModelsSettingsProps) {
 				headlessMaxBudgetUsd: Number(draft.headlessMaxBudgetUsd),
 				headlessMaxTurns: Number(draft.headlessMaxTurns),
 			},
+			execution: {
+				permissions: draft.execution.permissions,
+				taskBudgetUsd: Number(draft.execution.taskBudgetUsd),
+				maxCorrections: Number(draft.execution.maxCorrections),
+				maxReviewRounds: Number(draft.execution.maxReviewRounds),
+				maxEscalations: Number(draft.execution.maxEscalations),
+				pinModels: draft.execution.pinModels,
+				cheaperFallback: draft.execution.cheaperFallback,
+			},
 		});
 	};
+
+	const setExecution = (patch: Partial<ExecutionDraft>) =>
+		setDraft({ ...draft, execution: { ...draft.execution, ...patch } });
+
+	const limitInput = (id: string, label: string, key: LimitKey, step = "1") => (
+		<div className="flex items-center justify-between">
+			<Label htmlFor={id} className="text-sm font-medium">
+				{label}
+			</Label>
+			<Input
+				id={id}
+				type="number"
+				min={0}
+				step={step}
+				className="w-[120px]"
+				value={draft.execution[key]}
+				onChange={(event) => setExecution({ [key]: event.target.value })}
+			/>
+		</div>
+	);
 
 	return (
 		<div className="p-6 max-w-4xl w-full">
@@ -242,8 +317,120 @@ export function ModelsSettings({ visibleItems }: ModelsSettingsProps) {
 							</div>
 						))}
 						<p className="text-xs text-muted-foreground">
-							Columns: model, effort, turn limit.
+							Columns: model, effort, turn limit. ADE passes all three to the
+							runs it starts for tasks. In a session you start yourself, the
+							roles it hands work to get these models, but ADE cannot enforce
+							the effort or turn limit there.
 						</p>
+					</section>
+				)}
+
+				{showRouting && (
+					<section className="space-y-4">
+						<div>
+							<h3 className="text-sm font-medium">Task runs</h3>
+							<p className="text-xs text-muted-foreground mt-1">
+								How ADE runs the stages of a task, in Auto and Manual mode. Each
+								stage is a Claude Code run that ADE starts, watches and stops.
+							</p>
+						</div>
+						<div className="flex items-center justify-between gap-4">
+							<Label htmlFor="task-permissions" className="text-sm font-medium">
+								Permissions
+							</Label>
+							<Select
+								value={draft.execution.permissions}
+								onValueChange={(value) =>
+									setExecution({ permissions: value as PermissionProfile })
+								}
+							>
+								<SelectTrigger id="task-permissions" className="w-[300px]">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									{(Object.keys(PERMISSION_LABELS) as PermissionProfile[]).map(
+										(profile) => (
+											<SelectItem key={profile} value={profile}>
+												{PERMISSION_LABELS[profile]}
+											</SelectItem>
+										),
+									)}
+								</SelectContent>
+							</Select>
+						</div>
+						{draft.execution.permissions === "bypass" && (
+							<p className="text-xs text-destructive">
+								Runs may execute any command without asking, including commands
+								that delete files or reach the network. Use this only in a
+								disposable worktree.
+							</p>
+						)}
+						{limitInput(
+							"task-budget",
+							"Budget per task ($)",
+							"taskBudgetUsd",
+							"0.5",
+						)}
+						<p className="text-xs text-muted-foreground">
+							Once a task's estimated spend reaches this, ADE starts no further
+							run. Each run gets only the remainder as its Claude Code spending
+							limit. Claude Code checks that limit as the run goes, so a run can
+							end slightly above it.
+						</p>
+						{limitInput(
+							"task-corrections",
+							"Corrections per task",
+							"maxCorrections",
+						)}
+						{limitInput(
+							"task-reviews",
+							"Review rounds per task",
+							"maxReviewRounds",
+						)}
+						{limitInput(
+							"task-escalations",
+							"Escalations per task",
+							"maxEscalations",
+						)}
+						<div className="flex items-center justify-between gap-4">
+							<div className="space-y-0.5">
+								<Label htmlFor="pin-models" className="text-sm font-medium">
+									Pin model versions
+								</Label>
+								<p className="text-xs text-muted-foreground">
+									Run aliases as the exact model IDs ADE knows. ADE skips this
+									when you use Bedrock, Vertex or Foundry, or set your own model
+									environment variables.
+								</p>
+							</div>
+							<Switch
+								id="pin-models"
+								checked={draft.execution.pinModels}
+								onCheckedChange={(pinModels) => setExecution({ pinModels })}
+							/>
+						</div>
+						<div className="flex items-center justify-between gap-4">
+							<div className="space-y-0.5">
+								<Label
+									htmlFor="cheaper-fallback"
+									className="text-sm font-medium"
+								>
+									Retry once on a cheaper model
+								</Label>
+								<p className="text-xs text-muted-foreground">
+									When a model is unavailable to your account, ADE retries that
+									stage once on the next cheaper model. It never moves to a more
+									expensive one.
+								</p>
+							</div>
+							<Switch
+								id="cheaper-fallback"
+								checked={draft.execution.cheaperFallback}
+								onCheckedChange={(cheaperFallback) =>
+									setExecution({ cheaperFallback })
+								}
+							/>
+						</div>
 					</section>
 				)}
 
@@ -252,16 +439,22 @@ export function ModelsSettings({ visibleItems }: ModelsSettingsProps) {
 						<div>
 							<h3 className="text-sm font-medium">Cost warnings</h3>
 							<p className="text-xs text-muted-foreground mt-1">
-								A notification when estimated cost passes a threshold. Claude
-								Code sessions are not stopped. Leave blank to turn a warning
-								off.
+								A notification when estimated cost passes a threshold. These are
+								warnings only: sessions you run yourself are not stopped. Leave
+								a field blank to turn that warning off.
 							</p>
 						</div>
 
 						{usage && (
 							<p className="text-xs text-muted-foreground">
-								Recorded today: {usd(usage.todayUsd)} · all recorded sessions (
-								{usage.sessions}): {usd(usage.allTimeUsd)}
+								API-equivalent estimate, not a charge on a subscription.
+								Recorded today: {usd(usage.todayUsd)}
+								{usage.todayUnpriced > 0 ? " plus unpriced responses" : ""} ·
+								all recorded sessions ({usage.sessions}):{" "}
+								{usd(usage.allTimeUsd)}
+								{usage.allTimeUnpriced > 0
+									? ` plus ${usage.allTimeUnpriced} unpriced response(s)`
+									: ""}
 							</p>
 						)}
 
@@ -305,8 +498,10 @@ export function ModelsSettings({ visibleItems }: ModelsSettingsProps) {
 							<p className="text-xs text-muted-foreground mt-1">
 								Hard limits for background agent runs started with{" "}
 								<code className="bg-muted px-1 rounded">mode: "headless"</code>{" "}
-								on /agent/invoke. Claude Code stops the run when either limit is
-								reached.
+								on /agent/invoke. Claude Code stops the run once it passes
+								either limit. The last turn can take it slightly over the
+								spending limit, so treat that limit as a cap, not an exact
+								ceiling.
 							</p>
 						</div>
 						<div className="flex items-center justify-between">

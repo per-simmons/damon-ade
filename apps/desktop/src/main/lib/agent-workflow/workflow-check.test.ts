@@ -48,9 +48,9 @@ describe("checkAgentsFile", () => {
 	it("reports routing that differs from the settings", () => {
 		const project = ensureProjectWorkflow(home, root);
 		const json = JSON.parse(readFileSync(project.agentsFile, "utf8"));
-		json.quick.model = "opus";
-		json.reviewer.maxTurns = 0;
-		delete json.architect;
+		json["ade-quick"].model = "opus";
+		json["ade-reviewer"].maxTurns = 0;
+		delete json["ade-architect"];
 		writeFileSync(project.agentsFile, JSON.stringify(json), "utf8");
 		const check = checkAgentsFile(
 			project.agentsFile,

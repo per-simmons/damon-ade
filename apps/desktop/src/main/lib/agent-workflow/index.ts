@@ -1,5 +1,7 @@
 export {
+	ADE_ROLE_PREFIX,
 	type AgentDefinition,
+	adeRoleName,
 	buildAgentsDefinition,
 	type EffortLevel,
 	fillTasksDir,
@@ -7,6 +9,38 @@ export {
 	WORKFLOW_SUBAGENTS,
 	type WorkflowSubagent,
 } from "./agent-workflow";
+export {
+	checksPassed,
+	loadProjectChecks,
+	type ProjectChecks,
+	runChecks,
+	saveProjectChecks,
+	suggestChecks,
+} from "./checks";
+export {
+	type ApprovedChecks,
+	type ControllerDeps,
+	correctionFeedback,
+	type Decision,
+	decideNext,
+	STAGE_ROLE,
+	TaskController,
+	type TaskSpend,
+	taskSpend,
+} from "./controller";
+export {
+	captureIdentity,
+	identityMismatch,
+	type TaskChanges,
+	taskChanges,
+} from "./identity";
+export {
+	cheaperFallback,
+	MODEL_TIERS,
+	PINNED_MODEL_IDS,
+	resolveRunModel,
+	tierOf,
+} from "./models";
 export {
 	ensureProjectWorkflow,
 	listWorkflowProjects,
@@ -18,30 +52,38 @@ export {
 	renderAgentsJson,
 	workflowProjectsDir,
 } from "./project-workflow";
+export { buildResumeCommand, STAGE_ROLES, stageModel } from "./stage-launch";
+export { parseVerdict, stagePrompt } from "./stage-prompts";
 export {
-	prepareStageLaunch,
-	STAGE_ROLES,
-	type StageLaunchPlan,
-	stageModel,
-	type WorkflowRuntime,
-} from "./stage-launch";
+	buildStageArgs,
+	classifyFailure,
+	type StageRunHandle,
+	type StageRunResult,
+	type StageRunSpec,
+	startStageRun,
+} from "./stage-runner";
 export {
-	MAX_ESCALATIONS_PER_STEP,
-	MAX_REVIEW_ROUNDS,
-	stagePrompt,
-} from "./stage-prompts";
-export {
+	activeRun,
+	type CheckResult,
 	createTask,
+	type ExecutionMode,
 	getTask,
-	listTasks,
-	nextStageFor,
-	recordStageLaunch,
-	type StageLaunch,
-	summarizeTask,
+	listTaskRecords,
+	MODEL_STAGES,
+	type ModelStage,
+	RUN_KINDS,
+	type RunKind,
+	readTaskFiles,
+	saveTask,
 	TASK_STAGES,
+	type TaskFiles,
+	type TaskIdentity,
+	type TaskLimits,
 	type TaskRecord,
+	type TaskRun,
 	type TaskStage,
-	type TaskSummary,
+	type TaskState,
+	withTaskLock,
 } from "./tasks";
 export {
 	type AgentsFileCheck,
@@ -57,10 +99,15 @@ export {
 	DEFAULT_HEADLESS_MAX_BUDGET_USD,
 	DEFAULT_HEADLESS_MAX_TURNS,
 	DEFAULT_SESSION_WARN_USD,
+	DEFAULT_TASK_BUDGET_USD,
+	defaultExecutionSettings,
 	defaultWorkflowSettings,
 	EFFORT_LEVELS,
+	type ExecutionSettings,
 	loadWorkflowSettings,
 	MAX_TURNS_LIMIT,
+	PERMISSION_PROFILES,
+	type PermissionProfile,
 	ROLE_NAMES,
 	type RoleName,
 	type RoleRouting,

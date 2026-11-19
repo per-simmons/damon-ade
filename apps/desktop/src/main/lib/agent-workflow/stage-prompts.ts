@@ -1,27 +1,38 @@
 import {
+	adeRoleName,
 	ESCALATION_RULE,
 	fillTasksDir,
 	WORKFLOW_SUBAGENTS,
 } from "./agent-workflow";
-import type { TaskRecord, TaskStage } from "./tasks";
+import type { TaskChanges } from "./identity";
+import type { ModelStage, TaskRecord } from "./tasks";
 
 /**
- * The prompt for each stage session ADE launches. A stage runs directly on its
- * role's model (no coordinator in between). With `canDelegate` (Claude Code,
- * which has the workflow roles as subagents), handoffs happen inside the
- * session: blocked steps go to the architect, finished work to the reviewer.
- * Without it (Codex), the session stops and ADE offers the next stage.
+ * The prompt for each managed stage run. ADE decides every transition (plan,
+ * build, checks, review, corrections, escalation) and bounds them in the task
+ * record, so prompts never ask the user to start the next stage and never
+ * rely on the model to count retries. Each run gets only what it needs: the
+ * task folder, the check commands ADE will run, and for fixes and reviews the
+ * exact failures and the task's own changed files.
  */
 
-export const MAX_ESCALATIONS_PER_STEP = 2;
-export const MAX_REVIEW_ROUNDS = 2;
+export const VERDICT_PATTERN = /^\s*`?VERDICT:\s*(PASS|FAIL)`?\s*$/gim;
 
 export interface StagePromptInput {
-	stage: TaskStage;
+	stage: ModelStage;
 	task: TaskRecord;
 	/** The project's task folder (forward slashes). */
 	tasksDir: string;
-	canDelegate: boolean;
+	/** Commands ADE runs after implementation. */
+	checks: string[];
+	/** Whether the run may run those commands itself. */
+	mayRunChecks: boolean;
+	/** For fix runs: what failed. */
+	feedback?: string;
+	/** For reviews: the task's own changes. */
+	changes?: TaskChanges;
+	/** For escalations: the report to resolve. */
+	escalationReport?: string;
 }
 
 function roleBody(name: string, tasksDir: string, slug: string): string {
@@ -30,42 +41,28 @@ function roleBody(name: string, tasksDir: string, slug: string): string {
 	return fillTasksDir(role.prompt, tasksDir).replaceAll("<slug>", slug);
 }
 
-function escalationHandoff(
-	tasksDir: string,
-	slug: string,
-	canDelegate: boolean,
-): string {
-	const rule = fillTasksDir(ESCALATION_RULE, tasksDir).replaceAll(
-		"<slug>",
-		slug,
-	);
-	return canDelegate
-		? `## Escalation
-${rule}
-3. Then hand the report to the \`architect\` subagent (pass only the report path), apply its resolution, and continue. At most ${MAX_ESCALATIONS_PER_STEP} escalations per step: count them in progress.md. If a step is still blocked after that, stop and say so; the user decides in ADE.`
-		: `## Escalation
-${rule}
-3. Then stop. The user escalates from ADE.`;
+function checksNote(input: StagePromptInput): string {
+	if (input.checks.length === 0) {
+		return "No check commands are configured for this project; an independent reviewer checks the work.";
+	}
+	const list = input.checks.map((command) => `- \`${command}\``).join("\n");
+	return input.mayRunChecks
+		? `When you finish, ADE runs these checks itself; you may also run them while you work (they are allowed):\n${list}`
+		: `When you finish, ADE runs these checks itself (you cannot run shell commands in this run):\n${list}`;
 }
 
-function reviewHandoff(dir: string, canDelegate: boolean): string {
-	return canDelegate
-		? `## Review
-When the work is done, ask the \`reviewer\` subagent to review task \`${dir}\`. Record its result under \`## Review\` in progress.md. On FAIL, fix only the failing criteria and ask for one more review; after ${MAX_REVIEW_ROUNDS} failed reviews, set Status to \`blocked\` and stop. Set Status to \`done\` only after a PASS.`
-		: `## Review
-When the work is done, set Status to \`ready for review\` in progress.md and stop. The user starts the review from ADE.`;
-}
+const STOP = "When you are done, stop. ADE runs the next step.";
 
-export function stagePrompt({
-	stage,
-	task,
-	tasksDir,
-	canDelegate,
-}: StagePromptInput): string {
+export function stagePrompt(input: StagePromptInput): string {
+	const { stage, task, tasksDir } = input;
 	const dir = `${tasksDir}/${task.slug}`;
 	const header = `ADE task "${task.title}" (${task.slug}).
 Task folder: ${dir}
 The task description is in ${dir}/task.md. Write progress only inside the task folder; do not create workflow files in the repository.`;
+	const rule = fillTasksDir(ESCALATION_RULE, tasksDir).replaceAll(
+		"<slug>",
+		task.slug,
+	);
 
 	switch (stage) {
 		case "quick":
@@ -76,11 +73,9 @@ ${roleBody("quick", tasksDir, task.slug)}
 ## The change
 ${task.description}
 
-When finished, write ${dir}/progress.md with \`Status: done\` (or \`Status: blocked\` and the reason).${
-				canDelegate
-					? ` If you replied "Needs implementer", hand the task to the \`implementer\` subagent with the task folder path instead of stopping.`
-					: ""
-			}`;
+${checksNote(input)}
+
+When finished, write ${dir}/progress.md with \`Status: implemented\` and what you changed. ${STOP}`;
 
 		case "implement":
 			return `${header}
@@ -92,44 +87,94 @@ ${task.description}
 
 ## Process
 1. Read only the code the change needs: search first, then open the relevant files.
-2. Make the change and run the relevant checks (typecheck, lint and tests for what you touched).
-3. Keep ${dir}/progress.md current: \`Status: in progress\`, what you changed, and the checks you ran with their results.
-4. Never report a check as passing unless you ran it and it passed.
+2. Make the change.
+3. Keep ${dir}/progress.md current: \`Status: implemented\` when you are done, what you changed, and anything the reviewer should know.
 
-${escalationHandoff(tasksDir, task.slug, canDelegate)}
+${checksNote(input)}
 
-${reviewHandoff(dir, canDelegate)}`;
+${rule}
+3. Then stop. ADE escalates.
+
+${STOP}`;
 
 		case "plan":
 			return `${header}
 
 ${roleBody("planner", tasksDir, task.slug)}
 
-When plan.md and progress.md are written, stop. The user reviews the plan and starts the build from ADE.`;
+The project's checks (ADE runs these after implementation; refer to them under Validation commands):
+${input.checks.length ? input.checks.map((c) => `- \`${c}\``).join("\n") : "- none configured"}
+
+${STOP}`;
 
 		case "build":
 			return `${header}
 
 ${roleBody("implementer", tasksDir, task.slug)}
 
-Do every remaining step of ${dir}/plan.md in order, updating progress.md after each.
+Do every remaining step of ${dir}/plan.md in order, updating progress.md after each. When every step is done, set Status to \`implemented\`.
 
-${escalationHandoff(tasksDir, task.slug, canDelegate)}
+${checksNote(input)}
 
-${reviewHandoff(dir, canDelegate)}`;
+If you get blocked, follow the escalation rule above and stop; ADE escalates and then resumes the build. ${STOP}`;
 
-		case "review":
+		case "fix":
+			return `${header}
+
+You are correcting this task's implementation. Fix only what is listed below; do not redo work that passed.
+
+## What failed
+${input.feedback ?? "(no details recorded)"}
+
+Read ${dir}/progress.md${task.route === "plan" || task.route === "exceptional" ? ` and ${dir}/plan.md` : ""} for context. Update progress.md with what you changed and set Status to \`implemented\`.
+
+${checksNote(input)}
+
+${rule}
+3. Then stop. ADE escalates.
+
+${STOP}`;
+
+		case "review": {
+			const changes = input.changes;
+			const changed = changes?.tracked
+				? changes.files.length
+					? changes.files.map((f) => `- ${f}`).join("\n")
+					: "- (no file changes found)"
+				: "- (not a git repository: review the files the task describes)";
+			const preexisting = changes?.preexisting.length
+				? `\n\nThese files were already changed before the task started; ignore their pre-existing edits:\n${changes.preexisting.map((f) => `- ${f}`).join("\n")}`
+				: "";
 			return `${header}
 
 ${roleBody("reviewer", tasksDir, task.slug)}
 
-Exception to the read-only rule: record your result, with today's date, under \`## Review\` in ${dir}/progress.md, and set Status to \`done\` on PASS or \`changes requested\` on FAIL.`;
+## This task's changes
+${changed}${preexisting}
+
+Use \`git diff\` on those files. ${input.mayRunChecks && input.checks.length ? "You may run the project's checks." : "ADE has already run the project's checks."}
+
+End your reply with exactly one line: \`VERDICT: PASS\` or \`VERDICT: FAIL\`. Any FAIL criterion means FAIL.`;
+		}
 
 		case "escalate":
 			return `${header}
 
 ${roleBody("architect", tasksDir, task.slug)}
 
-Resolve the newest report in ${dir}/escalations/ that has no \`## Resolution\` section yet. When done, stop; the user continues the build from ADE.`;
+Resolve this escalation report: ${input.escalationReport ?? `the newest report in ${dir}/escalations/ without a Resolution`}.
+
+${STOP}`;
 	}
 }
+
+/** The reviewer's verdict: the last VERDICT line of its final text. */
+export function parseVerdict(
+	text: string | undefined,
+): "PASS" | "FAIL" | undefined {
+	const matches = [...(text ?? "").matchAll(VERDICT_PATTERN)];
+	const last = matches[matches.length - 1];
+	return last ? (last[1].toUpperCase() as "PASS" | "FAIL") : undefined;
+}
+
+export { adeRoleName };

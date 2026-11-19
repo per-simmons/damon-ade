@@ -45,12 +45,14 @@ describe("buildAgentsDefinition", () => {
 	const definition = buildAgentsDefinition(WORKFLOW_SUBAGENTS, TASKS_DIR);
 
 	it("produces Claude Code --agents JSON for every role", () => {
+		// Namespaced, so a project's own "reviewer" or "planner" agent is never
+		// replaced by ADE's.
 		expect(Object.keys(definition).sort()).toEqual([
-			"architect",
-			"implementer",
-			"planner",
-			"quick",
-			"reviewer",
+			"ade-architect",
+			"ade-implementer",
+			"ade-planner",
+			"ade-quick",
+			"ade-reviewer",
 		]);
 		// The fields Claude Code 2.1.193 validates for --agents.
 		for (const role of Object.values(definition)) {
@@ -72,8 +74,13 @@ describe("buildAgentsDefinition", () => {
 	});
 
 	it("omits tools for roles that get every tool", () => {
-		expect(definition.implementer.tools).toBeUndefined();
-		expect(definition.reviewer.tools).toEqual(["Read", "Grep", "Glob", "Bash"]);
+		expect(definition["ade-implementer"].tools).toBeUndefined();
+		expect(definition["ade-reviewer"].tools).toEqual([
+			"Read",
+			"Grep",
+			"Glob",
+			"Bash",
+		]);
 	});
 });
 

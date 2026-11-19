@@ -19,6 +19,10 @@ import {
 import { getWorkspaceName } from "shared/env.shared";
 import { backfillAgentMemory } from "./lib/agent-memory-backfill";
 import { setupAgentHooks } from "./lib/agent-setup";
+import {
+	recoverWorkflowTasks,
+	shutdownWorkflowRuns,
+} from "./lib/agent-workflow/service";
 import { loadWorkflowSettings } from "./lib/agent-workflow/workflow-settings";
 import { SUPERSET_HOME_DIR } from "./lib/app-environment";
 import { initAppState } from "./lib/app-state";
@@ -190,6 +194,12 @@ app.on("before-quit", async (event) => {
 
 	isQuitting = true;
 	disposeTray();
+	// Managed workflow runs are child processes: kill their trees (bounded).
+	try {
+		await shutdownWorkflowRuns();
+	} catch (error) {
+		console.error("[main] Stopping workflow runs failed:", error);
+	}
 	app.exit(0);
 });
 
@@ -298,6 +308,14 @@ if (!gotTheLock) {
 		// Must happen before renderer restore runs
 		console.log("[main] boot: reconcileDaemonSessions…");
 		await reconcileDaemonSessions();
+
+		// Workflow tasks whose run was in progress when ADE stopped: mark the
+		// run interrupted and pause the task (no paid work is replayed).
+		try {
+			recoverWorkflowTasks();
+		} catch (error) {
+			console.error("[main] Workflow task recovery failed:", error);
+		}
 		prewarmTerminalRuntime();
 
 		try {

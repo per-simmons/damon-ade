@@ -27,12 +27,13 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { ADE_ROLE_PREFIX } from "../src/main/lib/agent-workflow/agent-workflow";
 import {
 	ensureProjectWorkflow,
 	portablePath,
 	workflowProjectsDir,
 } from "../src/main/lib/agent-workflow/project-workflow";
-import { listTasks } from "../src/main/lib/agent-workflow/tasks";
+import { listTaskRecords } from "../src/main/lib/agent-workflow/tasks";
 import {
 	checkAgentsFile,
 	checkClaudeCliSupport,
@@ -179,7 +180,7 @@ ${project.root}`);
 				`  ${role.name.padEnd(12)} ${role.model ?? "-"} / ${role.effort ?? "-"} / ${role.maxTurns ?? "-"} turns${role.problems.length ? `  !! ${role.problems.join("; ")}` : ""}`,
 			);
 		}
-		console.log(`  tasks: ${listTasks(project).length}`);
+		console.log(`  tasks: ${listTaskRecords(project).length}`);
 		if (!check.ok) problems++;
 
 		// Runtime confirmation: models actually used, from recorded transcripts.
@@ -196,8 +197,11 @@ ${project.root}`);
 		}
 		console.log("  models actually used (recorded sessions):");
 		for (const [role, models] of observed) {
+			const roleName = role.startsWith(ADE_ROLE_PREFIX)
+				? role.slice(ADE_ROLE_PREFIX.length)
+				: role;
 			const configured =
-				settings.roles[role as keyof typeof settings.roles]?.model;
+				settings.roles[roleName as keyof typeof settings.roles]?.model;
 			const mismatched = configured
 				? [...models].filter((model) => !modelMatches(configured, model))
 				: [];

@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { adeRoleName } from "./agent-workflow";
 
 /**
  * Non-billable checks for the workflow: that a project's generated roles are
@@ -61,7 +62,8 @@ interface ExpectedRole {
 
 /**
  * Check a project's agents.json (the `--agents` JSON ADE passes to Claude
- * Code): it parses, every role is present with the fields Claude Code
+ * Code): it parses, every role (`expected` is keyed by role name, the file
+ * by its "ade-" name) is present with the fields Claude Code
  * validates, the routing matches the settings, and prompts point at the
  * project's task folder.
  */
@@ -88,7 +90,8 @@ export function checkAgentsFile(
 
 	const roles: RoleCheck[] = [];
 	for (const [name, want] of Object.entries(expected)) {
-		const role = parsed[name];
+		// Roles are keyed "ade-<role>" so a project's own agents keep their names.
+		const role = parsed[adeRoleName(name)];
 		const check: RoleCheck = { name, problems: [] };
 		roles.push(check);
 		if (!role) {
