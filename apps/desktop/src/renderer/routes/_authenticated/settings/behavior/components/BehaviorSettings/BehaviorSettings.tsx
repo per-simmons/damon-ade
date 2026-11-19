@@ -302,7 +302,7 @@ export function BehaviorSettings({ visibleItems }: BehaviorSettingsProps) {
 						</div>
 						<Switch
 							id="confirm-on-quit"
-							checked={confirmOnQuit ?? true}
+							checked={confirmOnQuit ?? false}
 							onCheckedChange={handleConfirmToggle}
 							disabled={isConfirmLoading || setConfirmOnQuit.isPending}
 						/>
@@ -319,8 +319,7 @@ export function BehaviorSettings({ visibleItems }: BehaviorSettingsProps) {
 								Delete local branch on agent removal
 							</Label>
 							<p className="text-xs text-muted-foreground">
-								Also delete the local git branch when deleting a worktree
-								agent
+								Also delete the local git branch when deleting a worktree agent
 							</p>
 						</div>
 						<Switch

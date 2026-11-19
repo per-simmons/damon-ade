@@ -54,11 +54,7 @@ export function OrganizationDropdown() {
 					className="no-drag flex items-center gap-1.5 h-6 px-1.5 rounded border border-border/60 bg-secondary/50 hover:bg-secondary hover:border-border transition-all duration-150 ease-out focus:outline-none focus:ring-1 focus:ring-ring"
 					aria-label="Menu"
 				>
-					<Avatar
-						size="xs"
-						fullName={userName}
-						className="rounded size-4"
-					/>
+					<Avatar size="xs" fullName={userName} className="rounded size-4" />
 					<span className="text-xs font-medium truncate max-w-32">
 						{displayName}
 					</span>
