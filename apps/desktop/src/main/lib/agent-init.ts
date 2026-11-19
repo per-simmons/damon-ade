@@ -1,5 +1,5 @@
 import type { AgentRuntime } from "@superset/local-db";
-import { workspaces, worktrees } from "@superset/local-db";
+import { projects, workspaces, worktrees } from "@superset/local-db";
 import { toAgentType } from "@superset/shared/agent-command";
 import { eq } from "drizzle-orm";
 import { localDb } from "main/lib/local-db";
@@ -34,6 +34,34 @@ interface AgentInitContext {
 
 const contexts = new Map<string, AgentInitContext>();
 
+/** The branch a new agent of a team works on: ade/<name>-<short id>. */
+export function agentBranchName(agentName: string, agentId: string): string {
+	const slug =
+		agentName
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, "-")
+			.replace(/^-+|-+$/g, "")
+			.slice(0, 40) || "agent";
+	return `ade/${slug}-${agentId.slice(0, 6)}`;
+}
+
+/** Where a team agent's worktree starts: the team's base branch. */
+export function teamWorktreeSource(
+	team: {
+		mainRepoPath: string;
+		workspaceBaseBranch: string | null;
+		defaultBranch: string | null;
+	},
+	branch: string,
+): AgentRepoSource {
+	return {
+		type: "team",
+		repoPath: team.mainRepoPath,
+		branch,
+		startPoint: team.workspaceBaseBranch || team.defaultBranch || "HEAD",
+	};
+}
+
 export function isAgentInit(agentId: string): boolean {
 	return contexts.has(agentId);
 }
@@ -61,12 +89,21 @@ export function retryAgentInit(agentId: string): boolean {
 			.where(eq(workspaces.id, agentId))
 			.get();
 		if (!workspace?.worktreeId || !workspace.runtime) return false;
+		const team = localDb
+			.select()
+			.from(projects)
+			.where(eq(projects.id, workspace.projectId))
+			.get();
 		ctx = {
 			categoryId: workspace.projectId,
 			worktreeId: workspace.worktreeId,
 			agentName: workspace.name,
 			runtime: toAgentType(workspace.runtime),
-			source: { type: "init" },
+			// A team's agent is a worktree of the team's repository; only a
+			// repo-less legacy team's agent gets a repository of its own.
+			source: team?.mainRepoPath
+				? teamWorktreeSource(team, workspace.branch)
+				: { type: "init" },
 		};
 		contexts.set(agentId, ctx);
 	}
@@ -84,9 +121,11 @@ async function runAgentInit(agentId: string): Promise<void> {
 		workspaceInitManager.updateProgress(
 			agentId,
 			"creating_repo",
-			ctx.source.type === "clone"
-				? "Cloning repository..."
-				: "Creating repository...",
+			ctx.source.type === "team"
+				? "Creating the agent's worktree of the team repository..."
+				: ctx.source.type === "clone"
+					? "Cloning repository..."
+					: "Creating repository...",
 		);
 
 		const { worktreePath, branch } = await setupAgentRepo({
@@ -130,6 +169,8 @@ async function runAgentInit(agentId: string): Promise<void> {
 				runtime: ctx.runtime,
 				userName: getUserName(),
 				worktreePath: resolveAgentWorktreePath(agentId, ctx.worktreeId),
+				// A worktree of the team's repository gets no ADE files.
+				writeBridges: ctx.source.type !== "team",
 			});
 		}
 

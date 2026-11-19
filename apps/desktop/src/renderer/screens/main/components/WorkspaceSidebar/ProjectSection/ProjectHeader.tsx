@@ -35,6 +35,7 @@ import { STROKE_WIDTH } from "../constants";
 import { RenameInput } from "../RenameInput";
 import { CloseProjectDialog } from "./CloseProjectDialog";
 import { ProjectThumbnail } from "./ProjectThumbnail";
+import { TeamRepoLine } from "./TeamRepoLine";
 
 interface ProjectHeaderProps {
 	projectId: string;
@@ -363,7 +364,7 @@ export function ProjectHeader({
 					</ContextMenuItem>
 					<ContextMenuItem onSelect={handleOpenSettings}>
 						<LuSettings className="size-4 mr-2" strokeWidth={STROKE_WIDTH} />
-						Project Settings
+						Team Settings
 					</ContextMenuItem>
 					{colorPickerSubmenu}
 					<ContextMenuItem onSelect={handleToggleImage}>
@@ -388,6 +389,8 @@ export function ProjectHeader({
 					</ContextMenuItem>
 				</ContextMenuContent>
 			</ContextMenu>
+
+			<TeamRepoLine projectId={projectId} />
 
 			<CloseProjectDialog
 				projectName={projectName}

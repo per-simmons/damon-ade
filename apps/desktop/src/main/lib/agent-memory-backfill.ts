@@ -1,8 +1,8 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { workspaces } from "@superset/local-db";
+import { projects, workspaces } from "@superset/local-db";
 import { toAgentType } from "@superset/shared/agent-command";
-import { isNotNull } from "drizzle-orm";
+import { eq, isNotNull } from "drizzle-orm";
 import { getAgentMemoryDir } from "./agent-home";
 import { scaffoldAgentMemory } from "./agent-scaffold";
 import { resolveAgentWorktreePath } from "./agent-worktree";
@@ -62,12 +62,20 @@ export function backfillAgentMemory(): void {
 
 			if (!memoryDirIsEmpty(getAgentMemoryDir(agent.id))) continue;
 
+			// An agent in a worktree of its team's repository gets no ADE files
+			// in that repository (one team = one repository).
+			const team = localDb
+				.select({ mainRepoPath: projects.mainRepoPath })
+				.from(projects)
+				.where(eq(projects.id, agent.projectId))
+				.get();
 			scaffoldAgentMemory({
 				agentId: agent.id,
 				agentName: agent.name || "Agent",
 				runtime: toAgentType(agent.runtime),
 				userName,
 				worktreePath,
+				writeBridges: !team?.mainRepoPath || agent.type === "branch",
 			});
 			scaffolded++;
 		} catch (error) {

@@ -18,10 +18,6 @@ export const createAgentInput = z.object({
 		.optional()
 		.transform((v) => (v ? v : undefined)),
 	runtime: z.enum(AGENT_RUNTIMES).default("claude"),
-	repo: z
-		.discriminatedUnion("type", [
-			z.object({ type: z.literal("init") }),
-			z.object({ type: z.literal("clone"), url: z.string().min(1) }),
-		])
-		.default({ type: "init" }),
+	// No repository choice: an agent always works in the team's repository
+	// (one team = one repository), in a worktree on its own branch.
 });

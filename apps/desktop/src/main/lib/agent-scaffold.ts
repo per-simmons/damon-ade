@@ -54,6 +54,13 @@ export interface ScaffoldParams {
 	 * git repo before passing it.
 	 */
 	worktreePath?: string;
+	/**
+	 * Write the bridge files (CLAUDE.md, .claude/, exclude rules) into the
+	 * worktree. False for agents working in a worktree of a team's own
+	 * repository: ADE never adds files to the user's repository. Their memory
+	 * still lives under <agent-home>.
+	 */
+	writeBridges?: boolean;
 }
 
 function sub(template: string, vars: Record<string, string>): string {
@@ -360,6 +367,7 @@ export function scaffoldAgentMemory({
 	userName,
 	role,
 	worktreePath: worktreePathOverride,
+	writeBridges = true,
 }: ScaffoldParams): void {
 	const agentHome = getAgentHome(agentId);
 	const memoryDir = getAgentMemoryDir(agentId);
@@ -395,6 +403,11 @@ export function scaffoldAgentMemory({
 	);
 	writeIfEmpty(join(skillsDir, "README.md"), sub(SKILLS_README, vars));
 	writeIfEmpty(join(skillsDir, "SKILL.template.md"), sub(SKILL_TEMPLATE, vars));
+
+	if (!writeBridges) {
+		if (runtime === "codex") regenerateCodexAgentsMd(agentId);
+		return;
+	}
 
 	// Per-runtime bridge files in the worktree (point each CLI at canonical
 	// memory). Idempotent so we never clobber a bridge the user customized.

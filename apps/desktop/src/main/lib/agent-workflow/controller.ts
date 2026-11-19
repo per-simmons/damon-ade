@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
 	HISTORY_FILE,
 	readTaskHistory,
@@ -593,7 +593,16 @@ export interface ControllerDeps {
 interface LiveRun {
 	project: ProjectWorkflow;
 	slug: string;
+	title: string;
+	/** The folder the run works in. */
+	worktree: string;
 	cancel: () => Promise<void>;
+}
+
+/** Folder comparison key (case-insensitive on Windows). */
+function folderKey(path: string): string {
+	const resolved = resolve(path).replace(/[\\/]+$/, "");
+	return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
 export class TaskController {
@@ -635,6 +644,26 @@ export class TaskController {
 			task.identity,
 			this.branchOf(task.identity.worktreePath),
 		);
+	}
+
+	/**
+	 * Another task's run in the same folder. Two runs never edit one working
+	 * folder at once: the second waits (paused) until the first is done.
+	 * Worktrees of the same repository are separate folders and may run
+	 * side by side.
+	 */
+	private folderBusy(
+		project: ProjectWorkflow,
+		task: TaskRecord,
+	): string | undefined {
+		const here = folderKey(task.identity.worktreePath);
+		for (const live of this.live.values()) {
+			if (live.slug === task.slug && live.project.key === project.key) continue;
+			if (folderKey(live.worktree) === here) {
+				return `Task "${live.title}" is running in this folder (${task.identity.worktreePath}). Resume this task when it has finished, or run it in another worktree.`;
+			}
+		}
+		return undefined;
 	}
 
 	/** Runs in progress, by run id (for the UI and shutdown). */
@@ -958,6 +987,8 @@ export class TaskController {
 			if (blocker) throw new Error(blocker);
 			const problem = this.identityProblem(task);
 			if (problem) throw new Error(problem);
+			const busy = this.folderBusy(project, task);
+			if (busy) throw new Error(busy);
 			if (
 				task.mode === "auto" &&
 				!task.pauseRequested &&
@@ -985,6 +1016,14 @@ export class TaskController {
 		if (problem) {
 			task.state = "blocked";
 			task.stateReason = problem;
+			saveTask(project, task);
+			this.changed(project, task.slug);
+			return task;
+		}
+		const busy = this.folderBusy(project, task);
+		if (busy) {
+			task.state = "paused";
+			task.stateReason = busy;
 			saveTask(project, task);
 			this.changed(project, task.slug);
 			return task;
@@ -1220,7 +1259,13 @@ export class TaskController {
 		saveTask(project, task);
 		this.changed(project, task.slug);
 
-		this.live.set(run.id, { project, slug: task.slug, cancel: handle.cancel });
+		this.live.set(run.id, {
+			project,
+			slug: task.slug,
+			title: task.title,
+			worktree: task.identity.worktreePath,
+			cancel: handle.cancel,
+		});
 		this.track(
 			project,
 			task.slug,
@@ -1335,6 +1380,8 @@ export class TaskController {
 		this.live.set(run.id, {
 			project,
 			slug: task.slug,
+			title: task.title,
+			worktree: task.identity.worktreePath,
 			cancel: async () => abort.abort(),
 		});
 		this.track(

@@ -16,9 +16,7 @@ export function StartView() {
 		<div className="flex flex-col h-full w-full relative overflow-hidden bg-background">
 			<div className="relative flex flex-1 items-center justify-center">
 				<div className="flex flex-col items-center w-full max-w-md px-6">
-					<SupersetLogo
-						className={cn("h-8 w-auto mb-12 opacity-80")}
-					/>
+					<SupersetLogo className={cn("h-8 w-auto mb-12 opacity-80")} />
 
 					<div className="w-full flex flex-col items-center gap-4">
 						<button
@@ -38,7 +36,8 @@ export function StartView() {
 									</span>
 								</div>
 								<div className="text-sm pt-3 text-muted-foreground">
-									Teams group your agents. Add agents once you have one.
+									A team works in one repository: choose a local folder or a
+									GitHub repository, then run tasks. Agents are optional.
 								</div>
 							</div>
 						</button>

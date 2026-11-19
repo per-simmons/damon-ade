@@ -43,6 +43,11 @@ import {
 import { getDefaultProjectColor } from "./utils/colors";
 import { discoverAndSaveProjectIcon } from "./utils/favicon-discovery";
 import { fetchGitHubOwner, getGitHubAvatarUrl } from "./utils/github";
+import {
+	migrateTeam,
+	teamForRepository,
+	teamRepositoryStatus,
+} from "./utils/teams";
 
 type Project = SelectProject;
 
@@ -759,6 +764,8 @@ export const createProjectsRouter = (getWindow: () => BrowserWindow | null) => {
 							name,
 							color: getDefaultProjectColor(),
 							defaultBranch,
+							// Without a tabOrder the team is never listed.
+							tabOrder: nextTabOrder(),
 						})
 						.returning()
 						.get();
@@ -1196,6 +1203,171 @@ export const createProjectsRouter = (getWindow: () => BrowserWindow | null) => {
 				}
 
 				return { iconUrl };
+			}),
+
+		/**
+		 * One team = one repository. New team from a local repository: the
+		 * team is named (default: the folder's name) and opens on its main
+		 * workspace, where Tasks work at once. A repository that already has a
+		 * team opens that team instead of making a second one.
+		 */
+		createTeam: publicProcedure
+			.input(
+				z.object({
+					path: z.string().min(1),
+					name: z.string().trim().max(80).optional(),
+					color: z.string().optional(),
+				}),
+			)
+			.mutation(async ({ input }) => {
+				if (!existsSync(input.path) || !statSync(input.path).isDirectory()) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "Choose an existing folder",
+					});
+				}
+				let repoRoot: string;
+				try {
+					repoRoot = await getGitRoot(input.path);
+				} catch (error) {
+					if (error instanceof NotGitRepoError) {
+						throw new TRPCError({
+							code: "BAD_REQUEST",
+							message:
+								"This folder is not a git repository. Choose a repository, or clone one from GitHub.",
+						});
+					}
+					throw error;
+				}
+				const existing = teamForRepository(repoRoot);
+				const project =
+					existing ?? upsertProject(repoRoot, await getDefaultBranch(repoRoot));
+				if (existing) {
+					// Opening it again shows it (if it was hidden) and refreshes it.
+					upsertProject(
+						existing.mainRepoPath,
+						await getDefaultBranch(existing.mainRepoPath),
+					);
+				} else {
+					const name = input.name?.trim();
+					if (name || input.color) {
+						localDb
+							.update(projects)
+							.set({
+								...(name ? { name } : {}),
+								...(input.color ? { color: input.color } : {}),
+							})
+							.where(eq(projects.id, project.id))
+							.run();
+					}
+				}
+				const fresh = localDb
+					.select()
+					.from(projects)
+					.where(eq(projects.id, project.id))
+					.get() as Project;
+				await ensureMainWorkspace(fresh);
+				const main = getBranchWorkspace(fresh.id);
+				track("project_opened", { project_id: fresh.id, method: "new_team" });
+				return {
+					project: fresh,
+					existed: !!existing,
+					workspaceId: main?.id ?? null,
+				};
+			}),
+
+		/** A team's repository, its agents, and whether they need migrating. */
+		teamRepository: publicProcedure
+			.input(z.object({ projectId: z.string() }))
+			.query(({ input }) => teamRepositoryStatus(input.projectId)),
+
+		/**
+		 * Give a team created before teams had a repository its repository.
+		 * Its agents keep their own folders until the user migrates them.
+		 */
+		setTeamRepository: publicProcedure
+			.input(z.object({ projectId: z.string(), path: z.string().min(1) }))
+			.mutation(async ({ input }) => {
+				const project = localDb
+					.select()
+					.from(projects)
+					.where(eq(projects.id, input.projectId))
+					.get();
+				if (!project) throw new Error("Team not found");
+				if (project.mainRepoPath) {
+					throw new Error(
+						`This team already has a repository: ${project.mainRepoPath}`,
+					);
+				}
+				let repoRoot: string;
+				try {
+					repoRoot = await getGitRoot(input.path);
+				} catch (error) {
+					if (error instanceof NotGitRepoError) {
+						throw new Error("This folder is not a git repository");
+					}
+					throw error;
+				}
+				const other = teamForRepository(repoRoot);
+				if (other) {
+					throw new Error(
+						`Team "${other.name}" already uses this repository. Open that team instead.`,
+					);
+				}
+				localDb
+					.update(projects)
+					.set({
+						mainRepoPath: repoRoot,
+						defaultBranch: await getDefaultBranch(repoRoot),
+						lastOpenedAt: Date.now(),
+					})
+					.where(eq(projects.id, input.projectId))
+					.run();
+				const fresh = localDb
+					.select()
+					.from(projects)
+					.where(eq(projects.id, input.projectId))
+					.get() as Project;
+				await ensureMainWorkspace(fresh);
+				return {
+					status: teamRepositoryStatus(input.projectId),
+					workspaceId: getBranchWorkspace(fresh.id)?.id ?? null,
+				};
+			}),
+
+		/**
+		 * Migrate an old team: one chosen agent's repository becomes the team's
+		 * (optional), and every other repository gets a team of its own. Only
+		 * team membership changes; no files are moved or deleted.
+		 */
+		migrateTeam: publicProcedure
+			.input(
+				z.object({
+					projectId: z.string(),
+					teamRepoAgentId: z.string().nullable(),
+				}),
+			)
+			.mutation(async ({ input }) => {
+				const result = migrateTeam(input.projectId, input.teamRepoAgentId);
+				// Teams that now have a repository get its default branch.
+				for (const id of [
+					input.projectId,
+					...result.createdTeams.map((t) => t.id),
+				]) {
+					const team = localDb
+						.select()
+						.from(projects)
+						.where(eq(projects.id, id))
+						.get();
+					if (team?.mainRepoPath && !team.defaultBranch) {
+						localDb
+							.update(projects)
+							.set({ defaultBranch: await getDefaultBranch(team.mainRepoPath) })
+							.where(eq(projects.id, id))
+							.run();
+					}
+				}
+				return result;
 			}),
 
 		// ADE: create a Category (a grouping-only project with no shared repo).
