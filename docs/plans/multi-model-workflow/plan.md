@@ -1,6 +1,6 @@
 # Plan: multi-model coding workflow in ADE
 
-Status: **v3 (2026-11-18): ADE owns the stages. Auto mode takes one request to a verified finish; Manual mode runs single steps (section A). Not yet tried against a real model (billable; needs the user).**
+Status: **Usable release (2026-11-18). ADE owns the stages: Auto mode takes one request to a verified finish, and Manual mode runs single steps (section A). Release checklist and one authorized real smoke task: section A, "Release verification".**
 Created: 2026-11-17
 Scope: `apps/desktop`. No new framework or dependency, no DB migration.
 
@@ -126,9 +126,40 @@ Every test uses a fake `claude` script (`agent-workflow/testing/fake-claude.ts`)
 
 The argument-capture tests check only that flags are passed correctly. The acceptance tests are what show the orchestration works.
 
+### Release verification (2026-11-18)
+
+**Bugs fixed in release testing** (regression tests in `controller.test.ts` and `workflow.acceptance.test.tsx`, under "release regressions"):
+
+- A quick run that says "Needs implementer" no longer counts as the implementation; the implementer runs before checks or review.
+- Check results count only for the exact approved commands and for the code state they ran on. Reviews are tied to their code state too.
+- Uncertain spend counts at the run's cap in every budget decision, and the UI shows it as a range.
+- The branch is revalidated before every stage.
+- A move voids earlier evidence (the runs are kept as history), then the task reconciles and is verified again.
+- Cancelling a task waits only for that task's own runs.
+- Opening an existing folder now lists the project in the sidebar and opens its workspace. Before, it was invisible and navigated to a missing route.
+
+**Real app with mocked execution.** Dev build, isolated ADE home, a compiled stand-in for `claude` set through `ADE_CLAUDE_BINARY`, driven through the dev test bridge on port 41732.
+
+- An existing repo was opened. An Auto request ran implement, `npm run test`, then review, ending in Done (verified), with live progress, model and cost.
+- Manual mode: disabled steps show their reasons, and a model override ran on Haiku.
+- Cancel killed the process tree.
+- After quitting and relaunching, the workspace, tasks, runs, checks and totals were restored.
+
+**Real smoke task** (authorized by the user):
+
+- Project: a disposable repo.
+- Task: Fix the typo in README.md: change "Teh greeter" to "The greeter".
+- Run: Auto, budget $0.50, with the installed Claude Code 2.1.193. The route was quick (`claude-haiku-5-5`, low effort, 15 turns, `acceptEdits`).
+- Result: ADE ran `npm run test` and it passed, ending in Done (verified) with no stage clicks.
+- Changes: only `README.md`, with exactly the requested fix.
+- Cost: Claude Code reported $0.011; ADE's live estimate was $0.0105.
+
 ### Known limits
 
-- Not yet tried against a real model. The stream-json fields, the failure texts and how far `--max-budget-usd` can be exceeded come from the CLI's help text and earlier transcripts, not a live run. Watch the first real run.
+- Real-model coverage is one quick task. The plan, review, correction and escalation paths have been exercised only with the fake `claude`.
+- While a run is in progress, its cost counts at its cap, so with a small budget the task card can show "Raise budget" during a normal run (cosmetic).
+- After a restart mid-run, the interrupted run's cost is uncertain. The budget must be raised before resuming.
+- Earlier wording in this section: the run was not yet tried against a real model. The stream-json fields, the failure texts and how far `--max-budget-usd` can be exceeded come from the CLI's help text and earlier transcripts, not a live run. Watch the first real run.
 - Checks run through Git Bash on Windows (cmd.exe if it is missing) and the login shell elsewhere. A project whose checks need another shell must write them accordingly.
 - ADE cannot enforce effort or turn limits in interactive sessions, including sessions opened with "Open session in terminal". The UI says so.
 - The built-in chat (mastracode) is still not part of the workflow.
