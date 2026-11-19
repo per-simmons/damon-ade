@@ -157,7 +157,6 @@ The argument-capture tests check only that flags are passed correctly. The accep
 ### Known limits
 
 - Real-model coverage is one quick task. The plan, review, correction and escalation paths have been exercised only with the fake `claude`.
-- While a run is in progress, its cost counts at its cap, so with a small budget the task card can show "Raise budget" during a normal run (cosmetic).
 - After a restart mid-run, the interrupted run's cost is uncertain. The budget must be raised before resuming.
 - Earlier wording in this section: the run was not yet tried against a real model. The stream-json fields, the failure texts and how far `--max-budget-usd` can be exceeded come from the CLI's help text and earlier transcripts, not a live run. Watch the first real run.
 - Checks run through Git Bash on Windows (cmd.exe if it is missing) and the login shell elsewhere. A project whose checks need another shell must write them accordingly.
