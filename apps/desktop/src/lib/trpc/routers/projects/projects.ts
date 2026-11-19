@@ -96,6 +96,20 @@ async function initGitRepo(path: string): Promise<{ defaultBranch: string }> {
 	return { defaultBranch };
 }
 
+/** The next sidebar position (projects with a tabOrder are listed). */
+function nextTabOrder(): number {
+	return (
+		localDb
+			.select()
+			.from(projects)
+			.all()
+			.reduce(
+				(max, p) => (p.tabOrder != null && p.tabOrder > max ? p.tabOrder : max),
+				-1,
+			) + 1
+	);
+}
+
 function upsertProject(mainRepoPath: string, defaultBranch: string): Project {
 	const name = basename(mainRepoPath);
 
@@ -106,14 +120,18 @@ function upsertProject(mainRepoPath: string, defaultBranch: string): Project {
 		.get();
 
 	if (existing) {
+		// Opening a project that was closed (hidden) shows it again.
+		const tabOrder = existing.tabOrder ?? nextTabOrder();
 		localDb
 			.update(projects)
-			.set({ lastOpenedAt: Date.now(), defaultBranch })
+			.set({ lastOpenedAt: Date.now(), defaultBranch, tabOrder })
 			.where(eq(projects.id, existing.id))
 			.run();
-		return { ...existing, lastOpenedAt: Date.now(), defaultBranch };
+		return { ...existing, lastOpenedAt: Date.now(), defaultBranch, tabOrder };
 	}
 
+	// A tabOrder puts the opened project in the sidebar; without one it was
+	// created but never listed.
 	const project = localDb
 		.insert(projects)
 		.values({
@@ -121,6 +139,7 @@ function upsertProject(mainRepoPath: string, defaultBranch: string): Project {
 			name,
 			color: getDefaultProjectColor(),
 			defaultBranch,
+			tabOrder: nextTabOrder(),
 		})
 		.returning()
 		.get();
@@ -1192,7 +1211,8 @@ export const createProjectsRouter = (getWindow: () => BrowserWindow | null) => {
 			.mutation(({ input }) => {
 				const allProjects = localDb.select().from(projects).all();
 				const maxTabOrder = allProjects.reduce(
-					(max, p) => (p.tabOrder != null && p.tabOrder > max ? p.tabOrder : max),
+					(max, p) =>
+						p.tabOrder != null && p.tabOrder > max ? p.tabOrder : max,
 					-1,
 				);
 
