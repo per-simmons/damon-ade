@@ -60,7 +60,10 @@ export function HistorySheet({
 					{error && <p className="text-xs text-destructive">{error.message}</p>}
 					{data && (
 						<>
-							<RepositoryCard project={data.project} />
+							<RepositoryCard
+								workspaceId={workspaceId}
+								project={data.project}
+							/>
 
 							<section className="space-y-2">
 								<h3 className="text-sm font-medium">Add conversations</h3>

@@ -1,6 +1,8 @@
+import { RemoteUpdate } from "../../../RemoteUpdate";
 import type { HistoryProjectInfo } from "../../types";
 
 interface RepositoryCardProps {
+	workspaceId: string;
 	project: HistoryProjectInfo;
 }
 
@@ -9,7 +11,7 @@ interface RepositoryCardProps {
  * identified by its folder and remote. Another project's history is never
  * shown here, however similar its name.
  */
-export function RepositoryCard({ project }: RepositoryCardProps) {
+export function RepositoryCard({ workspaceId, project }: RepositoryCardProps) {
 	const worktreeDiffers =
 		project.worktreePath.replace(/\\/g, "/").toLowerCase() !==
 		project.root.replace(/\\/g, "/").toLowerCase();
@@ -28,6 +30,9 @@ export function RepositoryCard({ project }: RepositoryCardProps) {
 				<p className="break-all text-muted-foreground">
 					This workspace's worktree: {project.worktreePath}
 				</p>
+			)}
+			{project.remote && (
+				<RemoteUpdate workspaceId={workspaceId} variant="card" />
 			)}
 			<p className="text-muted-foreground">
 				Conversations are linked to this repository only. To use another

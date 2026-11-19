@@ -19,6 +19,7 @@ import {
 	createProjectHistoryRouter,
 } from "./project-history";
 import { createProjectsRouter } from "./projects";
+import { createRepoUpdateRouter } from "./repo-update";
 import { createResourceMetricsRouter } from "./resource-metrics";
 import { createRingtoneRouter } from "./ringtone";
 import { createSettingsRouter } from "./settings";
@@ -55,6 +56,7 @@ export const createAppRouter = (getWindow: () => BrowserWindow | null) => {
 		sync: createSyncRouter(),
 		ringtone: createRingtoneRouter(getWindow),
 		workflow: createWorkflowRouter(),
+		repoUpdate: createRepoUpdateRouter(),
 		projectHistory: createProjectHistoryRouter(
 			createDefaultProjectHistoryDeps(getWindow),
 		),
