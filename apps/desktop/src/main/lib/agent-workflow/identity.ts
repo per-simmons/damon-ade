@@ -52,17 +52,37 @@ export function dirtyPaths(worktree: string): string[] {
 	return paths;
 }
 
+/** The worktree's checked-out branch ("HEAD" when detached), if a git repo. */
+export function currentBranch(worktree: string): string | undefined {
+	return (
+		git(resolve(worktree), ["rev-parse", "--abbrev-ref", "HEAD"])?.trim() ||
+		undefined
+	);
+}
+
+/**
+ * A fingerprint of the worktree's code: HEAD plus the content of every
+ * changed or untracked (not ignored) file. Check and review results are
+ * valid only for the code state they ran on. Undefined outside git.
+ */
+export function codeState(worktree: string): string | undefined {
+	const cwd = resolve(worktree);
+	const head = git(cwd, ["rev-parse", "HEAD"])?.trim();
+	if (head === undefined) return undefined;
+	const hash = createHash("sha256").update(head);
+	for (const path of dirtyPaths(cwd).sort()) {
+		hash.update(`\0${path}\0${contentHash(join(cwd, path))}`);
+	}
+	return hash.digest("hex").slice(0, 32);
+}
+
 export function captureIdentity(
 	workspaceId: string,
 	worktree: string,
 ): TaskIdentity {
 	const worktreePath = resolve(worktree);
 	const head = git(worktreePath, ["rev-parse", "HEAD"])?.trim();
-	const branch = git(worktreePath, [
-		"rev-parse",
-		"--abbrev-ref",
-		"HEAD",
-	])?.trim();
+	const branch = currentBranch(worktreePath);
 	const baselineDirty: Record<string, string> = {};
 	for (const path of dirtyPaths(worktreePath)) {
 		baselineDirty[path] = contentHash(join(worktreePath, path));
@@ -93,12 +113,30 @@ export function identityMismatch(
 	task: TaskRecord,
 	_workspaceId: string,
 	worktree: string,
+	/** The worktree's branch now; pass it to catch a branch switch. */
+	branchNow?: string,
 ): string | undefined {
-	if (samePath(task.identity.worktreePath, worktree)) return undefined;
+	if (samePath(task.identity.worktreePath, worktree)) {
+		return branchChange(task.identity, branchNow);
+	}
 	const where = task.identity.branch
 		? `${task.identity.worktreePath} (branch ${task.identity.branch})`
 		: task.identity.worktreePath;
 	return `This task belongs to ${where}. Open that workspace, or move the task here.`;
+}
+
+/**
+ * The task's worktree switched branches since the task was created (or
+ * moved): its plan and changes belong to the old branch.
+ */
+export function branchChange(
+	identity: TaskIdentity,
+	branchNow: string | undefined,
+): string | undefined {
+	if (!identity.branch || !branchNow || identity.branch === branchNow) {
+		return undefined;
+	}
+	return `This task runs on branch ${identity.branch}, but the worktree is now on ${branchNow}. Switch back to ${identity.branch}, or move the task to ${branchNow} (its results will be verified again).`;
 }
 
 export interface TaskChanges {

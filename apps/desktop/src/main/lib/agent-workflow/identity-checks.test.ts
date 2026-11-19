@@ -9,7 +9,14 @@ import {
 	saveProjectChecks,
 	suggestChecks,
 } from "./checks";
-import { captureIdentity, identityMismatch, taskChanges } from "./identity";
+import {
+	branchChange,
+	captureIdentity,
+	codeState,
+	currentBranch,
+	identityMismatch,
+	taskChanges,
+} from "./identity";
 import { ensureProjectWorkflow } from "./project-workflow";
 import type { TaskRecord } from "./tasks";
 
@@ -77,6 +84,34 @@ describe.if(git !== null)("task identity and changes", () => {
 		expect(identityMismatch(task, "ws-b", join(root, "elsewhere"))).toContain(
 			"belongs to",
 		);
+	});
+
+	it("detects a branch switch in the same worktree", () => {
+		const dir = repo("branches");
+		const identity = captureIdentity("ws", dir);
+		const task = { identity } as TaskRecord;
+		expect(
+			identityMismatch(task, "ws", dir, currentBranch(dir)),
+		).toBeUndefined();
+		spawnSync(git as string, ["checkout", "-q", "-b", "other"], { cwd: dir });
+		expect(currentBranch(dir)).toBe("other");
+		expect(identityMismatch(task, "ws", dir, currentBranch(dir))).toContain(
+			"now on other",
+		);
+		expect(branchChange(identity, "other")).toContain("Switch back");
+	});
+
+	it("fingerprints the code: edits, new files and commits change it", () => {
+		const dir = repo("state");
+		const first = codeState(dir);
+		expect(first).toMatch(/^[0-9a-f]{32}$/);
+		expect(codeState(dir)).toBe(first);
+		writeFileSync(join(dir, "src", "a.ts"), "changed\n");
+		const edited = codeState(dir);
+		expect(edited).not.toBe(first);
+		writeFileSync(join(dir, "src", "new.ts"), "x\n");
+		expect(codeState(dir)).not.toBe(edited);
+		expect(codeState(join(root, "not-a-repo-anywhere"))).toBeUndefined();
 	});
 
 	it("reports a folder that is not a git repository as untracked", () => {

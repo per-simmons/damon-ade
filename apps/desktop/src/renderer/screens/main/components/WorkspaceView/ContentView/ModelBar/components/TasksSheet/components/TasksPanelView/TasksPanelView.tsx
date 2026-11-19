@@ -154,6 +154,9 @@ export function TasksPanelView({
 				<div className="space-y-1 break-all text-xs text-muted-foreground">
 					<p>
 						Task runs in this project: {usd(usage.tasks.usd)}
+						{usage.tasks.worstCaseUsd > usage.tasks.usd + 0.0005
+							? ` (up to ${usd(usage.tasks.worstCaseUsd)}: ${usage.tasks.uncertainRuns} run(s) of uncertain cost counted at their cap)`
+							: ""}
 						{usage.tasks.pendingRuns > 0
 							? `, ${usage.tasks.pendingRuns} still running`
 							: ""}

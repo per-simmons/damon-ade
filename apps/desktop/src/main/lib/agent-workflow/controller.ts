@@ -1,6 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { checksPassed, loadProjectChecks } from "./checks";
-import { taskChanges } from "./identity";
+import {
+	branchChange,
+	codeState,
+	currentBranch,
+	taskChanges,
+} from "./identity";
 import { cheaperFallback, resolveRunModel } from "./models";
 import { type ProjectWorkflow, portablePath } from "./project-workflow";
 import { parseVerdict, stagePrompt } from "./stage-prompts";
@@ -81,33 +86,91 @@ export interface ApprovedChecks {
 export interface TaskSpend {
 	/** Known spend: Claude Code's reported cost, else ADE's estimate. */
 	usd: number;
+	/**
+	 * The most the task may have spent: runs whose cost is uncertain count at
+	 * their spending cap (or their estimate, if higher). Budget decisions use
+	 * this, never `usd`, so an unknown cost is never treated as zero.
+	 */
+	worstCaseUsd: number;
 	/** Runs still in progress (their cost is still growing). */
 	pendingRuns: number;
 	/** Finished runs with no usage at all: their cost is unknown. */
 	unknownRuns: number;
 	/** Runs where some responses could not be priced: the total is low. */
 	partialRuns: number;
+	/** Runs whose cost is not reported (unknown, partial, cut short, running). */
+	uncertainRuns: number;
+	/** Uncertain runs without a recorded cap (from before ADE set one). */
+	unboundedRuns: number;
 }
 
 /** What a task's model runs have cost, each run counted once. */
 export function taskSpend(task: TaskRecord): TaskSpend {
 	const spend: TaskSpend = {
 		usd: 0,
+		worstCaseUsd: 0,
 		pendingRuns: 0,
 		unknownRuns: 0,
 		partialRuns: 0,
+		uncertainRuns: 0,
+		unboundedRuns: 0,
 	};
 	for (const run of task.runs) {
-		if (run.kind === "checks") continue;
-		if (run.status === "queued") continue;
+		if (run.kind === "checks" || run.status === "queued") continue;
+		// A run that never started spent nothing.
+		if (run.failure === "launch" && run.liveCostUsd === undefined) continue;
 		if (run.status === "running") spend.pendingRuns++;
-		const cost = run.reportedCostUsd ?? run.liveCostUsd;
-		if (cost !== undefined) spend.usd += cost;
-		else if (run.status !== "running" && run.failure !== "launch")
-			spend.unknownRuns++;
+		const known = run.reportedCostUsd ?? run.liveCostUsd ?? 0;
+		spend.usd += known;
 		if (run.costState === "partial") spend.partialRuns++;
+		const certain =
+			run.reportedCostUsd !== undefined ||
+			(run.status === "succeeded" && run.costState === "estimated");
+		if (certain) {
+			spend.worstCaseUsd += known;
+			continue;
+		}
+		spend.uncertainRuns++;
+		if (
+			run.status !== "running" &&
+			run.reportedCostUsd === undefined &&
+			run.liveCostUsd === undefined
+		) {
+			spend.unknownRuns++;
+		}
+		if (run.maxBudgetUsd === undefined) {
+			spend.unboundedRuns++;
+			spend.worstCaseUsd += known;
+		} else {
+			spend.worstCaseUsd += Math.max(known, run.maxBudgetUsd);
+		}
 	}
 	return spend;
+}
+
+const NEEDS_IMPLEMENTER = /Needs implementer/i;
+
+/** A quick run that found the change is too big did not implement it. */
+function needsImplementer(run: TaskRun): boolean {
+	return run.kind === "quick" && NEEDS_IMPLEMENTER.test(run.summary ?? "");
+}
+
+/** A succeeded run that implemented (part of) the task. */
+function isImplementation(run: TaskRun): boolean {
+	return (
+		IMPLEMENTATION_KINDS.includes(run.kind) &&
+		run.status === "succeeded" &&
+		!needsImplementer(run)
+	);
+}
+
+/**
+ * The runs that count as evidence: those since the task's last move. Earlier
+ * runs stay in the record (and in the spend) as history.
+ */
+export function evidenceView(task: TaskRecord): TaskRecord {
+	const start = task.evidenceStart ?? 0;
+	return start > 0 ? { ...task, runs: task.runs.slice(start) } : task;
 }
 
 function lastIndex(task: TaskRecord, test: (run: TaskRun) => boolean): number {
@@ -121,6 +184,15 @@ const count = (task: TaskRecord, kind: RunKind) =>
 	task.runs.filter((run) => run.kind === kind && run.status !== "queued")
 		.length;
 
+const sameCommands = (a: string[] | undefined, b: string[]) =>
+	!!a && a.length === b.length && a.every((command, i) => command === b[i]);
+
+/** What ADE observed about the worktree just before deciding. */
+export interface DecisionContext {
+	/** identity.ts codeState of the task's worktree now (undefined: not git). */
+	codeState?: string;
+}
+
 /**
  * The next step, decided from recorded facts only. Pure: no I/O, so every
  * transition is unit-testable.
@@ -130,21 +202,35 @@ export function decideNext(
 	files: TaskFiles,
 	checks: ApprovedChecks,
 	settings: Pick<WorkflowSettings, "execution">,
+	context: DecisionContext = {},
 ): Decision {
 	if (activeRun(task)) return { type: "wait" };
 	if (task.state === "done" || task.state === "cancelled")
 		return { type: "none" };
 
+	// Budget: over all runs, history included, at their worst case.
 	const spend = taskSpend(task);
-	if (spend.usd >= task.limits.budgetUsd) {
+	if (spend.unboundedRuns > 0) {
 		return {
 			type: "block",
-			reason: `The task's budget of $${task.limits.budgetUsd.toFixed(2)} is used up ($${spend.usd.toFixed(2)} estimated).`,
+			reason: `${spend.unboundedRuns} earlier run(s) have no recorded cost or cap, so ADE cannot tell how much of the budget is left. Continue in Manual mode.`,
+		};
+	}
+	if (spend.worstCaseUsd >= task.limits.budgetUsd) {
+		return {
+			type: "block",
+			reason:
+				spend.uncertainRuns > 0
+					? `The task's budget of $${task.limits.budgetUsd.toFixed(2)} may be used up: $${spend.usd.toFixed(2)} known, up to $${spend.worstCaseUsd.toFixed(2)} counting ${spend.uncertainRuns} run(s) of uncertain cost at their cap.`
+					: `The task's budget of $${task.limits.budgetUsd.toFixed(2)} is used up ($${spend.usd.toFixed(2)} estimated).`,
 		};
 	}
 
+	// Everything else: only the runs since the last move.
+	const t = evidenceView(task);
+
 	// A failed last run decides first, unless the user resumed past it.
-	const last = task.runs[task.runs.length - 1];
+	const last = t.runs[t.runs.length - 1];
 	if (
 		last &&
 		last.status !== "succeeded" &&
@@ -211,27 +297,26 @@ export function decideNext(
 		}
 	}
 
-	const limits = task.limits;
-	const lastImpl = lastIndex(
-		task,
-		(run) =>
-			IMPLEMENTATION_KINDS.includes(run.kind) && run.status === "succeeded",
+	// Routing for quick tasks that turned out not to be small: the quick run
+	// changed nothing that counts, so the implementer runs next.
+	const lastQuick = lastIndex(
+		t,
+		(run) => run.kind === "quick" && run.status === "succeeded",
 	);
-
-	// Routing for quick tasks that turned out not to be small.
-	if (task.route === "quick" && lastImpl >= 0) {
-		const quick = task.runs[lastImpl];
-		if (
-			quick.kind === "quick" &&
-			/Needs implementer/i.test(quick.summary ?? "")
-		) {
-			return {
-				type: "reroute",
-				route: "implement",
-				reason: "the quick run found the change is not small",
-			};
-		}
+	if (
+		task.route === "quick" &&
+		lastQuick >= 0 &&
+		needsImplementer(t.runs[lastQuick])
+	) {
+		return {
+			type: "reroute",
+			route: "implement",
+			reason: "the quick run found the change is not small",
+		};
 	}
+
+	const limits = task.limits;
+	const lastImpl = lastIndex(t, isImplementation);
 
 	// Plan first for planned routes.
 	const planned = task.route === "plan" || task.route === "exceptional";
@@ -264,12 +349,18 @@ export function decideNext(
 				: task.route === "implement"
 					? "implement"
 					: "build";
-		return { type: "run", kind: first, reason: "implement the task" };
+		return {
+			type: "run",
+			kind: first,
+			reason: task.evidenceStart
+				? "reconcile the work in this worktree"
+				: "implement the task",
+		};
 	}
 
 	// Escalation: an open report after the last implementation run.
 	if (files.openEscalations.length > 0) {
-		if (count(task, "escalate") >= limits.maxEscalations) {
+		if (count(t, "escalate") >= limits.maxEscalations) {
 			return {
 				type: "block",
 				reason: `Still blocked after ${limits.maxEscalations} escalation(s): ${files.openEscalations.join(", ")}`,
@@ -282,7 +373,7 @@ export function decideNext(
 		};
 	}
 	const lastEscalate = lastIndex(
-		task,
+		t,
 		(run) => run.kind === "escalate" && run.status === "succeeded",
 	);
 	if (lastEscalate > lastImpl) {
@@ -303,7 +394,7 @@ export function decideNext(
 		};
 	}
 
-	const corrections = count(task, "fix");
+	const corrections = count(t, "fix");
 	const correctOrBlock = (what: string, feedbackReason: string): Decision =>
 		corrections >= limits.maxCorrections
 			? {
@@ -312,12 +403,39 @@ export function decideNext(
 				}
 			: { type: "run", kind: "fix", reason: feedbackReason };
 
-	// Checks after the last change.
+	// Evidence counts only for the code it ran on.
+	const current = context.codeState;
+	const fresh = (run: TaskRun) =>
+		current === undefined || run.codeState === current;
+
+	// Checks after the last change: the exact approved commands, on this code.
 	if (checks.commands.length > 0) {
-		const lastChecks = lastIndex(task, (run) => run.kind === "checks");
+		const lastChecks = lastIndex(
+			t,
+			(run) => run.kind === "checks" && run.status === "succeeded",
+		);
 		if (lastChecks < lastImpl)
 			return { type: "checks", reason: "verify the change" };
-		const run = task.runs[lastChecks];
+		const run = t.runs[lastChecks];
+		if (!sameCommands(run.commands, checks.commands)) {
+			return { type: "checks", reason: "the approved checks changed" };
+		}
+		if (!fresh(run)) {
+			const reruns = t.runs
+				.slice(lastImpl + 1)
+				.filter((r) => r.kind === "checks" && r.status === "succeeded").length;
+			if (reruns >= 3) {
+				return {
+					type: "block",
+					reason:
+						"The code keeps changing while the checks run (do the checks write files git does not ignore?).",
+				};
+			}
+			return {
+				type: "checks",
+				reason: "the code changed since the checks ran",
+			};
+		}
 		if (!checksPassed(run.checks ?? [], checks.commands.length)) {
 			return correctOrBlock("Checks still fail", "checks failed");
 		}
@@ -326,21 +444,28 @@ export function decideNext(
 		}
 	}
 
-	// Independent review after the last change.
+	// Independent review after the last change, of this code.
 	const lastReview = lastIndex(
-		task,
+		t,
 		(run) => run.kind === "review" && run.status === "succeeded",
 	);
-	if (lastReview < lastImpl) {
-		if (count(task, "review") >= limits.maxReviewRounds) {
+	if (lastReview < lastImpl || !fresh(t.runs[lastReview])) {
+		if (count(t, "review") >= limits.maxReviewRounds) {
 			return {
 				type: "block",
 				reason: `No passing review after ${limits.maxReviewRounds} review round(s).`,
 			};
 		}
-		return { type: "run", kind: "review", reason: "independent review" };
+		return {
+			type: "run",
+			kind: "review",
+			reason:
+				lastReview < lastImpl
+					? "independent review"
+					: "the code changed since the review",
+		};
 	}
-	const verdict = task.runs[lastReview].verdict;
+	const verdict = t.runs[lastReview].verdict;
 	if (verdict === "PASS") {
 		return {
 			type: "done",
@@ -380,6 +505,27 @@ export function correctionFeedback(task: TaskRecord): string {
 	return parts.join("\n\n") || "(no failure details recorded)";
 }
 
+/**
+ * After a move, the first implementation run reconciles: the earlier work
+ * may or may not be in this worktree.
+ */
+function reconcileNote(task: TaskRecord, kind: ModelStage): string {
+	if (!task.evidenceStart || !IMPLEMENTATION_KINDS.includes(kind)) return "";
+	if (evidenceView(task).runs.some(isImplementation)) return "";
+	const move = task.moves?.[task.moves.length - 1];
+	return `\n\n## This task was moved\nIt was moved${move ? ` from ${move.from} to ${move.to}` : ""}. Earlier work may or may not be present here. Check what of the task is already done in this worktree, then finish or redo the rest. Do not rely on progress.md or earlier results: ADE verifies the work here again.\n`;
+}
+
+/** The implementer after a quick run that found the change too big. */
+function rerouteNote(task: TaskRecord, kind: ModelStage): string {
+	if (kind !== "implement") return "";
+	const quick = [...evidenceView(task).runs]
+		.reverse()
+		.find((run) => run.kind === "quick" && run.status === "succeeded");
+	if (!quick || !needsImplementer(quick)) return "";
+	return `\n\n## Why this is not a quick change\nA quick run looked first and reported:\n${(quick.summary ?? "").slice(-1500)}\n`;
+}
+
 export interface ControllerDeps {
 	homeDir: string;
 	loadSettings: () => WorkflowSettings;
@@ -407,6 +553,9 @@ export interface ControllerDeps {
 	) => void;
 	/** How often live progress is written to task.json (ms). */
 	progressSaveIntervalMs?: number;
+	/** Probes of the worktree (default: git); injectable for tests. */
+	branchOf?: (worktree: string) => string | undefined;
+	codeStateOf?: (worktree: string) => string | undefined;
 }
 
 interface LiveRun {
@@ -417,16 +566,43 @@ interface LiveRun {
 
 export class TaskController {
 	private readonly live = new Map<string, LiveRun>();
-	/** Settles when every run started so far has been handled (for tests). */
-	private pending = new Set<Promise<unknown>>();
+	/** Work in flight, per task (so one task never waits for another). */
+	private pending = new Map<string, Set<Promise<unknown>>>();
 
 	constructor(private readonly deps: ControllerDeps) {}
 
-	/** Wait until no run is in flight (tests and shutdown). */
-	async idle(): Promise<void> {
-		while (this.pending.size > 0) {
-			await Promise.all([...this.pending]);
+	/** Wait until no run is in flight: of one task, or of all (tests, shutdown). */
+	async idle(project?: ProjectWorkflow, slug?: string): Promise<void> {
+		const key = project && slug ? `${project.key}/${slug}` : undefined;
+		const inFlight = () =>
+			key
+				? [...(this.pending.get(key) ?? [])]
+				: [...this.pending.values()].flatMap((set) => [...set]);
+		for (let batch = inFlight(); batch.length > 0; batch = inFlight()) {
+			await Promise.allSettled(batch);
 		}
+	}
+
+	private branchOf(worktree: string): string | undefined {
+		return (this.deps.branchOf ?? currentBranch)(worktree);
+	}
+
+	private codeStateOf(worktree: string): string | undefined {
+		return (this.deps.codeStateOf ?? codeState)(worktree);
+	}
+
+	/**
+	 * Revalidated before every automatic or manual stage: the worktree still
+	 * exists and is on the task's branch.
+	 */
+	private identityProblem(task: TaskRecord): string | undefined {
+		if (!existsSync(task.identity.worktreePath)) {
+			return `The task's worktree is gone: ${task.identity.worktreePath}. Move the task to a worktree to continue.`;
+		}
+		return branchChange(
+			task.identity,
+			this.branchOf(task.identity.worktreePath),
+		);
 	}
 
 	/** Runs in progress, by run id (for the UI and shutdown). */
@@ -448,9 +624,21 @@ export class TaskController {
 		]);
 	}
 
-	private track<T>(promise: Promise<T>): Promise<T> {
-		this.pending.add(promise);
-		void promise.finally(() => this.pending.delete(promise));
+	private track<T>(
+		project: ProjectWorkflow,
+		slug: string,
+		promise: Promise<T>,
+	): Promise<T> {
+		const key = `${project.key}/${slug}`;
+		const set = this.pending.get(key) ?? new Set();
+		this.pending.set(key, set);
+		set.add(promise);
+		void promise
+			.catch(() => undefined)
+			.finally(() => {
+				set.delete(promise);
+				if (set.size === 0) this.pending.delete(key);
+			});
 		return promise;
 	}
 
@@ -577,7 +765,8 @@ export class TaskController {
 			saveTask(project, task);
 		});
 		await Promise.all(liveRuns.map(([, live]) => live.cancel()));
-		await this.idle();
+		// Only this task's runs; other tasks keep running.
+		await this.idle(project, slug);
 		return this.load(project, slug);
 	}
 
@@ -646,11 +835,25 @@ export class TaskController {
 			const task = this.load(project, slug);
 			if (activeRun(task))
 				throw new Error("Wait for the current run to finish");
-			task.identity = identity;
-			task.routeReasons = [
-				...task.routeReasons,
-				`moved to ${identity.worktreePath}${identity.branch ? ` (${identity.branch})` : ""}`,
+			if (task.state === "cancelled") throw new Error("This task is cancelled");
+			const where = (id: TaskIdentity) =>
+				`${id.worktreePath}${id.branch ? ` (${id.branch})` : ""}`;
+			task.moves = [
+				...(task.moves ?? []),
+				{
+					at: this.deps.now().toISOString(),
+					from: where(task.identity),
+					to: where(identity),
+				},
 			];
+			task.identity = identity;
+			task.routeReasons = [...task.routeReasons, `moved to ${where(identity)}`];
+			// Earlier runs stay as history; none of them counts as evidence here.
+			task.evidenceStart = task.runs.length;
+			task.acknowledgedRunId = undefined;
+			task.pauseRequested = false;
+			task.state = "paused";
+			task.stateReason = `Moved to ${where(identity)}. Earlier runs are kept as history; resume to reconcile the work here and verify it again.`;
 			saveTask(project, task);
 			this.changed(project, slug);
 			return task;
@@ -667,13 +870,14 @@ export class TaskController {
 		if (activeRun(task)) return "Another run of this task is in progress";
 		if (task.state === "done" || task.state === "cancelled")
 			return `The task is ${task.state}`;
-		if (kind !== "checks" && taskSpend(task).usd >= task.limits.budgetUsd) {
-			return "The task's budget is used up; raise it to continue";
+		if (
+			kind !== "checks" &&
+			taskSpend(task).worstCaseUsd >= task.limits.budgetUsd
+		) {
+			return "The task's budget may be used up (counting uncertain costs at their cap); raise it to continue";
 		}
-		const implemented = task.runs.some(
-			(run) =>
-				IMPLEMENTATION_KINDS.includes(run.kind) && run.status === "succeeded",
-		);
+		const evidence = evidenceView(task);
+		const implemented = evidence.runs.some(isImplementation);
 		switch (kind) {
 			case "build":
 				return files.hasPlan ? undefined : "Build needs a plan first";
@@ -685,10 +889,10 @@ export class TaskController {
 				return implemented ? undefined : "Nothing has been implemented yet";
 			case "fix": {
 				const failed =
-					task.runs.some(
+					evidence.runs.some(
 						(run) => run.kind === "review" && run.verdict === "FAIL",
 					) ||
-					task.runs.some(
+					evidence.runs.some(
 						(run) =>
 							run.kind === "checks" &&
 							(run.checks ?? []).some((c) => c.exitCode !== 0 || c.timedOut),
@@ -720,11 +924,8 @@ export class TaskController {
 				kind,
 			);
 			if (blocker) throw new Error(blocker);
-			if (!existsSync(task.identity.worktreePath)) {
-				throw new Error(
-					`The task's worktree is gone: ${task.identity.worktreePath}`,
-				);
-			}
+			const problem = this.identityProblem(task);
+			if (problem) throw new Error(problem);
 			if (
 				task.mode === "auto" &&
 				!task.pauseRequested &&
@@ -747,9 +948,11 @@ export class TaskController {
 
 	/** Decide and act. Caller holds the task lock. */
 	private advance(project: ProjectWorkflow, task: TaskRecord): TaskRecord {
-		if (!existsSync(task.identity.worktreePath)) {
+		// Revalidated before every automatic stage.
+		const problem = this.identityProblem(task);
+		if (problem) {
 			task.state = "blocked";
-			task.stateReason = `The task's worktree is gone: ${task.identity.worktreePath}. Move the task to a worktree to continue.`;
+			task.stateReason = problem;
 			saveTask(project, task);
 			this.changed(project, task.slug);
 			return task;
@@ -760,6 +963,7 @@ export class TaskController {
 			readTaskFiles(project, task.slug),
 			this.approvedChecks(project),
 			settings,
+			{ codeState: this.codeStateOf(task.identity.worktreePath) },
 		);
 		switch (decision.type) {
 			case "wait":
@@ -864,7 +1068,8 @@ export class TaskController {
 				tasksDir: portablePath(project.tasksDir),
 				checks: checks.commands,
 				mayRunChecks,
-				feedback: kind === "fix" ? correctionFeedback(task) : undefined,
+				feedback:
+					kind === "fix" ? correctionFeedback(evidenceView(task)) : undefined,
 				changes: kind === "review" ? taskChanges(task.identity) : undefined,
 				escalationReport:
 					kind === "escalate" && files.openEscalations[0]
@@ -873,10 +1078,16 @@ export class TaskController {
 			}) +
 			(task.answers
 				? `\n\n## The user's answers to the plan's questions\n${task.answers}\n`
-				: "");
+				: "") +
+			reconcileNote(task, kind) +
+			rerouteNote(task, kind);
 
 		const spend = taskSpend(task);
-		const remaining = Math.max(task.limits.budgetUsd - spend.usd, 0.01);
+		// Uncertain costs count at their cap, so the remainder is never overstated.
+		const remaining = Math.max(
+			task.limits.budgetUsd - spend.worstCaseUsd,
+			0.01,
+		);
 		const run: TaskRun = {
 			id: this.deps.newId(),
 			kind,
@@ -978,6 +1189,8 @@ export class TaskController {
 
 		this.live.set(run.id, { project, slug: task.slug, cancel: handle.cancel });
 		this.track(
+			project,
+			task.slug,
 			handle.done.then((result) =>
 				this.finishModelRun(
 					project,
@@ -1019,6 +1232,7 @@ export class TaskController {
 				: undefined;
 			run.summary = result.text;
 			if (result.sessionId) run.sessionId = result.sessionId;
+			run.codeState = this.codeStateOf(task.identity.worktreePath);
 			try {
 				this.deps.onRunFinished?.(project, task, run);
 			} catch (error) {
@@ -1075,6 +1289,8 @@ export class TaskController {
 			attempt: this.nextAttempt(task, "checks"),
 			queuedAt: this.deps.now().toISOString(),
 			startedAt: this.deps.now().toISOString(),
+			// The exact commands: results count only while they stay approved.
+			commands: [...checks.commands],
 		};
 		task.runs.push(run);
 		task.state = "running";
@@ -1089,6 +1305,8 @@ export class TaskController {
 			cancel: async () => abort.abort(),
 		});
 		this.track(
+			project,
+			task.slug,
 			this.deps
 				.runChecks({
 					cwd: task.identity.worktreePath,
@@ -1133,6 +1351,7 @@ export class TaskController {
 			if (!task || !run || run.status !== "running") return task;
 			run.endedAt = this.deps.now().toISOString();
 			run.checks = results;
+			run.codeState = this.codeStateOf(task.identity.worktreePath);
 			if (aborted || task.state === "cancelled") {
 				run.status = "cancelled";
 				run.failure = "cancelled";

@@ -459,6 +459,8 @@ describe.if(bash !== null && git !== null)("Auto mode, end to end", () => {
 				isError: true,
 				exit: 1,
 				text: "API Error: model claude-opus-5-5 not_found_error",
+				// Claude Code reports the (zero) cost of a request it never billed.
+				cost: 0,
 			},
 			{
 				name: "plan-sonnet",
@@ -496,6 +498,7 @@ describe.if(bash !== null && git !== null)("Auto mode, end to end", () => {
 				isError: true,
 				exit: 1,
 				text: "model claude-haiku-5-5 not available",
+				cost: 0,
 			},
 		]);
 		const quick = await caller.createTask({
@@ -536,7 +539,7 @@ describe.if(bash !== null && git !== null)("Auto mode, end to end", () => {
 		saveSettings(() => {});
 	}, 30_000);
 
-	it("shows usage on a model without a known price as partial", async () => {
+	it("keeps an unpriced run's cost uncertain and never counts it as zero", async () => {
 		const repo = makeRepo("unpriced");
 		addWorkspace("ws-unpriced", repo);
 		await caller.setChecks({ workspaceId: "ws-unpriced", commands: [] });
@@ -558,6 +561,36 @@ describe.if(bash !== null && git !== null)("Auto mode, end to end", () => {
 		expect(task.runs[0].unpricedModels).toEqual(["claude-mystery-9"]);
 		expect(task.runs[0].observedModels).toEqual(["claude-mystery-9"]);
 		expect(task.spend.partialRuns).toBe(1);
+		// The run might have used its whole cap: Auto stops instead of
+		// assuming it cost nothing.
+		expect(task.spend.uncertainRuns).toBe(1);
+		expect(task.spend.worstCaseUsd).toBeCloseTo(10, 5);
+		expect(task.state).toBe("blocked");
+		expect(task.stateReason).toContain("may be used up");
+		expect(task.runs).toHaveLength(1);
+		const html = renderToStaticMarkup(
+			<m.panel.TasksPanelView
+				data={await tasksOf("ws-unpriced")}
+				checks={undefined}
+				description=""
+				preview={undefined}
+				actions={noActions}
+			/>,
+		);
+		expect(html).toContain("1 run(s) uncertain");
+		expect(html).toContain("some responses unpriced");
+
+		// Raising the budget lets it continue.
+		await caller.setBudget({
+			workspaceId: "ws-unpriced",
+			slug: created.slug,
+			budgetUsd: 20,
+		});
+		await caller.resume({ workspaceId: "ws-unpriced", slug: created.slug });
+		await settle();
+		const resumed = await taskOf("ws-unpriced", created.slug);
+		expect(resumed.state).toBe("done");
+		expect(fake.remainingSteps()).toBe(0);
 	}, 30_000);
 
 	it("surfaces a launch that cannot start", async () => {
@@ -711,6 +744,16 @@ describe.if(bash !== null && git !== null)("Auto mode, end to end", () => {
 		expect(task.runs[0].status).toBe("interrupted");
 		expect(fake.calls().length).toBe(callsBefore);
 
+		// The interrupted run's cost is uncertain: it counts at its cap, so the
+		// budget must be raised before ADE launches more.
+		const paused = await taskOf("ws-restart", created.slug);
+		expect(paused.spend.uncertainRuns).toBe(1);
+		await caller.setBudget({
+			workspaceId: "ws-restart",
+			slug: created.slug,
+			budgetUsd: 25,
+		});
+
 		// The user resumes: the stage runs again (once), then review.
 		fake.setSteps([
 			{ name: "implement-again", write: { "src/cart.js": "w\n" } },
@@ -839,6 +882,241 @@ describe.if(bash !== null && git !== null)("Manual mode and isolation", () => {
 		expect(readFileSync(join(shop, "src", "cart.js"), "utf8")).toBe(
 			"export const total = 1;\n",
 		);
+	}, 30_000);
+});
+
+describe.if(bash !== null && git !== null)("release regressions", () => {
+	it("runs the implementer when a quick run says it needs one", async () => {
+		const repo = makeRepo("reroute");
+		addWorkspace("ws-reroute", repo);
+		await caller.setChecks({ workspaceId: "ws-reroute", commands: [CHECK] });
+		fake.setSteps([
+			{
+				name: "quick",
+				text: "Needs implementer: the README fix also needs the cart totals changed",
+			},
+			{
+				name: "implement",
+				write: {
+					"README.md": "# Shop\nThe shop.\n",
+					"src/cart.js": "export const total = 5;\n",
+				},
+			},
+			{ name: "review", text: "VERDICT: PASS" },
+		]);
+		const created = await caller.createTask({
+			workspaceId: "ws-reroute",
+			description: "Fix typo in README",
+		});
+		await settle();
+		const task = await taskOf("ws-reroute", created.slug);
+		expect(task.route).toBe("implement");
+		expect(task.state).toBe("done");
+		expect(task.runs.map((r) => r.kind)).toEqual([
+			"quick",
+			"implement",
+			"checks",
+			"review",
+		]);
+		expect(task.runs[1].model).toBe("claude-sonnet-5-5");
+		const implementCall = fake
+			.calls()
+			.filter((c) => c.step === "implement")
+			.at(-1);
+		expect(implementCall?.stdin).toContain(
+			"also needs the cart totals changed",
+		);
+		expect(readFileSync(join(repo, "src", "cart.js"), "utf8")).toContain("5");
+	}, 30_000);
+
+	it("re-runs checks when the approved commands change or the code changes", async () => {
+		const repo = makeRepo("rechecks");
+		addWorkspace("ws-rechecks", repo);
+		writeFileSync(join(repo, "lint.js"), 'console.log("lint ok");\n');
+		const LINT = `"${process.execPath.replace(/\\/g, "/")}" lint.js`;
+		await caller.setChecks({ workspaceId: "ws-rechecks", commands: [CHECK] });
+		const created = await caller.createTask({
+			workspaceId: "ws-rechecks",
+			description: "Add a discount field to the cart total",
+			mode: "manual",
+		});
+		const slug = created.slug;
+		const ws = "ws-rechecks";
+		fake.setSteps([{ name: "implement", write: { "src/cart.js": "c\n" } }]);
+		await caller.runStep({ workspaceId: ws, slug, kind: "implement" });
+		await settle();
+		await caller.runStep({ workspaceId: ws, slug, kind: "checks" });
+		await settle();
+		// The panel's next step is the review: the checks are current.
+		expect((await taskOf(ws, slug)).next).toMatchObject({
+			type: "run",
+			kind: "review",
+		});
+
+		// Same number of commands, a different command: the old pass is void.
+		await caller.setChecks({ workspaceId: ws, commands: [LINT] });
+		expect((await taskOf(ws, slug)).next).toEqual({
+			type: "checks",
+			reason: "the approved checks changed",
+		});
+		await caller.runStep({ workspaceId: ws, slug, kind: "checks" });
+		await settle();
+		let task = await taskOf(ws, slug);
+		expect(task.runs.at(-1)?.checks?.map((c) => c.command)).toEqual([LINT]);
+		expect(task.next).toMatchObject({ type: "run", kind: "review" });
+
+		// Someone edits the code after the checks ran: they must run again.
+		writeFileSync(join(repo, "src", "cart.js"), "edited by hand\n");
+		task = await taskOf(ws, slug);
+		expect(task.next).toEqual({
+			type: "checks",
+			reason: "the code changed since the checks ran",
+		});
+
+		// In Auto, ADE re-runs the checks itself before the review.
+		fake.setSteps([{ name: "review", text: "VERDICT: PASS" }]);
+		await caller.setMode({ workspaceId: ws, slug, mode: "auto" });
+		await caller.start({ workspaceId: ws, slug });
+		await settle();
+		task = await taskOf(ws, slug);
+		expect(task.state).toBe("done");
+		expect(task.runs.map((r) => r.kind)).toEqual([
+			"implement",
+			"checks",
+			"checks",
+			"checks",
+			"review",
+		]);
+	}, 30_000);
+
+	it("stops before the next stage when the worktree switched branches", async () => {
+		const repo = makeRepo("branch");
+		addWorkspace("ws-branch", repo);
+		const original = sh(repo, "rev-parse", "--abbrev-ref", "HEAD");
+		await caller.setChecks({ workspaceId: "ws-branch", commands: [CHECK] });
+		fake.setSteps([
+			{
+				name: "implement",
+				write: { "src/cart.js": "b\n" },
+				// Something switches the branch while the task is running.
+				git: [["checkout", "-q", "-b", "experiment"]],
+			},
+		]);
+		const created = await caller.createTask({
+			workspaceId: "ws-branch",
+			description: "Add a discount field to the cart total",
+		});
+		await settle();
+		let task = await taskOf("ws-branch", created.slug);
+		// No checks or review ran on the other branch.
+		expect(task.runs.map((r) => r.kind)).toEqual(["implement"]);
+		expect(task.state).toBe("blocked");
+		expect(task.stateReason).toContain(`runs on branch ${original}`);
+		expect(task.mismatch).toContain("now on experiment");
+		await expect(
+			caller.resume({ workspaceId: "ws-branch", slug: created.slug }),
+		).rejects.toThrow("now on experiment");
+
+		// Switching back lets it continue.
+		sh(repo, "checkout", "-q", original);
+		fake.setSteps([{ name: "review", text: "VERDICT: PASS" }]);
+		await caller.resume({ workspaceId: "ws-branch", slug: created.slug });
+		await settle();
+		task = await taskOf("ws-branch", created.slug);
+		expect(task.state).toBe("done");
+	}, 30_000);
+
+	it("moving a task voids its completion evidence and verifies it again", async () => {
+		const repo = makeRepo("move");
+		const other = join(root, "move-b");
+		sh(repo, "worktree", "add", "-q", other, "-b", "move-b");
+		addWorkspace("ws-move-a", repo);
+		addWorkspace("ws-move-b", repo, other);
+		await caller.setChecks({ workspaceId: "ws-move-a", commands: [CHECK] });
+		fake.setSteps([
+			{ name: "implement-a", write: { "src/cart.js": "a\n" } },
+			{ name: "review-a", text: "VERDICT: PASS" },
+		]);
+		const created = await caller.createTask({
+			workspaceId: "ws-move-a",
+			description: "Add a discount field to the cart total",
+		});
+		await settle();
+		expect((await taskOf("ws-move-a", created.slug)).state).toBe("done");
+
+		await caller.moveHere({ workspaceId: "ws-move-b", slug: created.slug });
+		let task = await taskOf("ws-move-b", created.slug);
+		expect(task.state).toBe("paused");
+		expect(task.stateReason).toContain("verify it again");
+		expect(task.moves).toHaveLength(1);
+		// History is kept, but none of it is evidence any more.
+		expect(task.runs.map((r) => r.history)).toEqual([true, true, true]);
+		expect(task.next).toEqual({
+			type: "run",
+			kind: "implement",
+			reason: "reconcile the work in this worktree",
+		});
+
+		fake.setSteps([
+			{ name: "reconcile-b", write: { "src/cart.js": "a\n" } },
+			{ name: "review-b", text: "VERDICT: PASS" },
+		]);
+		await caller.resume({ workspaceId: "ws-move-b", slug: created.slug });
+		await settle();
+		task = await taskOf("ws-move-b", created.slug);
+		expect(task.state).toBe("done");
+		expect(
+			task.runs.map((r) => `${r.kind}${r.history ? "(old)" : ""}`),
+		).toEqual([
+			"implement(old)",
+			"checks(old)",
+			"review(old)",
+			"implement",
+			"checks",
+			"review",
+		]);
+		const reconcile = fake.calls().find((c) => c.step === "reconcile-b");
+		expect(reconcile?.cwd.replace(/\\/g, "/")).toBe(other.replace(/\\/g, "/"));
+		expect(reconcile?.stdin).toContain("This task was moved");
+		// Spend still covers every run, history included.
+		expect(task.spend.usd).toBeGreaterThan(0);
+	}, 60_000);
+
+	it("cancelling one task does not wait for another task's run", async () => {
+		const first = makeRepo("cancel-one");
+		const second = makeRepo("cancel-two");
+		addWorkspace("ws-c1", first);
+		addWorkspace("ws-c2", second);
+		await caller.setChecks({ workspaceId: "ws-c1", commands: [] });
+		await caller.setChecks({ workspaceId: "ws-c2", commands: [] });
+		fake.setSteps([
+			{ name: "hang-1", hang: true },
+			{ name: "hang-2", hang: true },
+		]);
+		const one = await caller.createTask({
+			workspaceId: "ws-c1",
+			description: "Add a discount field to the cart total",
+		});
+		const two = await caller.createTask({
+			workspaceId: "ws-c2",
+			description: "Add a discount field to the cart total",
+		});
+		expect(one.state).toBe("running");
+		expect(two.state).toBe("running");
+
+		const started = Date.now();
+		const cancelled = await caller.cancel({
+			workspaceId: "ws-c1",
+			slug: one.slug,
+		});
+		expect(cancelled.state).toBe("cancelled");
+		expect(Date.now() - started).toBeLessThan(8_000);
+		// The other task is untouched and still running.
+		const other = await taskOf("ws-c2", two.slug);
+		expect(other.state).toBe("running");
+		expect(other.runs[0].status).toBe("running");
+
+		await caller.cancel({ workspaceId: "ws-c2", slug: two.slug });
 	}, 30_000);
 });
 

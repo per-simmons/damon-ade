@@ -18,6 +18,14 @@ export function RunRow({ run, onOpenSession }: RunRowProps) {
 	return (
 		<li className="space-y-0.5 text-xs" data-run-kind={run.kind}>
 			<div className="flex flex-wrap items-center gap-x-2">
+				{run.history && (
+					<span
+						className="text-muted-foreground"
+						title="Before the task was moved: kept as history, not as evidence"
+					>
+						(history)
+					</span>
+				)}
 				<span className="font-medium">
 					{RUN_LABELS[run.kind]}
 					{run.attempt > 1 ? ` #${run.attempt}` : ""}

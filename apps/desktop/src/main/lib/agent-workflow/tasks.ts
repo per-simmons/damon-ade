@@ -124,6 +124,13 @@ export interface TaskRun {
 	verdict?: "PASS" | "FAIL";
 	/** Checks run by ADE (kind "checks"). */
 	checks?: CheckResult[];
+	/** The exact approved commands a checks run ran (kind "checks"). */
+	commands?: string[];
+	/**
+	 * The worktree's code state (identity.ts codeState) when the run ended.
+	 * Check and review results count only while the code is unchanged.
+	 */
+	codeState?: string;
 	/** The run's final text, trimmed. */
 	summary?: string;
 }
@@ -171,6 +178,14 @@ export interface TaskRecord {
 	identity: TaskIdentity;
 	limits: TaskLimits;
 	runs: TaskRun[];
+	/**
+	 * Index of the first run that counts as evidence. Set when the task moves
+	 * to another worktree or branch: earlier runs stay as history (and in the
+	 * spend), but the work must be reconciled and verified again.
+	 */
+	evidenceStart?: number;
+	/** Explicit moves between worktrees or branches. */
+	moves?: Array<{ at: string; from: string; to: string }>;
 }
 
 const MAX_DESCRIPTION_LENGTH = 20_000;

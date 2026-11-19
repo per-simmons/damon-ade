@@ -17,12 +17,22 @@ const checks = { commands: ["bun run test"] };
 let n = 0;
 function run(kind: TaskRun["kind"], extra: Partial<TaskRun> = {}): TaskRun {
 	n++;
+	// As ADE records them: every model run has a cap, and one that finished
+	// normally reports its cost.
+	const model = kind !== "checks";
+	const reported = {
+		...(model ? { maxBudgetUsd: 1 } : {}),
+		...(model && (extra.status ?? "succeeded") === "succeeded"
+			? { reportedCostUsd: 0.01, costState: "reported" as const }
+			: {}),
+	};
 	return {
 		id: `r${n}`,
 		kind,
 		status: "succeeded",
 		attempt: 1,
 		queuedAt: new Date(n * 1000).toISOString(),
+		...reported,
 		...extra,
 	};
 }
@@ -190,46 +200,268 @@ describe("decideNext", () => {
 		});
 	});
 
-	it("treats checks that changed since the run as not passed", () => {
+	it("runs the implementer after a quick run that says it needs one", () => {
+		// Regression: the flagged quick run used to count as the implementation,
+		// so checks and review ran on code nobody changed.
+		const flagged = run("quick", {
+			summary: "Needs implementer: this touches the schema and 6 files",
+		});
+		const quick = task("quick", [flagged]);
+		expect(decideNext(quick, noFiles, checks, settings)).toMatchObject({
+			type: "reroute",
+			route: "implement",
+		});
+		// After the reroute: the implementer, not checks or review.
+		const rerouted = task("implement", [flagged]);
+		expect(decideNext(rerouted, noFiles, checks, settings)).toMatchObject({
+			type: "run",
+			kind: "implement",
+		});
+		expect(decideNext(rerouted, noFiles, noChecks, settings)).toMatchObject({
+			type: "run",
+			kind: "implement",
+		});
+		// Once implemented, verification follows.
+		const implemented = task("implement", [flagged, run("implement")]);
+		expect(decideNext(implemented, noFiles, checks, settings)).toMatchObject({
+			type: "checks",
+		});
+	});
+});
+
+describe("decideNext: check and review evidence", () => {
+	const approved = { commands: ["bun run test", "bun run lint"] };
+	const checksRun = (commands: string[], state = "S1") =>
+		run("checks", {
+			commands,
+			codeState: state,
+			checks: commands.map((command) => passed(command)),
+		});
+
+	it("accepts results only for the exact approved commands", () => {
 		const t = task("quick", [
 			run("quick"),
-			run("checks", { checks: [passed()] }),
+			checksRun(["bun run test", "bun run lint"]),
 		]);
-		// The project now has two approved checks; one result is not enough.
+		expect(
+			decideNext(t, noFiles, approved, settings, { codeState: "S1" }),
+		).toMatchObject({ type: "done" });
+		// Same number of commands, one changed: the old results do not count.
 		expect(
 			decideNext(
 				t,
 				noFiles,
-				{ commands: ["bun run test", "bun run lint"] },
+				{ commands: ["bun run test", "bun run typecheck"] },
 				settings,
+				{ codeState: "S1" },
 			),
-		).toMatchObject({ type: "run", kind: "fix" });
+		).toEqual({ type: "checks", reason: "the approved checks changed" });
+		// A different order is a different approval too.
+		expect(
+			decideNext(
+				t,
+				noFiles,
+				{ commands: ["bun run lint", "bun run test"] },
+				settings,
+				{ codeState: "S1" },
+			),
+		).toMatchObject({ type: "checks" });
+		// A result recorded without its commands (older record) does not count.
+		const legacy = task("quick", [
+			run("quick"),
+			run("checks", { codeState: "S1", checks: [passed(), passed()] }),
+		]);
+		expect(
+			decideNext(legacy, noFiles, approved, settings, { codeState: "S1" }),
+		).toMatchObject({ type: "checks" });
+	});
+
+	it("accepts results only for the code they ran on", () => {
+		const t = task("quick", [
+			run("quick"),
+			checksRun(["bun run test", "bun run lint"], "S1"),
+		]);
+		expect(
+			decideNext(t, noFiles, approved, settings, { codeState: "S2" }),
+		).toEqual({
+			type: "checks",
+			reason: "the code changed since the checks ran",
+		});
+		// Outside git there is no code state: results stand.
+		expect(decideNext(t, noFiles, approved, settings, {})).toMatchObject({
+			type: "done",
+		});
+	});
+
+	it("stops re-running checks when the code keeps changing under them", () => {
+		const t = task("quick", [
+			run("quick"),
+			checksRun(approved.commands, "S1"),
+			checksRun(approved.commands, "S2"),
+			checksRun(approved.commands, "S3"),
+		]);
+		expect(
+			decideNext(t, noFiles, approved, settings, { codeState: "S4" }),
+		).toMatchObject({ type: "block" });
+	});
+
+	it("re-reviews when the code changed after a passing review", () => {
+		const t = task("implement", [
+			run("implement"),
+			run("review", { verdict: "PASS", codeState: "S1" }),
+		]);
+		expect(
+			decideNext(t, noFiles, noChecks, settings, { codeState: "S1" }),
+		).toMatchObject({ type: "done" });
+		expect(
+			decideNext(t, noFiles, noChecks, settings, { codeState: "S2" }),
+		).toEqual({
+			type: "run",
+			kind: "review",
+			reason: "the code changed since the review",
+		});
 	});
 });
 
-describe("taskSpend", () => {
-	it("counts each run once and says what is pending or unknown", () => {
+describe("decideNext: after a move", () => {
+	it("keeps history but requires reconciliation and fresh verification", () => {
+		const before = [
+			run("implement"),
+			checksRun2(),
+			run("review", { verdict: "PASS", codeState: "S1" }),
+		];
+		const moved = task("implement", before, { evidenceStart: before.length });
+		// None of the earlier runs counts: implement (reconcile) again.
+		expect(
+			decideNext(moved, noFiles, checks, settings, { codeState: "S1" }),
+		).toEqual({
+			type: "run",
+			kind: "implement",
+			reason: "reconcile the work in this worktree",
+		});
+		// Then checks and review again, though old ones passed on the same code.
+		const reconciled = task("implement", [...before, run("implement")], {
+			evidenceStart: before.length,
+		});
+		expect(
+			decideNext(reconciled, noFiles, checks, settings, { codeState: "S1" }),
+		).toMatchObject({ type: "checks" });
+	});
+
+	it("counts corrections and old failures only since the move", () => {
+		const before = [
+			run("implement"),
+			run("fix"),
+			run("fix"),
+			run("review", { status: "failed", failure: "error" }),
+		];
+		const moved = task("implement", [...before, run("implement")], {
+			evidenceStart: before.length,
+		});
+		const failing = task(
+			"implement",
+			[
+				...moved.runs,
+				run("checks", {
+					commands: checks.commands,
+					codeState: "S1",
+					checks: [{ ...passed(), exitCode: 1 }],
+				}),
+			],
+			{ evidenceStart: before.length },
+		);
+		// Two fixes before the move do not exhaust the limit of 2.
+		expect(
+			decideNext(failing, noFiles, checks, settings, { codeState: "S1" }),
+		).toMatchObject({ type: "run", kind: "fix" });
+	});
+
+	function checksRun2() {
+		return run("checks", {
+			commands: checks.commands,
+			codeState: "S1",
+			checks: [passed()],
+		});
+	}
+});
+
+describe("taskSpend and the budget", () => {
+	it("counts each run once and keeps uncertain costs visible", () => {
 		const t = task("implement", [
 			run("implement", {
 				reportedCostUsd: 0.4,
 				liveCostUsd: 0.39,
 				costState: "reported",
+				maxBudgetUsd: 10,
 			}),
 			run("checks"),
 			run("review", {
 				status: "running",
 				liveCostUsd: 0.02,
 				costState: "pending",
+				maxBudgetUsd: 9.6,
 			}),
-			run("fix", { status: "failed", failure: "error" }),
-			run("fix", { liveCostUsd: 0.1, costState: "partial" }),
+			run("fix", { status: "failed", failure: "error", maxBudgetUsd: 1 }),
+			run("fix", {
+				liveCostUsd: 0.1,
+				reportedCostUsd: undefined,
+				costState: "partial",
+				maxBudgetUsd: 2,
+			}),
 			run("review", { status: "failed", failure: "launch" }),
 		]);
-		expect(taskSpend(t)).toEqual({
-			usd: 0.52,
+		const spend = taskSpend(t);
+		expect(spend.usd).toBeCloseTo(0.52, 6);
+		// The running, unknown and partial runs count at their caps.
+		expect(spend.worstCaseUsd).toBeCloseTo(0.4 + 9.6 + 1 + 2, 6);
+		expect(spend).toMatchObject({
 			pendingRuns: 1,
 			unknownRuns: 1,
 			partialRuns: 1,
+			uncertainRuns: 3,
+			unboundedRuns: 0,
+		});
+	});
+
+	it("never treats an unknown cost as zero when deciding to launch", () => {
+		// Regression: a run with no cost used to count as $0 of the budget.
+		const t = task(
+			"implement",
+			[
+				run("implement", {
+					status: "cancelled",
+					failure: "cancelled",
+					maxBudgetUsd: 4,
+				}),
+			],
+			{
+				limits: {
+					budgetUsd: 4,
+					maxCorrections: 2,
+					maxReviewRounds: 3,
+					maxEscalations: 1,
+				},
+				acknowledgedRunId: "x",
+			},
+		);
+		const decision = decideNext(t, noFiles, noChecks, settings);
+		expect(decision.type).toBe("block");
+		expect(decision.type === "block" && decision.reason).toContain(
+			"may be used up",
+		);
+	});
+
+	it("refuses Auto launches when an earlier run has no cost or cap", () => {
+		const t = task("implement", [
+			// Recorded before ADE set caps (upgraded first-version task).
+			run("implement", {
+				status: "interrupted",
+				failure: "interrupted",
+				maxBudgetUsd: undefined,
+			}),
+		]);
+		expect(decideNext(t, noFiles, noChecks, settings)).toMatchObject({
+			type: "block",
 		});
 	});
 });

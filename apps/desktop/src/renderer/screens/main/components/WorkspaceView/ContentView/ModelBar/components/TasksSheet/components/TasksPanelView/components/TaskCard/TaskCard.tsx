@@ -50,7 +50,8 @@ export function TaskCard({ task, actions }: TaskCardProps) {
 		(task.state === "needs-input" && task.planQuestions.length === 0);
 	const showSteps =
 		!finished && !elsewhere && (task.mode === "manual" || stopped) && !running;
-	const budgetSpent = task.spend.usd >= task.limits.budgetUsd;
+	// Uncertain costs count at their cap, as in ADE's budget decisions.
+	const budgetSpent = task.spend.worstCaseUsd >= task.limits.budgetUsd;
 
 	return (
 		<div
@@ -96,7 +97,7 @@ export function TaskCard({ task, actions }: TaskCardProps) {
 						disabled={busy || running}
 						onClick={() => actions.onMoveHere(task.slug)}
 					>
-						Move task to this worktree
+						Move task here
 					</Button>
 				</div>
 			)}

@@ -6,7 +6,9 @@ import {
 	activeRun,
 	buildResumeCommand,
 	captureIdentity,
+	codeState,
 	createTask,
+	currentBranch,
 	decideNext,
 	defaultWorkflowSettings,
 	EFFORT_LEVELS,
@@ -111,6 +113,9 @@ export interface WorkflowRouterDeps {
 	controller: () => TaskController;
 	captureIdentity: (workspaceId: string, worktreePath: string) => TaskIdentity;
 	events: NodeJS.EventEmitter;
+	/** Worktree probes (default: git). */
+	branchOf?: (worktree: string) => string | undefined;
+	codeStateOf?: (worktree: string) => string | undefined;
 }
 
 /**
@@ -173,6 +178,13 @@ async function guarded<T>(fn: () => Promise<T> | T): Promise<T> {
 	}
 }
 
+interface Probes {
+	/** The workspace's branch now. */
+	branchNow: string | undefined;
+	/** Code state of a worktree now (cached per request). */
+	codeStateOf: (worktree: string) => string | undefined;
+}
+
 /** What the panel shows for one task. */
 function describeTask(
 	project: ProjectWorkflow,
@@ -180,14 +192,25 @@ function describeTask(
 	ctx: WorkspaceContext,
 	settings: ReturnType<typeof loadWorkflowSettings>,
 	checks: { commands: string[] },
+	probes: Probes,
 ) {
 	const files = readTaskFiles(project, task.slug);
 	const spend = taskSpend(task);
-	const mismatch = identityMismatch(task, ctx.workspaceId, ctx.worktreePath);
+	const mismatch = identityMismatch(
+		task,
+		ctx.workspaceId,
+		ctx.worktreePath,
+		probes.branchNow,
+	);
 	const next =
-		task.state === "done" || task.state === "cancelled" || activeRun(task)
+		task.state === "done" ||
+		task.state === "cancelled" ||
+		activeRun(task) ||
+		mismatch
 			? undefined
-			: decideNext(task, files, checks, settings);
+			: decideNext(task, files, checks, settings, {
+					codeState: probes.codeStateOf(task.identity.worktreePath),
+				});
 	const manualBlockers = Object.fromEntries(
 		RUN_KINDS.map((kind) => [
 			kind,
@@ -215,15 +238,18 @@ function describeTask(
 			worktreePath: task.identity.worktreePath,
 			branch: task.identity.branch ?? null,
 		},
-		/** Set when this workspace is not the task's worktree. */
+		/** Set when this workspace is not the task's worktree or branch. */
 		mismatch: mismatch ?? null,
+		moves: task.moves ?? [],
 		spend,
 		next: next ?? null,
 		manualBlockers,
 		nextModel:
 			next?.type === "run" ? stageModel(next.kind, task, settings) : null,
-		runs: task.runs.map((run) => ({
+		runs: task.runs.map((run, index) => ({
 			id: run.id,
+			/** Before the task's last move: history, not evidence. */
+			history: index < (task.evidenceStart ?? 0),
 			kind: run.kind,
 			status: run.status,
 			attempt: run.attempt,
@@ -254,6 +280,9 @@ function describeTask(
 export const createWorkflowRouter = (
 	deps: WorkflowRouterDeps = defaultWorkflowRouterDeps,
 ) => {
+	const branchOf = deps.branchOf ?? currentBranch;
+	const codeStateOf = deps.codeStateOf ?? codeState;
+
 	/** The task, after checking it may be acted on from this workspace. */
 	function taskFor(
 		workspaceId: string,
@@ -265,7 +294,12 @@ export const createWorkflowRouter = (
 		if (!task)
 			throw new TRPCError({ code: "NOT_FOUND", message: "Task not found" });
 		if (!options.allowOtherWorktree) {
-			const mismatch = identityMismatch(task, workspaceId, ctx.worktreePath);
+			const mismatch = identityMismatch(
+				task,
+				workspaceId,
+				ctx.worktreePath,
+				branchOf(ctx.worktreePath),
+			);
 			if (mismatch)
 				throw new TRPCError({ code: "CONFLICT", message: mismatch });
 		}
@@ -339,8 +373,17 @@ export const createWorkflowRouter = (
 				const approved = {
 					commands: projectChecks.approvedAt ? projectChecks.commands : [],
 				};
+				const states = new Map<string, string | undefined>();
+				const probes: Probes = {
+					branchNow: branchOf(ctx.worktreePath),
+					codeStateOf: (worktree) => {
+						if (!states.has(worktree))
+							states.set(worktree, codeStateOf(worktree));
+						return states.get(worktree);
+					},
+				};
 				const tasks = listTaskRecords(project).map((task) =>
-					describeTask(project, task, ctx, settings, approved),
+					describeTask(project, task, ctx, settings, approved, probes),
 				);
 
 				// Task runs: Claude Code's reported cost (each run once, child
@@ -349,11 +392,20 @@ export const createWorkflowRouter = (
 				const taskTotals = tasks.reduce(
 					(sum, task) => ({
 						usd: sum.usd + task.spend.usd,
+						worstCaseUsd: sum.worstCaseUsd + task.spend.worstCaseUsd,
 						pendingRuns: sum.pendingRuns + task.spend.pendingRuns,
 						unknownRuns: sum.unknownRuns + task.spend.unknownRuns,
 						partialRuns: sum.partialRuns + task.spend.partialRuns,
+						uncertainRuns: sum.uncertainRuns + task.spend.uncertainRuns,
 					}),
-					{ usd: 0, pendingRuns: 0, unknownRuns: 0, partialRuns: 0 },
+					{
+						usd: 0,
+						worstCaseUsd: 0,
+						pendingRuns: 0,
+						unknownRuns: 0,
+						partialRuns: 0,
+						uncertainRuns: 0,
+					},
 				);
 				// Task runs' transcripts are recorded too (for reports); here they
 				// are already counted from task.json, so leave them out.

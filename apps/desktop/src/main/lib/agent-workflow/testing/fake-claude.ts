@@ -32,6 +32,8 @@ export interface FakeStep {
 	noResult?: boolean;
 	/** Never finish; also start a hanging child and record its pid here. */
 	hang?: boolean;
+	/** git commands to run in the worktree (e.g. switch branch). */
+	git?: string[][];
 }
 
 export interface FakeCall {
@@ -69,6 +71,9 @@ function main() {
       : path.join(process.cwd(), file);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, content);
+  }
+  for (const gitArgs of step.git || []) {
+    require("node:child_process").spawnSync("git", gitArgs, { cwd: process.cwd() });
   }
   const emit = (o) => process.stdout.write(JSON.stringify(o) + "\n");
   emit({ type: "system", subtype: "init", model, session_id: sessionId });
