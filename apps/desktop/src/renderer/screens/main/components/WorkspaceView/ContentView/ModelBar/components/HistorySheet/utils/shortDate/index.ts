@@ -1,0 +1,1 @@
+export { shortDate } from "./shortDate";

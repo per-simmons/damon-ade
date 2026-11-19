@@ -14,6 +14,7 @@ import { BinaryInstallDialog } from "renderer/components/BinaryInstallDialog/Bin
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useRuntimeAvailability } from "renderer/stores/model-bar/useRuntimeAvailability";
 import { useAgentSession } from "renderer/stores/tabs/useAgentSession";
+import { HistorySheet } from "./components/HistorySheet";
 import { TasksSheet } from "./components/TasksSheet";
 import { MODEL_BAR_MODELS, type ModelDescriptor } from "./models";
 
@@ -35,6 +36,7 @@ export function ModelBar() {
 
 	const [installBinary, setInstallBinary] = useState<AgentBinary | null>(null);
 	const [tasksOpen, setTasksOpen] = useState(false);
+	const [historyOpen, setHistoryOpen] = useState(false);
 
 	// Close the install dialog once a re-check confirms the tool is now present.
 	useEffect(() => {
@@ -127,7 +129,23 @@ export function ModelBar() {
 				})}
 			</div>
 
-			<div className="ml-auto">
+			<div className="ml-auto flex items-center">
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<button
+							type="button"
+							disabled={!ready}
+							onClick={() => setHistoryOpen(true)}
+							className="flex h-7 items-center rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+						>
+							History
+						</button>
+					</TooltipTrigger>
+					<TooltipContent side="bottom" showArrow={false}>
+						Link earlier Claude Code sessions and Claude app chats to this
+						project; tasks use the relevant parts as history
+					</TooltipContent>
+				</Tooltip>
 				<Tooltip>
 					<TooltipTrigger asChild>
 						<button
@@ -150,6 +168,16 @@ export function ModelBar() {
 				workspaceId={workspaceId}
 				open={tasksOpen}
 				onOpenChange={setTasksOpen}
+			/>
+
+			<HistorySheet
+				workspaceId={workspaceId}
+				open={historyOpen}
+				onOpenChange={setHistoryOpen}
+				onStartTask={() => {
+					setHistoryOpen(false);
+					setTasksOpen(true);
+				}}
 			/>
 
 			<BinaryInstallDialog

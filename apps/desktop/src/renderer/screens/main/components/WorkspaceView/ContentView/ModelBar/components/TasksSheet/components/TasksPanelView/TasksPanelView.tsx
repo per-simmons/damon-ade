@@ -50,6 +50,8 @@ export function TasksPanelView({
 }: TasksPanelViewProps) {
 	const [route, setRoute] = useState<Route | typeof AUTOMATIC>(AUTOMATIC);
 	const [mode, setMode] = useState<Mode>("auto");
+	const [useHistory, setUseHistory] = useState(true);
+	const historyAvailable = data?.historyAvailable ?? 0;
 	const usage = data?.usage;
 
 	return (
@@ -100,6 +102,18 @@ export function TasksPanelView({
 							{mode === "auto" ? "Auto" : "Manual"}
 						</Label>
 					</div>
+					{historyAvailable > 0 && (
+						<div className="flex items-center gap-2 pb-2">
+							<Switch
+								id="new-task-history"
+								checked={useHistory}
+								onCheckedChange={setUseHistory}
+							/>
+							<Label htmlFor="new-task-history" className="text-xs">
+								Use project history
+							</Label>
+						</div>
+					)}
 					<Button
 						disabled={actions.busy || !description.trim()}
 						onClick={() =>
@@ -107,6 +121,7 @@ export function TasksPanelView({
 								description,
 								route: route === AUTOMATIC ? undefined : route,
 								mode,
+								useHistory: historyAvailable > 0 && useHistory,
 							})
 						}
 					>
@@ -118,6 +133,13 @@ export function TasksPanelView({
 						? "Auto: ADE runs every stage, the checks and an independent review, and corrects within your limits. It stops only to ask you something or when a limit is reached."
 						: "Manual: ADE creates the task; you run each step yourself."}
 				</p>
+				{historyAvailable > 0 && (
+					<p className="text-xs text-muted-foreground">
+						{useHistory
+							? `ADE searches the ${historyAvailable} conversation(s) linked to this project (History) and gives the task only the relevant excerpts, as historical context. No model is used for this.`
+							: "This task gets no project history."}
+					</p>
+				)}
 				{data?.runtime === "codex" && (
 					<p className="text-xs text-amber-600">
 						This is a Codex workspace. ADE runs task stages with Claude Code;

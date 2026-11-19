@@ -23,6 +23,7 @@ import {
 import type { Route, TaskActions, TaskView } from "../../../../types";
 import { taskCostLabel, usd } from "../../../../utils/costLabel";
 import { RunRow } from "./components/RunRow";
+import { TaskHistory } from "./components/TaskHistory";
 
 interface TaskCardProps {
 	task: TaskView;
@@ -90,6 +91,12 @@ export function TaskCard({ task, actions }: TaskCardProps) {
 					{task.stateReason}
 				</p>
 			)}
+
+			<TaskHistory
+				task={task}
+				actions={actions}
+				disabled={running || elsewhere || finished}
+			/>
 
 			{elsewhere && (
 				<div className="space-y-2 rounded border border-amber-500/40 p-2">

@@ -13,7 +13,12 @@ export type Mode = "auto" | "manual";
 /** Everything the panel can ask ADE to do. */
 export interface TaskActions {
 	busy: boolean;
-	onCreate: (input: { description: string; route?: Route; mode: Mode }) => void;
+	onCreate: (input: {
+		description: string;
+		route?: Route;
+		mode: Mode;
+		useHistory: boolean;
+	}) => void;
 	onStart: (slug: string) => void;
 	onResume: (slug: string) => void;
 	onPause: (slug: string) => void;
@@ -26,4 +31,10 @@ export interface TaskActions {
 	onOpenSession: (slug: string, runId: string) => void;
 	onSaveChecks: (commands: string[]) => void;
 	onDescriptionChange: (description: string) => void;
+	/** Choose the task's history again from the project's current imports. */
+	onRefreshHistory: (slug: string) => void;
+	/** Stop using one conversation in this task. */
+	onExcludeHistory: (slug: string, conversationId: string) => void;
+	/** Run the task without project history. */
+	onClearHistory: (slug: string) => void;
 }

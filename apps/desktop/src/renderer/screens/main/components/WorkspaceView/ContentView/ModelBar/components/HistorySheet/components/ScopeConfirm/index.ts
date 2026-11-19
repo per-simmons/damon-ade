@@ -1,0 +1,1 @@
+export { ScopeConfirm } from "./ScopeConfirm";

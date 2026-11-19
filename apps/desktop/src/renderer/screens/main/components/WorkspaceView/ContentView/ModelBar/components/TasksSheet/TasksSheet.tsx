@@ -8,8 +8,8 @@ import {
 import { toast } from "@superset/ui/sonner";
 import { useDeferredValue, useMemo, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
+import { useLaunchInNewTab } from "../../hooks/useLaunchInNewTab";
 import { TasksPanelView } from "./components/TasksPanelView";
-import { useLaunchInNewTab } from "./hooks/useLaunchInNewTab";
 import type { TaskActions } from "./types";
 
 /**
@@ -111,6 +111,25 @@ export function TasksSheet({
 		onSuccess: refresh,
 		onError,
 	});
+	const refreshHistory = electronTrpc.workflow.refreshTaskHistory.useMutation({
+		onSuccess: (result) => {
+			toast.success(
+				result.excerpts
+					? `History refreshed: ${result.excerpts} excerpt(s)`
+					: "No linked conversation matches this task",
+			);
+			refresh();
+		},
+		onError,
+	});
+	const excludeHistory = electronTrpc.workflow.excludeTaskHistory.useMutation({
+		onSuccess: refresh,
+		onError,
+	});
+	const clearHistory = electronTrpc.workflow.clearTaskHistory.useMutation({
+		onSuccess: refresh,
+		onError,
+	});
 	const setChecks = electronTrpc.workflow.setChecks.useMutation({
 		onSuccess: (result) => {
 			toast.success(
@@ -135,6 +154,9 @@ export function TasksSheet({
 		moveHere,
 		setBudget,
 		setChecks,
+		refreshHistory,
+		excludeHistory,
+		clearHistory,
 	];
 	const busy = mutations.some((mutation) => mutation.isPending);
 
@@ -156,6 +178,10 @@ export function TasksSheet({
 			onSetBudget: (slug, budgetUsd) =>
 				setBudget.mutate({ workspaceId, slug, budgetUsd }),
 			onSaveChecks: (commands) => setChecks.mutate({ workspaceId, commands }),
+			onRefreshHistory: (slug) => refreshHistory.mutate({ workspaceId, slug }),
+			onExcludeHistory: (slug, conversationId) =>
+				excludeHistory.mutate({ workspaceId, slug, conversationId }),
+			onClearHistory: (slug) => clearHistory.mutate({ workspaceId, slug }),
 			onOpenSession: (slug, runId) => {
 				void (async () => {
 					try {
@@ -189,6 +215,9 @@ export function TasksSheet({
 			moveHere,
 			setBudget,
 			setChecks,
+			refreshHistory,
+			excludeHistory,
+			clearHistory,
 			utils,
 			launchInNewTab,
 		],

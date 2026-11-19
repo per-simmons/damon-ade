@@ -1151,4 +1151,7 @@ const noActions = {
 	onOpenSession: noop,
 	onSaveChecks: noop,
 	onDescriptionChange: noop,
+	onRefreshHistory: noop,
+	onExcludeHistory: noop,
+	onClearHistory: noop,
 };
