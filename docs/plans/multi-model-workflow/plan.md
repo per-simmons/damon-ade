@@ -1,12 +1,141 @@
 # Plan: multi-model coding workflow in ADE
 
-Status: **v2 done (2026-11-17): the workflow works in any project opened in ADE (section 0). M4 runs need the user (billable).**
+Status: **v3 (2026-11-18): ADE owns the stages. Auto mode takes one request to a verified finish; Manual mode runs single steps (section A). Not yet tried against a real model (billable; needs the user).**
 Created: 2026-11-17
-Scope: `apps/desktop`. No new orchestrator, no DB migration.
+Scope: `apps/desktop`. No new framework or dependency, no DB migration.
+
+## A. v3: app-owned Auto mode (2026-11-18)
+
+An independent review of v2 found that "Auto" was terminal launches plus model-side instructions: nothing in the app tracked outcomes, enforced limits, ran checks or required a review. v3 moves orchestration into ADE. Section 0 (v2) still describes the per-project state and terminal integration, which v3 keeps.
+
+### How a task runs
+
+- **TaskController** (`agent-workflow/controller.ts`), one per app (`service.ts`):
+  - A pure function, `decideNext`, picks every next step from recorded facts: runs and their outcomes, the files the agents wrote, the approved checks and the limits. No model call routes or advances anything.
+  - Auto mode advances after every run. It stops only when:
+    - the plan asks the user something
+    - a failure may not be retried (auth, turn limit, launch, exhausted fallback)
+    - a limit or the budget is reached
+    - the user pauses or cancels
+  - A rate limit or an overloaded API pauses the task; the user resumes it.
+  - Manual mode runs one requested step. It uses the same prerequisites and per-task lock, and every disabled step says why.
+- **Runs are child processes of ADE** (`stage-runner.ts`):
+  - Command: `claude -p --output-format stream-json`, with `--model`, `--effort`, `--max-turns`, `--permission-mode`, `--max-budget-usd`, the allowed and disallowed tools, `--add-dir <task folder>`, `--agents` and `--session-id`.
+  - The prompt goes through stdin, never in process arguments.
+  - Cancel and timeout kill the process tree.
+  - ADE prices each streamed response while the run is going. At the end it records Claude Code's reported cost, which includes subagents.
+- **Done means verified:**
+  - The checks the user approved for the project passed after the last change, and an independent review run (read-only, Write and Edit disallowed) ended with `VERDICT: PASS`.
+  - A quick task with passing checks needs no review.
+  - Without checks, the review alone decides.
+  - A failed check or review starts a correction run with the exact failure. Then checks and review run again.
+- **Limits are kept in `task.json`:** corrections (2), review rounds (3), escalations (2) and the task budget ($10). Defaults are in Settings › Models & Cost › Task runs.
+  - Once the estimated spend reaches the budget, ADE starts no further run.
+  - Each run's `--max-budget-usd` is set to what is left of the budget.
+  - Claude Code checks that cap as the run goes, so a run can end slightly above it. The UI says so and does not call it a strict ceiling.
+- **Lifecycle:**
+  - Runs record queued, running, succeeded, failed, cancelled, blocked and interrupted, with ids, timestamps and a failure reason.
+  - Run events are idempotent: a duplicate or stale completion changes nothing.
+  - After a restart, runs that were in progress become `interrupted` and their task is paused. Nothing is re-run until the user resumes.
+  - On quit, ADE kills the process trees of its runs.
+- **Models:**
+  - Known aliases are pinned to their IDs (opus → `claude-opus-5-5`, …). Pinning is skipped when the user sets `ANTHROPIC_DEFAULT_*_MODEL` or uses Bedrock, Vertex or Foundry.
+  - If the model is unavailable to the account, the stage is retried once on the next cheaper tier, and never on a pricier one (this can be turned off).
+  - Auth and rate-limit failures are shown and never trigger a model switch.
+- **Worktree identity:**
+  - A task records its workspace, worktree, branch, HEAD and the content hashes of files that were already dirty.
+  - Runs use that worktree as their working directory.
+  - In another worktree of the same project, the task is shown but locked, except for Pause and Cancel, until the user moves it ("Move task to this worktree").
+  - The reviewer gets only the task's own tracked, staged and untracked changes. Edits made before the task started are listed separately and excluded.
+- **Role names are namespaced** (`ade-planner`, `ade-reviewer`, …), so a project's own agents with those names are never overridden.
+
+### Security
+
+- **No implicit permission bypass anywhere:**
+  - Task runs use `acceptEdits`. The "edits and checks" profile also allows only the approved check commands and read-only git. "Bypass" is an explicit setting with a warning.
+  - `/agent/invoke` runs, terminal and headless, use `acceptEdits` unless the agent's registry entry sets `permissionMode`.
+  - Restored terminals resume with plain `claude --resume <id>`, so the user's own Claude Code settings apply.
+- **The local server** (127.0.0.1 only) no longer sends wildcard CORS headers. It refuses requests that carry a browser `Origin` or a non-local `Host` (DNS rebinding).
+  - `POST /agent/invoke` needs `Authorization: Bearer <ADE home>/invoke-token`. The token is random and created with mode 0600. ADE's watcher sends it.
+  - `POST /agent/message` and transcript recording on `/hook/complete` need either that token or the hook token that ADE terminals get as `SUPERSET_HOOK_TOKEN`. The hook token cannot start agents.
+  - Transcript recording accepts only `.jsonl` paths.
+- **Headless invoke** writes the prompt to stdin (the 30,000-character argv limit is gone) and kills the process tree on timeout.
+
+**Migration:**
+- External scripts that POST to `/agent/invoke` must send the invoke token.
+- Agents that relied on the old unconditional bypass need `"permissionMode": "bypassPermissions"` in `~/agents/registry.json`.
+
+### UI
+
+- **Tasks panel** (model bar › Tasks):
+  - One request box with an Auto/Manual switch and a route preview. Auto's button is "Run task".
+  - Approve the project's checks once; ADE suggests them from package.json.
+  - Per task:
+    - state and reason
+    - live run list with model, observed model, verdict, check results, failure and cost
+    - Pause, Resume and Cancel
+    - an answer box for plan questions
+    - Raise budget
+    - in Manual mode, step buttons with the reason a step is disabled
+    - "Open session in terminal", labelled as interactive, where ADE's limits do not apply
+- **Cost labels:**
+  - Each amount is shown as reported, `~` estimate, "so far" while the run is going, "at least" when some responses could not be priced, or "unknown".
+  - Task runs and your own sessions are totalled separately.
+  - Everything is labelled as an API-equivalent estimate, not a charge on a subscription.
+- **Labels:**
+  - The model-bar logos say they open a plain interactive session, not a managed task.
+  - Codex workspaces say that task stages run on Claude Code.
+
+### Codex boundary
+
+Managed stages always run on Claude Code, including in Codex workspaces, and the panel says so. Codex sessions you open yourself are not part of a task.
+
+### Verification (no billable calls)
+
+Every test uses a fake `claude` script (`agent-workflow/testing/fake-claude.ts`). Guards fail the test if a real `claude` or `codex` would be spawned, or if `fetch` is called.
+
+- **`workflow.acceptance.test.tsx`:** the workflow tRPC router with the real controller, runner and check commands, against real git repositories, 14 scenarios:
+  - an existing repository with its own CLAUDE.md and its own `reviewer` agent: one Auto request goes plan (opus), build (sonnet), checks, review (sonnet), then done, with no Build or Review click
+    - the effort, turn limit and permissions on each process are the role's
+    - the reviewer saw only the task's own change
+    - no files were added to the repository
+    - the panel renders the result
+  - a trivial task: quick (haiku), then checks, then done, with no plan and no review
+  - a plan question, then needs-input, then the user's answer, then done
+  - a failed review, then a fix with the reviewer's findings, then re-checks, then a passing re-review
+  - retry exhaustion: blocked after 2 corrections
+  - an unavailable model: a cheaper retry on sonnet; Haiku has nothing cheaper, so the task blocks
+  - budget exhaustion: no further launch, and the run was capped at the remainder
+  - usage on an unpriced model shows as partial
+  - Claude Code missing: the launch failure is surfaced
+  - cancel kills the process tree, grandchild included
+  - concurrent Start clicks launch once; duplicate and stale completions change nothing
+  - restart: the run becomes interrupted, nothing is replayed, and the user resumes
+  - Manual mode: single steps, a model override, disabled steps with their reasons
+  - two projects and two worktrees of one project: the task is locked in the other worktree; an explicit move makes later runs use that worktree's cwd and branch
+- **Unit tests:**
+  - `controller.test.ts`: transitions and spend accounting
+  - `stage-runner.test.ts`: stdin, flags, streamed cost, unknown price, failure classes, tree kill on cancel
+  - `identity-checks.test.ts`
+  - `models.test.ts`
+  - `project-tasks.test.ts`: task records, the v1 upgrade, the lock
+  - `local-auth.test.ts`
+  - `server-auth.test.ts`: real HTTP: no CORS, 401 without the token, 403 for browsers
+  - `headless-run.test.ts`: stdin, explicit permissions, tree kill on timeout
+  - `agent-invoke.test.ts`: the registry permission mode through a real bash
+
+The argument-capture tests check only that flags are passed correctly. The acceptance tests are what show the orchestration works.
+
+### Known limits
+
+- Not yet tried against a real model. The stream-json fields, the failure texts and how far `--max-budget-usd` can be exceeded come from the CLI's help text and earlier transcripts, not a live run. Watch the first real run.
+- Checks run through Git Bash on Windows (cmd.exe if it is missing) and the login shell elsewhere. A project whose checks need another shell must write them accordingly.
+- ADE cannot enforce effort or turn limits in interactive sessions, including sessions opened with "Open session in terminal". The UI says so.
+- The built-in chat (mastracode) is still not part of the workflow.
 
 ## 0. v2: any project, managed by ADE (2026-11-17)
 
-Sections 1–11 below record how the work got here (M1–M5). Where they describe files written into agent repositories, slash commands, `.ade/tasks` or a main-session model, **v2 replaces them**.
+Sections 1–11 below record how the work got here (M1–M5). Where they describe files written into agent repositories, slash commands, `.ade/tasks` or a main-session model, **v2 replaces them**. Where v2 describes terminal stage launches, unprefixed role names or "Inside Claude sessions, handoffs are automatic", **v3 (section A) replaces them**.
 
 ### What was missing in v1
 

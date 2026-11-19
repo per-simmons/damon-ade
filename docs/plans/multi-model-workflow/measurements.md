@@ -52,7 +52,13 @@ The arms:
 |---|---|---|
 | **A** | Current baseline | In the project's terminal: `SUPERSET_WORKFLOW_AGENTS= claude --model opus --dangerously-skip-permissions`, then give the prompt directly. The empty variable stops ADE from adding the workflow roles, so Claude cannot hand work to them. |
 | **A2** | Efficient single model | Same as A, but start with `SUPERSET_WORKFLOW_AGENTS= CLAUDE_CODE_EFFORT_LEVEL=medium claude --model opus --dangerously-skip-permissions`. |
-| **B** | Multi-model workflow | Model bar > **Tasks**: paste the prompt, leave the route on Automatic, Start, then run the stage buttons it offers until the task is done. |
+| **B** | Multi-model workflow | Model bar > **Tasks**: paste the prompt, leave the route on "Chosen by ADE" and Auto on, and click **Run task**. ADE runs plan, build, checks, review and corrections itself. Approve the project's checks first, with the same commands you use to judge the arms. |
+
+Permissions must match across arms. Arms A and A2 above skip permission prompts, while arm B's task runs default to "Edit files and run the approved checks". Either set Settings › Models & Cost › Task runs › Permissions to the bypass profile for arm B, or drop `--dangerously-skip-permissions` from A and A2.
+
+Arm B's runs are recorded twice, and the two records never add together:
+- Each run's cost and models are in the task record, shown in the Tasks panel.
+- Each run's transcript is recorded under the project, so `bun run workflow report` includes it. Role names appear as `ade-planner`, `ade-reviewer`, and so on.
 
 When the session is done, judge it with the acceptance checks. This runs the commands and records pass or fail:
 
