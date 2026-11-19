@@ -101,6 +101,10 @@ function focusMainWindow(): void {
 		}
 		mainWindow.show();
 		mainWindow.focus();
+	} else {
+		// The window was closed but ADE kept running (tray): launching ADE
+		// again must bring a window back. Same path as the tray's "Open".
+		app.emit("activate");
 	}
 }
 
