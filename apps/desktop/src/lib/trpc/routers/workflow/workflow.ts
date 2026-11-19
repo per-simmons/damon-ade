@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { projects, workspaces } from "@superset/local-db";
 import { TRPCError } from "@trpc/server";
 import { observable } from "@trpc/server/observable";
@@ -278,7 +279,7 @@ function describeTask(
 					excerpts: task.history.excerpts,
 					sources: task.history.sources,
 					excluded: task.history.excluded,
-					file: `${project.tasksDir}/${task.slug}/history.md`,
+					file: join(project.tasksDir, task.slug, "history.md"),
 				}
 			: null,
 		spend,

@@ -80,6 +80,17 @@ type PickKind = (typeof PICK_KINDS)[number];
 
 function pickPathWith(getWindow: () => BrowserWindow | null) {
 	return async (kind: PickKind): Promise<string | null> => {
+		// Development only: UI tests cannot drive the native dialog.
+		if (
+			process.env.NODE_ENV === "development" &&
+			process.env.ADE_TEST_PICK_PATHS
+		) {
+			const paths = JSON.parse(process.env.ADE_TEST_PICK_PATHS) as Record<
+				string,
+				string
+			>;
+			if (paths[kind]) return paths[kind];
+		}
 		const window = getWindow();
 		const options: Electron.OpenDialogOptions =
 			kind === "export-folder"
