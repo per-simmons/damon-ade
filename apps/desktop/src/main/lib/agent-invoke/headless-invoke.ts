@@ -88,6 +88,7 @@ export function startHeadlessInvoke(
 			model: request.model,
 			claudeSessionId: request.claudeSessionId,
 			fresh: request.fresh,
+			permissionMode: request.permissionMode,
 		})
 		.catch(
 			(error): HeadlessRunResult => ({

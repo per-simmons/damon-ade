@@ -17,7 +17,7 @@ describe("buildAgentInvokeCommand (posix)", () => {
 				shell: "posix",
 				fresh: true,
 			}),
-		).toBe(`claude --dangerously-skip-permissions "$(cat -- '${FILE}')"`);
+		).toBe(`claude --permission-mode acceptEdits "$(cat -- '${FILE}')"`);
 	});
 
 	it("adds session and model flags as bare tokens", () => {
@@ -30,7 +30,7 @@ describe("buildAgentInvokeCommand (posix)", () => {
 				model: "claude-sonnet-5-5",
 			}),
 		).toBe(
-			`claude --resume ${SESSION} --model claude-sonnet-5-5 --dangerously-skip-permissions "$(cat -- '${FILE}')"`,
+			`claude --resume ${SESSION} --model claude-sonnet-5-5 --permission-mode acceptEdits "$(cat -- '${FILE}')"`,
 		);
 		expect(
 			buildAgentInvokeCommand({
@@ -58,7 +58,7 @@ describe("buildAgentInvokeCommand (posix)", () => {
 			claudeSessionId: "$(whoami)",
 		});
 		expect(command).toBe(
-			`claude --dangerously-skip-permissions "$(cat -- '${FILE}')"`,
+			`claude --permission-mode acceptEdits "$(cat -- '${FILE}')"`,
 		);
 	});
 
@@ -99,7 +99,7 @@ describe("buildAgentInvokeCommand (Windows shells)", () => {
 				model: "fable",
 			}),
 		).toBe(
-			`claude --model fable --dangerously-skip-permissions '${readPromptFileInstruction(winFile)}'`,
+			`claude --model fable --permission-mode acceptEdits '${readPromptFileInstruction(winFile)}'`,
 		);
 	});
 
@@ -122,7 +122,7 @@ describe("buildAgentInvokeCommand (Windows shells)", () => {
 				fresh: true,
 			}),
 		).toBe(
-			`claude --dangerously-skip-permissions "${readPromptFileInstruction(winFile)}"`,
+			`claude --permission-mode acceptEdits "${readPromptFileInstruction(winFile)}"`,
 		);
 		for (const bad of ['C:\\a"b.txt', "C:\\%TEMP%\\p.txt", "C:\\a!b.txt"]) {
 			expect(() =>

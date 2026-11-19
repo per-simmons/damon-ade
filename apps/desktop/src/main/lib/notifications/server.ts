@@ -41,6 +41,7 @@ import {
 	scheduleSessionRecording,
 	transcriptPathFor,
 } from "../usage-metrics";
+import { checkLocalRequest, type LocalTokenKind } from "./local-auth";
 import { mapEventType } from "./map-event-type";
 
 // Re-export types for backwards compatibility
@@ -68,15 +69,29 @@ const app = express();
 // Parse JSON request bodies
 app.use(express.json());
 
-// CORS
+// Local callers only: no CORS headers (browsers cannot send JSON POSTs here),
+// a Host check against DNS rebinding, and no browser Origin. Mutating routes
+// also need a token (local-auth.ts).
 app.use((req, res, next) => {
-	res.setHeader("Access-Control-Allow-Origin", "*");
-	res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-	if (req.method === "OPTIONS") {
-		return res.status(200).end();
+	const check = checkLocalRequest(req, getSupersetHomeDir(), []);
+	if (!check.ok) {
+		return res
+			.status(check.status)
+			.json({ success: false, error: check.error });
 	}
 	next();
 });
+
+function requireToken(
+	req: express.Request,
+	res: express.Response,
+	accept: LocalTokenKind[],
+): boolean {
+	const check = checkLocalRequest(req, getSupersetHomeDir(), accept);
+	if (check.ok) return true;
+	res.status(check.status).json({ success: false, error: check.error });
+	return false;
+}
 
 /**
  * Resolves paneId from tabId or workspaceId using synced tabs state.
@@ -250,7 +265,17 @@ app.get("/hook/complete", (req, res) => {
 
 	// Claude Code sends its transcript path; record the session's token usage
 	// from it once the turn has stopped (debounced, off the request path).
-	if (mappedEventType === "Stop" && typeof transcriptPath === "string") {
+	// Only from ADE's own hook (it carries the terminal's hook token), and only
+	// a Claude transcript file.
+	const hookAuthorized = checkLocalRequest(req, getSupersetHomeDir(), [
+		"hook",
+	]).ok;
+	if (
+		mappedEventType === "Stop" &&
+		hookAuthorized &&
+		typeof transcriptPath === "string" &&
+		decodeHookString(transcriptPath).endsWith(".jsonl")
+	) {
 		scheduleSessionRecording({
 			transcriptPath: decodeHookString(transcriptPath),
 			workspaceId: typeof workspaceId === "string" ? workspaceId : undefined,
@@ -278,6 +303,7 @@ app.get("/hook/complete", (req, res) => {
  * Validation, the prompt file and the shell choice live in main/lib/agent-invoke.
  */
 app.post("/agent/invoke", async (req, res) => {
+	if (!requireToken(req, res, ["invoke"])) return;
 	const parsed = parseAgentInvokeRequest(req.body, getAgentEntry);
 	if (!parsed.ok) {
 		return res
@@ -329,6 +355,7 @@ app.post("/agent/invoke", async (req, res) => {
 			claudeSessionId: request.claudeSessionId,
 			fresh: request.fresh,
 			model: request.model,
+			permissionMode: request.permissionMode,
 		};
 		notificationsEmitter.emit(NOTIFICATION_EVENTS.AGENT_INVOKE, invokeEvent);
 
@@ -357,6 +384,7 @@ app.post("/agent/invoke", async (req, res) => {
  *   POST /agent/message  { agent, content, conversation?, role?, metadata? }
  */
 app.post("/agent/message", (req, res) => {
+	if (!requireToken(req, res, ["invoke", "hook"])) return;
 	const { agent, content, conversation, role, metadata } = (req.body ?? {}) as {
 		agent?: string;
 		content?: string;

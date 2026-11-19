@@ -18,7 +18,27 @@
  *
  * The model and session id are interpolated as bare words, so each is used only
  * when it is a plain token (letters, digits and . _ - [ ]).
+ *
+ * Permissions: "acceptEdits" unless the agent's registry entry chooses
+ * another mode. The permission bypass is used only when chosen explicitly.
  */
+
+export const INVOKE_PERMISSION_MODES = [
+	"acceptEdits",
+	"default",
+	"plan",
+	"bypassPermissions",
+] as const;
+export type InvokePermissionMode = (typeof INVOKE_PERMISSION_MODES)[number];
+
+export function isInvokePermissionMode(
+	value: unknown,
+): value is InvokePermissionMode {
+	return (
+		typeof value === "string" &&
+		(INVOKE_PERMISSION_MODES as readonly string[]).includes(value)
+	);
+}
 
 export type InvokeShellKind = "posix" | "powershell" | "cmd";
 
@@ -38,6 +58,8 @@ export interface AgentInvokeCommandParams {
 	claudeSessionId?: string;
 	/** true = new session (pinned with --session-id when an id is given). */
 	fresh: boolean;
+	/** Defaults to "acceptEdits"; never a bypass unless chosen. */
+	permissionMode?: InvokePermissionMode;
 }
 
 function safeToken(value: string | undefined): string | undefined {
@@ -92,6 +114,7 @@ export function buildAgentInvokeCommand({
 	model,
 	claudeSessionId,
 	fresh,
+	permissionMode,
 }: AgentInvokeCommandParams): string {
 	const sessionId = safeToken(claudeSessionId);
 	const modelToken = safeToken(model);
@@ -108,5 +131,19 @@ export function buildAgentInvokeCommand({
 			: "--continue ";
 	const modelFlag = modelToken ? `--model ${modelToken} ` : "";
 
-	return `claude ${sessionFlag}${modelFlag}--dangerously-skip-permissions ${promptArgument(promptFile, shell)}`;
+	const mode = isInvokePermissionMode(permissionMode)
+		? permissionMode
+		: "acceptEdits";
+	return `claude ${sessionFlag}${modelFlag}--permission-mode ${mode} ${promptArgument(promptFile, shell)}`;
+}
+
+/**
+ * `claude --resume <id>` for restoring a terminal's session. No permission
+ * flags: the user's own Claude Code settings (permissions.defaultMode) apply,
+ * so ADE never turns a restored session into a bypass session.
+ */
+export function claudeResumeCommand(sessionId: string): string {
+	const id = safeToken(sessionId);
+	if (!id) throw new Error("Invalid Claude session id");
+	return `claude --resume ${id}`;
 }

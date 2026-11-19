@@ -64,6 +64,7 @@ fi
 if [ "$DEBUG_HOOKS_ENABLED" = "1" ]; then
   STATUS_CODE=$(curl -sG "http://127.0.0.1:${SUPERSET_PORT:-{{DEFAULT_PORT}}}/hook/complete" \
     --connect-timeout 1 --max-time 2 \
+    -H "Authorization: Bearer ${SUPERSET_HOOK_TOKEN:-}" \
     --data-urlencode "paneId=$SUPERSET_PANE_ID" \
     --data-urlencode "tabId=$SUPERSET_TAB_ID" \
     --data-urlencode "workspaceId=$SUPERSET_WORKSPACE_ID" \
@@ -78,6 +79,7 @@ if [ "$DEBUG_HOOKS_ENABLED" = "1" ]; then
 else
   curl -sG "http://127.0.0.1:${SUPERSET_PORT:-{{DEFAULT_PORT}}}/hook/complete" \
     --connect-timeout 1 --max-time 2 \
+    -H "Authorization: Bearer ${SUPERSET_HOOK_TOKEN:-}" \
     --data-urlencode "paneId=$SUPERSET_PANE_ID" \
     --data-urlencode "tabId=$SUPERSET_TAB_ID" \
     --data-urlencode "workspaceId=$SUPERSET_WORKSPACE_ID" \

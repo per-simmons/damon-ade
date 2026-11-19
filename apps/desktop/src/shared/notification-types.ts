@@ -3,7 +3,10 @@
  * Kept in shared/ to avoid cross-boundary imports.
  */
 
-import type { InvokeShellKind } from "./utils/agent-invoke-command";
+import type {
+	InvokePermissionMode,
+	InvokeShellKind,
+} from "./utils/agent-invoke-command";
 
 export interface NotificationIds {
 	paneId?: string;
@@ -56,6 +59,8 @@ export interface AgentInvokeEvent extends NotificationIds {
 	 * else the agent's registry `model`. Omitted = the agent's own default.
 	 */
 	model?: string;
+	/** The agent's registry permission mode; "acceptEdits" when unset. */
+	permissionMode?: InvokePermissionMode;
 }
 
 /**

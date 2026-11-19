@@ -1,5 +1,6 @@
 import { workflowEnvFor } from "main/lib/agent-workflow/workflow-env";
 import { getSupersetHomeDir } from "main/lib/app-environment";
+import { getLocalToken } from "main/lib/notifications/local-auth";
 import { getTerminalHostClient } from "main/lib/terminal-host/client";
 import type { ListSessionsResponse } from "main/lib/terminal-host/types";
 import { DaemonTerminalManager, getDaemonTerminalManager } from "./daemon";
@@ -11,9 +12,11 @@ import {
 
 // Every terminal's claude gets its project's workflow roles and task folder
 // (main process only; env.ts is shared with the terminal-host subprocess).
-setWorkflowEnvResolver((project) =>
-	workflowEnvFor(getSupersetHomeDir(), project),
-);
+// The hook token lets the notify hook record usage (notifications/local-auth.ts).
+setWorkflowEnvResolver((project) => ({
+	...(workflowEnvFor(getSupersetHomeDir(), project) ?? {}),
+	SUPERSET_HOOK_TOKEN: getLocalToken(getSupersetHomeDir(), "hook"),
+}));
 
 export { DaemonTerminalManager, getDaemonTerminalManager };
 export type {

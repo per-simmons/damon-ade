@@ -124,6 +124,7 @@ export function useAgentHookListener() {
 						model: invoke.model,
 						claudeSessionId: csid,
 						fresh,
+						permissionMode: invoke.permissionMode,
 					});
 				} catch (error) {
 					console.error("[agent-invoke] Could not build command:", error);

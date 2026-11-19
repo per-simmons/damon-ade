@@ -160,6 +160,7 @@ const localDbMock = () => ({
 	organizations: mockTable("organizations"),
 	organizationMembers: mockTable("organization_members"),
 	tasks: mockTable("tasks"),
+	agentMessages: mockTable("agent_messages"),
 	EXTERNAL_APPS: [],
 	EXECUTION_MODES: ["sequential", "parallel"],
 	BRANCH_PREFIX_MODES: ["none", "github", "author", "custom"],

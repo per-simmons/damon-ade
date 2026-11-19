@@ -9,10 +9,11 @@ import {
 } from "node:fs";
 import { basename, join } from "node:path";
 import {
+	type InvokePermissionMode,
 	type InvokeShellKind,
+	isInvokePermissionMode,
 	isSafeCliToken,
 } from "shared/utils/agent-invoke-command";
-import { MAX_HEADLESS_PROMPT_LENGTH } from "./headless-run";
 
 /**
  * Request handling for POST /agent/invoke, kept free of Electron and Express
@@ -31,6 +32,7 @@ export interface InvokeAgentEntry {
 	workspaceId: string;
 	sessionId: string;
 	model?: string;
+	permissionMode?: string;
 }
 
 export interface ParsedInvokeRequest {
@@ -51,6 +53,11 @@ export interface ParsedInvokeRequest {
 	entry: InvokeAgentEntry;
 	/** Set when the registry model was ignored because it is not a plain token. */
 	ignoredRegistryModel?: string;
+	/**
+	 * From the agent's registry entry only (a request cannot raise it);
+	 * "acceptEdits" when unset or not a known mode.
+	 */
+	permissionMode: InvokePermissionMode;
 }
 
 export type ParseInvokeResult =
@@ -105,13 +112,6 @@ export function parseAgentInvokeRequest(
 			ok: false,
 			status: 400,
 			error: 'mode must be "terminal" or "headless"',
-		};
-	}
-	if (mode === "headless" && prompt.length > MAX_HEADLESS_PROMPT_LENGTH) {
-		return {
-			ok: false,
-			status: 413,
-			error: `a headless prompt is limited to ${MAX_HEADLESS_PROMPT_LENGTH} characters`,
 		};
 	}
 	const maxBudgetUsd = fields.maxBudgetUsd;
@@ -172,6 +172,9 @@ export function parseAgentInvokeRequest(
 			entry,
 			ignoredRegistryModel:
 				registryModel && !registryModelSafe ? registryModel : undefined,
+			permissionMode: isInvokePermissionMode(entry.permissionMode)
+				? entry.permissionMode
+				: "acceptEdits",
 		},
 	};
 }

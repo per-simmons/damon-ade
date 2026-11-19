@@ -1,6 +1,8 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { InvokePermissionMode } from "shared/utils/agent-invoke-command";
+import { treeKillWithEscalation } from "../tree-kill";
 
 /**
  * Headless Claude Code runs for unattended /agent/invoke calls, with a hard
@@ -8,13 +10,16 @@ import { dirname, join } from "node:path";
  * --max-turns M`. Both caps exist only in print mode, which is why the
  * interactive terminal path can only warn.
  *
- * The process is started with an argument array and no shell, so the prompt
- * is passed to Claude Code exactly as given, whatever characters it contains.
+ * The process is started with an argument array and no shell, and the
+ * prompt is written to its stdin, so it never appears in process arguments.
+ * Permissions are explicit: acceptEdits unless the agent's registry entry
+ * chooses otherwise; there is no implicit bypass. A timeout kills the whole
+ * process tree, not just the CLI.
  */
 
-/** Windows limits a whole command line to 32,767 characters. */
-export const MAX_HEADLESS_PROMPT_LENGTH = 30_000;
 export const DEFAULT_HEADLESS_TIMEOUT_MS = 60 * 60 * 1000;
+
+export type HeadlessPermissionMode = InvokePermissionMode;
 
 export interface HeadlessRunParams {
 	/** Command and leading arguments, e.g. ["/usr/local/bin/claude"]. */
@@ -27,6 +32,7 @@ export interface HeadlessRunParams {
 	claudeSessionId?: string;
 	/** true = new session pinned with --session-id; false = --resume. */
 	fresh: boolean;
+	permissionMode: HeadlessPermissionMode;
 	/**
 	 * The project's multi-model workflow (agent-workflow/project-workflow.ts):
 	 * its task folder and its roles as `--agents` JSON.
@@ -34,6 +40,8 @@ export interface HeadlessRunParams {
 	workflow?: { tasksDir: string; agentsJson: string };
 	timeoutMs?: number;
 	env?: NodeJS.ProcessEnv;
+	/** Kill a process and its children (defaults to tree-kill with escalation). */
+	killTree?: (pid: number) => Promise<void>;
 }
 
 /** Fields read from `claude -p --output-format json`; all optional. */
@@ -58,7 +66,7 @@ export interface HeadlessRunResult {
 }
 
 export function buildHeadlessArgs(
-	params: Omit<HeadlessRunParams, "command" | "cwd">,
+	params: Omit<HeadlessRunParams, "command" | "cwd" | "prompt">,
 ): string[] {
 	const args = [
 		"-p",
@@ -68,7 +76,8 @@ export function buildHeadlessArgs(
 		String(params.maxBudgetUsd),
 		"--max-turns",
 		String(params.maxTurns),
-		"--dangerously-skip-permissions",
+		"--permission-mode",
+		params.permissionMode,
 	];
 	if (params.workflow) {
 		// --add-dir takes several values; --agents right after it ends the list.
@@ -82,10 +91,7 @@ export function buildHeadlessArgs(
 			params.claudeSessionId,
 		);
 	}
-	// A leading "-" would be read as an option; a leading space is harmless.
-	args.push(
-		params.prompt.startsWith("-") ? ` ${params.prompt}` : params.prompt,
-	);
+	// No positional prompt: it is written to stdin.
 	return args;
 }
 
@@ -119,6 +125,8 @@ export function runHeadlessClaude(
 ): Promise<HeadlessRunResult> {
 	const [executable, ...leading] = params.command;
 	const started = Date.now();
+	const killTree =
+		params.killTree ?? ((pid: number) => treeKillWithEscalation({ pid }));
 	return new Promise((resolve) => {
 		let child: ChildProcess;
 		try {
@@ -127,7 +135,7 @@ export function runHeadlessClaude(
 				env: params.env ?? process.env,
 				shell: false,
 				windowsHide: true,
-				stdio: ["ignore", "pipe", "pipe"],
+				stdio: ["pipe", "pipe", "pipe"],
 			});
 		} catch (error) {
 			resolve({
@@ -138,6 +146,11 @@ export function runHeadlessClaude(
 			});
 			return;
 		}
+
+		child.stdin?.on("error", () => {
+			// Exited before reading the prompt; reported via close.
+		});
+		child.stdin?.end(params.prompt, "utf8");
 
 		let stdout = "";
 		let stderr = "";
@@ -151,7 +164,7 @@ export function runHeadlessClaude(
 		let timedOut = false;
 		const timer = setTimeout(() => {
 			timedOut = true;
-			child.kill();
+			if (child.pid) void killTree(child.pid);
 		}, params.timeoutMs ?? DEFAULT_HEADLESS_TIMEOUT_MS);
 
 		const finish = (exitCode: number | null, extraError?: string) => {

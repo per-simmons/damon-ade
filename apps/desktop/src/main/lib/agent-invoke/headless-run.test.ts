@@ -12,7 +12,6 @@ import { type InvokeAgentEntry, parseAgentInvokeRequest } from "./agent-invoke";
 import { type HeadlessFinished, startHeadlessInvoke } from "./headless-invoke";
 import {
 	buildHeadlessArgs,
-	MAX_HEADLESS_PROMPT_LENGTH,
 	parseHeadlessOutput,
 	resolveClaudeExecutable,
 	runHeadlessClaude,
@@ -25,15 +24,21 @@ let fakeClaude: string;
 
 beforeAll(() => {
 	root = mkdtempSync(join(tmpdir(), "ade-headless-"));
-	// A stand-in for `claude -p`: records its arguments, then behaves as
-	// FAKE_MODE says.
+	// A stand-in for `claude -p`: records its arguments and the prompt it read
+	// from stdin, then behaves as FAKE_MODE says. "hang" also starts a child
+	// that hangs, to prove a timeout kills the whole process tree.
 	fakeClaude = join(root, "fake-claude.js");
 	writeFileSync(
 		fakeClaude,
-		`const { writeFileSync } = require("node:fs");
-writeFileSync(process.env.FAKE_ARGS, JSON.stringify(process.argv.slice(2)));
+		`const { readFileSync, writeFileSync } = require("node:fs");
+const stdin = readFileSync(0, "utf8");
+writeFileSync(process.env.FAKE_ARGS, JSON.stringify({ args: process.argv.slice(2), stdin }));
 const mode = process.env.FAKE_MODE ?? "ok";
-if (mode === "hang") { setInterval(() => {}, 1000); }
+if (mode === "hang") {
+  const child = require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  writeFileSync(process.env.FAKE_CHILD_PID, String(child.pid));
+  setInterval(() => {}, 1000);
+}
 else if (mode === "garbage") { process.stdout.write("not json"); }
 else if (mode === "fail") { process.stderr.write("boom"); process.exit(3); }
 else {
@@ -67,30 +72,41 @@ function run(
 		maxBudgetUsd: 2.5,
 		maxTurns: 30,
 		fresh: true,
-		env: { ...process.env, FAKE_ARGS: argsFile, FAKE_MODE: mode },
+		permissionMode: "acceptEdits",
+		env: {
+			...process.env,
+			FAKE_ARGS: argsFile,
+			FAKE_MODE: mode,
+			FAKE_CHILD_PID: `${argsFile}.child`,
+		},
 		...extra,
-	}).then((result) => ({
-		result,
-		args: (() => {
-			try {
-				return JSON.parse(readFileSync(argsFile, "utf8")) as string[];
-			} catch {
-				return undefined;
-			}
-		})(),
-	}));
+	}).then((result) => {
+		let recorded: { args: string[]; stdin: string } | undefined;
+		try {
+			recorded = JSON.parse(readFileSync(argsFile, "utf8"));
+		} catch {
+			recorded = undefined;
+		}
+		let childPid: number | undefined;
+		try {
+			childPid = Number(readFileSync(`${argsFile}.child`, "utf8"));
+		} catch {
+			childPid = undefined;
+		}
+		return { result, args: recorded?.args, stdin: recorded?.stdin, childPid };
+	});
 }
 
 describe("buildHeadlessArgs", () => {
 	it("caps spending and turns and passes model and session", () => {
 		expect(
 			buildHeadlessArgs({
-				prompt: "go",
 				maxBudgetUsd: 2.5,
 				maxTurns: 30,
 				model: "sonnet",
 				claudeSessionId: SESSION,
 				fresh: false,
+				permissionMode: "acceptEdits",
 			}),
 		).toEqual([
 			"-p",
@@ -100,21 +116,21 @@ describe("buildHeadlessArgs", () => {
 			"2.5",
 			"--max-turns",
 			"30",
-			"--dangerously-skip-permissions",
+			"--permission-mode",
+			"acceptEdits",
 			"--model",
 			"sonnet",
 			"--resume",
 			SESSION,
-			"go",
 		]);
 	});
 
 	it("adds the project's workflow roles and task folder", () => {
 		const args = buildHeadlessArgs({
-			prompt: "go",
 			maxBudgetUsd: 1,
 			maxTurns: 1,
 			fresh: true,
+			permissionMode: "acceptEdits",
 			workflow: { tasksDir: "/w/tasks", agentsJson: '{"planner":{}}' },
 		});
 		// --agents directly after --add-dir ends --add-dir's list of folders.
@@ -125,17 +141,16 @@ describe("buildHeadlessArgs", () => {
 			"--agents",
 			'{"planner":{}}',
 		]);
-		expect(args[args.length - 1]).toBe("go");
 	});
 
-	it("keeps a prompt that starts with a dash from being read as an option", () => {
-		const args = buildHeadlessArgs({
-			prompt: "--help me",
-			maxBudgetUsd: 1,
-			maxTurns: 1,
-			fresh: true,
-		});
-		expect(args[args.length - 1]).toBe(" --help me");
+	it("never adds the permission bypass unless the agent chose it", () => {
+		const base = { maxBudgetUsd: 1, maxTurns: 1, fresh: true };
+		const plain = buildHeadlessArgs({ ...base, permissionMode: "acceptEdits" });
+		expect(plain).not.toContain("--dangerously-skip-permissions");
+		expect(plain).not.toContain("bypassPermissions");
+		expect(
+			buildHeadlessArgs({ ...base, permissionMode: "bypassPermissions" }),
+		).toContain("bypassPermissions");
 	});
 });
 
@@ -167,13 +182,16 @@ describe("runHeadlessClaude with a real child process", () => {
 		],
 		["newlines", "line 1\nline 2\r\n\ttabbed"],
 		["unicode", "naïve café 日本語 🚀"],
-		["backslashes", 'C:\\Users\\Pat\\ "\\"'],
+		["backslashes", String.raw`C:\Users\Pat\ "\"`],
+		["a leading dash", "--help me"],
+		["a long text", "x".repeat(200_000)],
 	];
 	for (const [label, prompt] of prompts) {
-		it(`passes a prompt with ${label} as one exact argument`, async () => {
-			const { result, args } = await run(prompt);
+		it(`passes a prompt with ${label} on stdin, never in the arguments`, async () => {
+			const { result, args, stdin } = await run(prompt);
 			expect(result.exitCode).toBe(0);
-			expect(args?.[args.length - 1]).toBe(prompt);
+			expect(stdin).toBe(prompt);
+			expect(args?.some((arg) => arg.includes(prompt))).toBe(false);
 			expect(args).toContain("--max-budget-usd");
 		});
 	}
@@ -203,10 +221,24 @@ describe("runHeadlessClaude with a real child process", () => {
 		expect(result.parseError).toContain("not JSON");
 	});
 
-	it("kills a run that exceeds its timeout", async () => {
-		const { result } = await run("x", "hang", { timeoutMs: 500 });
+	it("kills a run that exceeds its timeout, children included", async () => {
+		const { result, childPid } = await run("x", "hang", { timeoutMs: 1500 });
 		expect(result.timedOut).toBe(true);
-	});
+		expect(childPid).toBeGreaterThan(0);
+		const alive = (pid: number) => {
+			try {
+				process.kill(pid, 0);
+				return true;
+			} catch {
+				return false;
+			}
+		};
+		const deadline = Date.now() + 5000;
+		while (alive(childPid as number) && Date.now() < deadline) {
+			await new Promise((resolve) => setTimeout(resolve, 100));
+		}
+		expect(alive(childPid as number)).toBe(false);
+	}, 15_000);
 
 	it("reports a missing executable instead of throwing", async () => {
 		const result = await runHeadlessClaude({
@@ -216,6 +248,7 @@ describe("runHeadlessClaude with a real child process", () => {
 			maxBudgetUsd: 1,
 			maxTurns: 1,
 			fresh: true,
+			permissionMode: "acceptEdits",
 		});
 		expect(result.exitCode).toBeNull();
 		expect(result.stderrTail.length).toBeGreaterThan(0);
@@ -236,7 +269,7 @@ describe("headless /agent/invoke requests", () => {
 	};
 	const limits = () => ({ headlessMaxBudgetUsd: 5, headlessMaxTurns: 40 });
 
-	it("validates mode, budget and prompt length", () => {
+	it("validates mode and budget; long prompts are fine (they go on stdin)", () => {
 		const status = (body: Record<string, unknown>) => {
 			const parsed = parseAgentInvokeRequest(body, () => entry);
 			return parsed.ok ? 200 : parsed.status;
@@ -245,18 +278,7 @@ describe("headless /agent/invoke requests", () => {
 		expect(status({ agent: "a", prompt: "x", maxBudgetUsd: -1 })).toBe(400);
 		expect(status({ agent: "a", prompt: "x", maxBudgetUsd: "5" })).toBe(400);
 		expect(
-			status({
-				agent: "a",
-				prompt: "x".repeat(MAX_HEADLESS_PROMPT_LENGTH + 1),
-				mode: "headless",
-			}),
-		).toBe(413);
-		// The same prompt is fine for a terminal run.
-		expect(
-			status({
-				agent: "a",
-				prompt: "x".repeat(MAX_HEADLESS_PROMPT_LENGTH + 1),
-			}),
+			status({ agent: "a", prompt: "x".repeat(50_000), mode: "headless" }),
 		).toBe(200);
 		expect(parse({ agent: "a", prompt: "x" }).mode).toBe("terminal");
 	});

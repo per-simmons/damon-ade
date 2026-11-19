@@ -19,6 +19,11 @@ export interface AgentRegistryEntry {
 	sessionId: string;
 	/** Optional model override, e.g. "anthropic/claude-opus-4-5". */
 	model?: string;
+	/**
+	 * Claude Code permission mode for invoked runs: "acceptEdits" (default),
+	 * "default", "plan" or "bypassPermissions". The bypass is never implied.
+	 */
+	permissionMode?: string;
 }
 
 export type AgentRegistry = Record<string, AgentRegistryEntry>;

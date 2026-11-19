@@ -42,10 +42,43 @@ const AGENTS: Record<string, InvokeAgentEntry> = {
 		sessionId: "s-3",
 		model: "sonnet; rm -rf ~",
 	},
+	trusted: {
+		cwd: "/agents/trusted",
+		workspaceId: "ws-4",
+		sessionId: "s-4",
+		permissionMode: "bypassPermissions",
+	},
+	odd: {
+		cwd: "/agents/odd",
+		workspaceId: "ws-5",
+		sessionId: "s-5",
+		permissionMode: "yolo; rm -rf ~",
+	},
 };
 const lookup = (name: string) => AGENTS[name];
 
 describe("parseAgentInvokeRequest", () => {
+	it("uses acceptEdits unless the registry entry chooses another permission mode", () => {
+		const mode = (body: Record<string, unknown>) => {
+			const result = parseAgentInvokeRequest(body, lookup);
+			if (!result.ok) throw new Error(result.error);
+			return result.request.permissionMode;
+		};
+		expect(mode({ agent: "plain", prompt: "x" })).toBe("acceptEdits");
+		// Only an explicit registry choice gives the bypass.
+		expect(mode({ agent: "trusted", prompt: "x" })).toBe("bypassPermissions");
+		// An unknown value falls back to the safe default.
+		expect(mode({ agent: "odd", prompt: "x" })).toBe("acceptEdits");
+		// A request cannot raise its own permissions.
+		expect(
+			mode({
+				agent: "plain",
+				prompt: "x",
+				permissionMode: "bypassPermissions",
+			}),
+		).toBe("acceptEdits");
+	});
+
 	it("accepts a minimal request and uses the registry model", () => {
 		const result = parseAgentInvokeRequest(
 			{ agent: "cicero", prompt: "Summarize today" },
@@ -232,6 +265,7 @@ describe.if(bash !== null)("invoke command through a real bash", () => {
 			model: parsed.request.model,
 			claudeSessionId: parsed.request.claudeSessionId,
 			fresh: parsed.request.fresh,
+			permissionMode: parsed.request.permissionMode,
 		});
 		if (existsSync(argvOut)) rmSync(argvOut);
 		const result = spawnSync(bash as string, ["-c", command], {
@@ -266,7 +300,7 @@ describe.if(bash !== null)("invoke command through a real bash", () => {
 	for (const [label, prompt] of hostilePrompts) {
 		it(`passes a prompt with ${label} through unchanged as one argument`, () => {
 			const argv = invoke({ agent: "plain", prompt });
-			expect(argv).toEqual(["--dangerously-skip-permissions", prompt]);
+			expect(argv).toEqual(["--permission-mode", "acceptEdits", prompt]);
 		});
 	}
 
@@ -282,7 +316,8 @@ describe.if(bash !== null)("invoke command through a real bash", () => {
 
 	it("drops trailing newlines, as command substitution does", () => {
 		expect(invoke({ agent: "plain", prompt: "done\n\n" })).toEqual([
-			"--dangerously-skip-permissions",
+			"--permission-mode",
+			"acceptEdits",
 			"done",
 		]);
 	});
@@ -291,7 +326,8 @@ describe.if(bash !== null)("invoke command through a real bash", () => {
 		expect(invoke({ agent: "cicero", prompt: "x" })).toEqual([
 			"--model",
 			"fable",
-			"--dangerously-skip-permissions",
+			"--permission-mode",
+			"acceptEdits",
 			"x",
 		]);
 		expect(
@@ -299,7 +335,8 @@ describe.if(bash !== null)("invoke command through a real bash", () => {
 		).toEqual([
 			"--model",
 			"claude-sonnet-5-5",
-			"--dangerously-skip-permissions",
+			"--permission-mode",
+			"acceptEdits",
 			"x",
 		]);
 	});
@@ -307,7 +344,13 @@ describe.if(bash !== null)("invoke command through a real bash", () => {
 	it("pins a fresh session and resumes an existing one", () => {
 		expect(
 			invoke({ agent: "plain", prompt: "x", claudeSessionId: SESSION }),
-		).toEqual(["--session-id", SESSION, "--dangerously-skip-permissions", "x"]);
+		).toEqual([
+			"--session-id",
+			SESSION,
+			"--permission-mode",
+			"acceptEdits",
+			"x",
+		]);
 		expect(
 			invoke({
 				agent: "plain",
@@ -315,7 +358,15 @@ describe.if(bash !== null)("invoke command through a real bash", () => {
 				claudeSessionId: SESSION,
 				fresh: false,
 			}),
-		).toEqual(["--resume", SESSION, "--dangerously-skip-permissions", "x"]);
+		).toEqual(["--resume", SESSION, "--permission-mode", "acceptEdits", "x"]);
+	});
+
+	it("passes the bypass only for an agent whose registry entry chooses it", () => {
+		expect(invoke({ agent: "trusted", prompt: "x" })).toEqual([
+			"--permission-mode",
+			"bypassPermissions",
+			"x",
+		]);
 	});
 
 	it("never reaches the shell for a malformed request", () => {
@@ -359,7 +410,8 @@ describe.if(powershell !== null)(
 					SESSION,
 					"--model",
 					"fable",
-					"--dangerously-skip-permissions",
+					"--permission-mode",
+					"acceptEdits",
 					readPromptFileInstruction(promptFile),
 				]);
 			} finally {
