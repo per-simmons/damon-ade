@@ -147,7 +147,7 @@ export function ModelBar() {
 					</TooltipTrigger>
 					<TooltipContent side="bottom" showArrow={false}>
 						Optional specialists (UI, Backend, your own…) with their own
-						instructions, role models and extra roles
+						instructions and their own Roles
 					</TooltipContent>
 				</Tooltip>
 				<Tooltip>

@@ -183,7 +183,7 @@ describe.if(bash !== null && git !== null)("specialists and roles", () => {
 				name: "Backend",
 				specialty: "Backend",
 				templateId: "backend",
-				// Every base role's model can change; the reviewer differs here.
+				// Every role's model can change; the reviewer differs here.
 				roles: { reviewer: { model: "opus" }, implementer: { maxTurns: 12 } },
 			},
 		});
@@ -242,7 +242,7 @@ describe.if(bash !== null && git !== null)("specialists and roles", () => {
 					],
 				},
 			}),
-		).rejects.toThrow("base role");
+		).rejects.toThrow("built-in role");
 
 		// Personal templates persist in ADE's home, separate from built-ins.
 		const mine = await specialists.saveTemplate({
@@ -400,13 +400,18 @@ describe.if(bash !== null && git !== null)("specialists and roles", () => {
 		expect(task?.runs.map((r) => [r.kind, r.role, r.verdict])).toEqual([
 			["custom", "API Contract Reviewer", "PASS"],
 		]);
-		// Run history keeps the role's name after the role is removed.
+		// Run history keeps the role's name after the role is removed from
+		// the Roles list; saving again does not bring it back.
+		const current = (await specialists.list({ workspaceId: "ws-shop" }))
+			.specialists[0];
 		await specialists.save({
 			workspaceId: "ws-shop",
-			specialist: {
-				...(await specialists.list({ workspaceId: "ws-shop" })).specialists[0],
-				disabledTemplateRoles: ["backend-api-contract-reviewer"],
-			},
+			specialist: { ...current, customRoles: [] },
+		});
+		await specialists.save({
+			workspaceId: "ws-shop",
+			specialist: (await specialists.list({ workspaceId: "ws-shop" }))
+				.specialists[0],
 		});
 		task = (await tasks.getProjectTasks({ workspaceId: "ws-shop" })).tasks.find(
 			(t) => t.slug === created.slug,
@@ -414,4 +419,160 @@ describe.if(bash !== null && git !== null)("specialists and roles", () => {
 		expect(task?.customRoles).toEqual([]);
 		expect(task?.runs[0].role).toBe("API Contract Reviewer");
 	}, 60_000);
+
+	it("a template's roles join the one Roles list, keep their edits, never duplicate, and run when their condition applies", async () => {
+		const repo = makeRepo("web");
+		workspaces.set("ws-web", { root: repo, worktree: repo });
+		await tasks.setChecks({ workspaceId: "ws-web", commands: [] });
+		const mine = {
+			id: "",
+			name: "Copy Editor",
+			description: "Checks wording",
+			instructions: "Check user-facing text.",
+			access: "read-only" as const,
+			trigger: "on-request" as const,
+		};
+		// 1. Applying the UI template adds its Accessibility Reviewer to the
+		// same list as the user's own role (and next to the workflow's roles).
+		const saved = await specialists.save({
+			workspaceId: "ws-web",
+			specialist: {
+				name: "UI",
+				specialty: "UI",
+				templateId: "ui",
+				customRoles: [mine],
+			},
+		});
+		expect(
+			saved.customRoles.map((r) => [r.name, r.fromTemplate ?? null]),
+		).toEqual([
+			["Copy Editor", null],
+			["Accessibility Reviewer", "ui"],
+		]);
+		expect(saved.appliedTemplates).toEqual(["ui"]);
+		let spec = (await specialists.list({ workspaceId: "ws-web" }))
+			.specialists[0];
+		expect(spec.effective.customRoles.map((r) => r.name)).toEqual([
+			"Copy Editor",
+			"Accessibility Reviewer",
+		]);
+
+		// 2. Its model and instructions are edited like any role.
+		const edited = spec.customRoles.map((r) =>
+			r.name === "Accessibility Reviewer"
+				? {
+						...r,
+						model: "haiku",
+						instructions: "Check focus order and labels only.",
+					}
+				: r,
+		);
+		await specialists.save({
+			workspaceId: "ws-web",
+			specialist: { ...spec, customRoles: edited },
+		});
+
+		// 3 and 4. Applying the template again adds nothing and keeps the edits,
+		// whether the saved list already has the role or the client re-adds it.
+		for (const customRoles of [edited, [...edited, ...spec.customRoles]]) {
+			spec = (await specialists.list({ workspaceId: "ws-web" })).specialists[0];
+			const again = await specialists.save({
+				workspaceId: "ws-web",
+				specialist: {
+					...spec,
+					templateId: "ui",
+					appliedTemplates: [],
+					customRoles: customRoles.filter(
+						(r, i, all) => all.findIndex((x) => x.id === r.id) === i,
+					),
+				},
+			});
+			expect(again.customRoles.map((r) => r.name)).toEqual([
+				"Copy Editor",
+				"Accessibility Reviewer",
+			]);
+			const reviewer = again.customRoles.find(
+				(r) => r.name === "Accessibility Reviewer",
+			);
+			expect(reviewer?.model).toBe("haiku");
+			expect(reviewer?.instructions).toBe("Check focus order and labels only.");
+		}
+
+		// 5. It runs when its condition applies, on its own model.
+		fake.setSteps([
+			{
+				name: "implement",
+				write: {
+					"src/api.js": "export const route = 9;\n",
+					"{task}/progress.md": "Status: implemented\n",
+				},
+				cost: 0.05,
+			},
+			{ name: "a11y", text: "Labels fine.\nVERDICT: PASS", cost: 0.01 },
+			{ name: "review", text: "VERDICT: PASS", cost: 0.02 },
+		]);
+		const before = fake.calls().length;
+		const created = await tasks.createTask({
+			workspaceId: "ws-web",
+			description: "Add a keyboard shortcut to close the settings dialog",
+			route: "implement",
+		});
+		await controller.idle();
+		const task = (
+			await tasks.getProjectTasks({ workspaceId: "ws-web" })
+		).tasks.find((t) => t.slug === created.slug);
+		expect(task?.specialist?.name).toBe("UI");
+		expect(task?.state).toBe("done");
+		expect(task?.runs.map((r) => [r.kind, r.role])).toEqual([
+			["implement", "Implementer"],
+			["custom", "Accessibility Reviewer"],
+			["review", "Reviewer"],
+		]);
+		const a11y = fake.calls()[before + 1];
+		expect(a11y.stdin).toContain("Check focus order and labels only.");
+		expect(flag(a11y.args, "--model")).toBe("claude-haiku-5-5");
+
+		// Order and settings survive a reload from disk.
+		const reloaded = (await specialists.list({ workspaceId: "ws-web" }))
+			.specialists[0];
+		expect(reloaded.customRoles.map((r) => r.name)).toEqual([
+			"Copy Editor",
+			"Accessibility Reviewer",
+		]);
+	}, 60_000);
+
+	it("an older specialist keeps a template role it switched off when it moves to one list", async () => {
+		const project = (
+			await import("main/lib/agent-workflow/project-workflow")
+		).ensureProjectWorkflow(TEST_HOME, workspaces.get("ws-web")?.root ?? "");
+		const { writeFileSync: write } = await import("node:fs");
+		const { join: j } = await import("node:path");
+		write(
+			j(project.dir, "specialists.json"),
+			JSON.stringify({
+				version: 1,
+				specialists: [
+					{
+						id: "spec-legacy",
+						name: "Old DB",
+						specialty: "Database",
+						templateId: "database",
+						templateUses: { instructions: true, models: true },
+						roles: {},
+						customRoles: [],
+						disabledTemplateRoles: ["database-migration-reviewer"],
+						createdAt: "2026-11-01T00:00:00Z",
+						updatedAt: "2026-11-01T00:00:00Z",
+					},
+				],
+			}),
+		);
+		let spec = (await specialists.list({ workspaceId: "ws-web" }))
+			.specialists[0];
+		expect(spec.effective.customRoles).toEqual([]);
+		await specialists.save({ workspaceId: "ws-web", specialist: spec });
+		spec = (await specialists.list({ workspaceId: "ws-web" })).specialists[0];
+		expect(spec.customRoles).toEqual([]);
+		expect(spec.appliedTemplates).toEqual(["database"]);
+	});
 });

@@ -1,4 +1,3 @@
-import { Button } from "@superset/ui/button";
 import { Input } from "@superset/ui/input";
 import {
 	Select,
@@ -8,7 +7,6 @@ import {
 	SelectValue,
 } from "@superset/ui/select";
 import { Textarea } from "@superset/ui/textarea";
-import { useState } from "react";
 import {
 	type EffortLevel,
 	type ModelCatalog,
@@ -20,35 +18,39 @@ const INHERIT = "__inherit__";
 const CUSTOM = "__custom__";
 const EFFORTS: EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
 
-interface RoleRowProps {
+export interface InheritedRole {
+	model: string;
+	effort: string;
+	maxTurns: number;
+	source: { model: string; effort: string; maxTurns: string };
+	/** What "Inherit" means here, e.g. "Reviewer" for an added role. */
+	from?: string;
+}
+
+interface RoleFieldsProps {
 	label: string;
-	/** The value the role has without this specialist's own settings. */
-	inherited: {
-		model: string;
-		effort: string;
-		maxTurns: number;
-		source: { model: string; effort: string; maxTurns: string };
-	};
+	inherited: InheritedRole;
 	value: RoleDraft;
 	models: ModelCatalog["models"];
 	onChange: (value: RoleDraft) => void;
+	instructionsLabel: string;
+	instructionsPlaceholder: string;
 }
 
 /**
- * One base role of a specialist: model, reasoning effort, maximum turns and
- * extra instructions. Empty fields inherit; the effective value and where
- * it comes from are shown, and Reset returns to inheriting.
+ * The settings every role has, in one layout: model, reasoning effort,
+ * maximum turns and instructions. Empty values inherit; the line below says
+ * what will run and where each value comes from.
  */
-export function RoleRow({
+export function RoleFields({
 	label,
 	inherited,
 	value,
 	models,
 	onChange,
-}: RoleRowProps) {
-	const [showInstructions, setShowInstructions] = useState(
-		!!value.instructions,
-	);
+	instructionsLabel,
+	instructionsPlaceholder,
+}: RoleFieldsProps) {
 	const knownModel =
 		!value.model || models.some((m) => m.value === value.model);
 	const modelValue = value.model
@@ -57,35 +59,19 @@ export function RoleRow({
 			: CUSTOM
 		: INHERIT;
 	const effective = {
-		model: value.model ?? inherited.model,
+		model: value.model || inherited.model,
 		effort: value.effort ?? inherited.effort,
 		maxTurns: value.maxTurns ?? inherited.maxTurns,
 	};
 	const source = (key: "model" | "effort" | "maxTurns") =>
-		value[key] !== undefined
-			? SOURCE_LABELS.specialist
-			: (SOURCE_LABELS[inherited.source[key]] ?? inherited.source[key]);
-	const customized =
-		value.model !== undefined ||
-		value.effort !== undefined ||
-		value.maxTurns !== undefined ||
-		!!value.instructions;
+		value[key] !== undefined && value[key] !== ""
+			? "set for this role"
+			: inherited.from
+				? `same as ${inherited.from}`
+				: (SOURCE_LABELS[inherited.source[key]] ?? inherited.source[key]);
 
 	return (
-		<div className="space-y-2 rounded border p-2" data-role-row={label}>
-			<div className="flex items-center justify-between">
-				<p className="text-sm font-medium">{label}</p>
-				{customized && (
-					<Button
-						size="sm"
-						variant="ghost"
-						className="h-6 px-2 text-xs"
-						onClick={() => onChange({})}
-					>
-						Reset to inherited
-					</Button>
-				)}
-			</div>
+		<div className="space-y-2">
 			<div className="grid grid-cols-3 gap-2 text-xs">
 				<div className="space-y-1">
 					<span className="text-muted-foreground">Model</span>
@@ -185,27 +171,16 @@ export function RoleRow({
 				({source("effort")}), at most {effective.maxTurns} turns (
 				{source("maxTurns")}).
 			</p>
-			{showInstructions ? (
-				<Textarea
-					rows={3}
-					className="text-xs"
-					aria-label={`${label} extra instructions`}
-					placeholder="Extra instructions for this role (added to its built-in instructions)"
-					value={value.instructions ?? ""}
-					onChange={(e) =>
-						onChange({ ...value, instructions: e.target.value || undefined })
-					}
-				/>
-			) : (
-				<Button
-					size="sm"
-					variant="ghost"
-					className="h-6 px-2 text-xs"
-					onClick={() => setShowInstructions(true)}
-				>
-					Add instructions for this role
-				</Button>
-			)}
+			<Textarea
+				rows={3}
+				className="text-xs"
+				aria-label={`${label} ${instructionsLabel.toLowerCase()}`}
+				placeholder={instructionsPlaceholder}
+				value={value.instructions ?? ""}
+				onChange={(e) =>
+					onChange({ ...value, instructions: e.target.value || undefined })
+				}
+			/>
 		</div>
 	);
 }

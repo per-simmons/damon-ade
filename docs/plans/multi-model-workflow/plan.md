@@ -4,6 +4,23 @@ Status: **Usable release (2026-11-18). ADE owns the stages: Auto mode takes one 
 Created: 2026-11-17
 Scope: `apps/desktop`. No new framework or dependency, no DB migration.
 
+## Specialists and Roles (2026-11-19)
+
+A team (one repository) can have specialists. Each has a specialty, instructions, and one list called **Roles**:
+
+- **The workflow's own roles:** Planner, Architect, Implementer, Reviewer and Quick Worker. When they run, and what they may do with files, is fixed by the workflow.
+- **Roles a template adds:** for example the UI template's Accessibility Reviewer.
+- **Roles the user adds.**
+
+Every role in the list has the same controls: model, reasoning effort, maximum turns and instructions. Added roles also set when they run (before implementation, after implementation and checks, or only in Manual), their file access and trigger words.
+
+Applying a template copies its roles into the list, matched by each role's stable id:
+- applying it again adds nothing
+- a role's edits are never overwritten
+- a removed role stays removed
+
+Older specialists that read their template's roles live keep any role they had switched off when they are next saved. Settings resolve global default, then template, then specialist, then task. The controller schedules added roles by their trigger, and the runner gets each role's resolved model.
+
 ## A. v3: app-owned Auto mode (2026-11-18)
 
 An independent review of v2 found that "Auto" was terminal launches plus model-side instructions: nothing in the app tracked outcomes, enforced limits, ran checks or required a review. v3 moves orchestration into ADE. Section 0 (v2) still describes the per-project state and terminal integration, which v3 keeps.

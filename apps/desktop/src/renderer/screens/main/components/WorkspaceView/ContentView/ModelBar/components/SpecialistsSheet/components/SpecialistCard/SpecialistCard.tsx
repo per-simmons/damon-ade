@@ -45,13 +45,15 @@ export function SpecialistCard({
 				</div>
 			</div>
 			<p className="text-muted-foreground">
-				{roles.map((r) => `${r.label}: ${r.model}`).join(" · ")}
+				Roles:{" "}
+				{[
+					...roles.map((r) => `${r.label} (${r.model})`),
+					...effective.customRoles.map(
+						(r) =>
+							`${r.name} (${r.model ?? (r.access === "read-only" ? effective.roles.reviewer.model : effective.roles.implementer.model)})`,
+					),
+				].join(" · ")}
 			</p>
-			{effective.customRoles.length > 0 && (
-				<p className="text-muted-foreground">
-					Extra roles: {effective.customRoles.map((r) => r.name).join(", ")}
-				</p>
-			)}
 			{effective.problems.map((problem) => (
 				<p key={problem} className="text-amber-600">
 					{problem}

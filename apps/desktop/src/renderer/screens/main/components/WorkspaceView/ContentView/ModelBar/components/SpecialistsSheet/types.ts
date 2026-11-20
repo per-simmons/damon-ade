@@ -27,6 +27,8 @@ export interface CustomRoleDraft {
 	model?: string;
 	effort?: EffortLevel;
 	maxTurns?: number;
+	/** The template that added it (display only). */
+	fromTemplate?: string;
 }
 
 export interface SpecialistDraft {
@@ -40,6 +42,8 @@ export interface SpecialistDraft {
 	roles: Partial<Record<RoleName, RoleDraft>>;
 	customRoles: CustomRoleDraft[];
 	disabledTemplateRoles: string[];
+	/** Templates whose roles are already in the list. */
+	appliedTemplates?: string[];
 }
 
 export const SOURCE_LABELS: Record<string, string> = {

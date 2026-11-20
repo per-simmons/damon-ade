@@ -9,7 +9,6 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@superset/ui/select";
-import { Switch } from "@superset/ui/switch";
 import { Textarea } from "@superset/ui/textarea";
 import { useState } from "react";
 import type {
@@ -21,10 +20,70 @@ import type {
 	SpecialistList,
 	TemplateView,
 } from "../../types";
-import { CustomRoleEditor } from "./components/CustomRoleEditor";
-import { RoleRow } from "./components/RoleRow";
+import { RoleCard } from "./components/RoleCard";
+
+/** The workflow's own roles: when they run and what they may do is fixed. */
+const BUILT_IN_ROLES: Record<
+	RoleName,
+	{ responsibility: string; runs: string; files: string }
+> = {
+	planner: {
+		responsibility:
+			"Breaks the task down, records decisions and acceptance criteria.",
+		runs: "for tasks that need a plan",
+		files: "writes the plan only",
+	},
+	architect: {
+		responsibility:
+			"Hard design decisions and escalations when implementation is blocked.",
+		runs: "for exceptional tasks and on escalation",
+		files: "may edit",
+	},
+	implementer: {
+		responsibility:
+			"Makes the change, and the corrections after failed checks or reviews.",
+		runs: "for every non-trivial task",
+		files: "may edit",
+	},
+	reviewer: {
+		responsibility: "Independent review of the task's changes.",
+		runs: "after the checks pass",
+		files: "read-only",
+	},
+	quick: {
+		responsibility: "Small, low-risk, well-scoped changes without planning.",
+		runs: "for trivial tasks",
+		files: "may edit",
+	},
+};
+
+/**
+ * Add a template's roles to the list, matched by the role's stable id (or
+ * an existing role with the same name): applying a template again adds
+ * nothing and never overwrites a role's settings.
+ */
+function withTemplateRoles(
+	roles: CustomRoleDraft[],
+	template: TemplateView | undefined,
+): CustomRoleDraft[] {
+	if (!template) return roles;
+	const ids = new Set(roles.map((r) => r.id));
+	const names = new Set(roles.map((r) => r.name.trim().toLowerCase()));
+	const added = template.customRoles
+		.filter((r) => !ids.has(r.id) && !names.has(r.name.trim().toLowerCase()))
+		.map((r) => ({ ...(r as CustomRoleDraft), fromTemplate: template.id }));
+	return [...roles, ...added];
+}
 
 const NONE = "__none__";
+
+const BUILT_IN_ROLE_LABELS: Record<RoleName, string> = {
+	planner: "Planner",
+	architect: "Architect",
+	implementer: "Implementer",
+	reviewer: "Reviewer",
+	quick: "Quick Worker",
+};
 
 interface SpecialistEditorProps {
 	initial: SpecialistDraft;
@@ -39,7 +98,8 @@ interface SpecialistEditorProps {
 
 /**
  * Create or edit a specialist: name and specialty, an optional template,
- * specialty instructions, the five base roles and custom roles. Values left
+ * specialty instructions and its Roles (the workflow's roles plus any added by
+ * a template or by the user, all edited the same way). Values left
  * empty inherit from the template or the global defaults (Settings › Models
  * & Cost); the effective value and its source are shown for every role.
  */
@@ -83,7 +143,29 @@ export function SpecialistEditor({
 			templateId: t?.id,
 			specialty: draft.specialty || t?.specialty || "",
 			name: draft.name || t?.name || "",
+			// Its roles join the Roles list (once; edits are kept).
+			customRoles: draft.templateUses.instructions
+				? withTemplateRoles(draft.customRoles, t)
+				: draft.customRoles,
+			appliedTemplates:
+				t && draft.templateUses.instructions
+					? [...new Set([...(draft.appliedTemplates ?? []), t.id])]
+					: draft.appliedTemplates,
 		});
+	};
+
+	/** What an added role inherits: the Reviewer's or the Implementer's settings. */
+	const inheritedForAdded = (access: "read-only" | "edit") => {
+		const base: RoleName = access === "read-only" ? "reviewer" : "implementer";
+		const inherited = inheritedFor(base);
+		const own = draft.roles[base] ?? {};
+		return {
+			model: own.model || inherited.model,
+			effort: own.effort ?? inherited.effort,
+			maxTurns: own.maxTurns ?? inherited.maxTurns,
+			source: inherited.source,
+			from: BUILT_IN_ROLE_LABELS[base],
+		};
 	};
 
 	const addCustomRole = () =>
@@ -237,89 +319,53 @@ export function SpecialistEditor({
 				/>
 			</div>
 
-			<div className="space-y-2">
-				<p className="text-sm font-medium">Base roles</p>
-				<p className="text-xs text-muted-foreground">
-					Every specialist has these roles. ADE runs only the ones a task needs:
-					a typo gets the Quick Worker, not a planner and architect.
-				</p>
-				{list.baseRoles.map(({ role, label }) => (
-					<RoleRow
-						key={role}
-						label={label}
-						inherited={inheritedFor(role)}
-						value={draft.roles[role] ?? {}}
-						models={models.models}
-						onChange={(value: RoleDraft) =>
-							set({ roles: { ...draft.roles, [role]: value } })
-						}
-					/>
-				))}
-			</div>
-
-			{template &&
-				draft.templateUses.instructions &&
-				template.customRoles.length > 0 && (
-					<div className="space-y-1">
-						<p className="text-sm font-medium">Roles from the template</p>
-						{template.customRoles.map((role) => {
-							const on = !draft.disabledTemplateRoles.includes(role.id);
-							return (
-								<div
-									key={role.id}
-									className="flex items-start justify-between gap-2 rounded border p-2 text-xs"
-								>
-									<div>
-										<p className="font-medium">{role.name}</p>
-										<p className="text-muted-foreground">{role.description}</p>
-										<p className="text-muted-foreground">
-											Runs {role.trigger.replace("-", " ")}
-											{role.keywords.length
-												? `, only when the task mentions ${role.keywords.slice(0, 5).join(", ")}…`
-												: ""}
-										</p>
-									</div>
-									<Switch
-										aria-label={`Use ${role.name}`}
-										checked={on}
-										onCheckedChange={(v) =>
-											set({
-												disabledTemplateRoles: v
-													? draft.disabledTemplateRoles.filter(
-															(id) => id !== role.id,
-														)
-													: [...draft.disabledTemplateRoles, role.id],
-											})
-										}
-									/>
-								</div>
-							);
-						})}
-					</div>
-				)}
-
-			<div className="space-y-2">
+			<div className="space-y-2" data-roles>
 				<div className="flex items-center justify-between">
-					<p className="text-sm font-medium">Custom roles</p>
+					<p className="text-sm font-medium">Roles</p>
 					<Button size="sm" variant="outline" onClick={addCustomRole}>
 						Add role
 					</Button>
 				</div>
-				{draft.customRoles.map((role, i) => (
-					<CustomRoleEditor
-						key={role.id || `new-${i}`}
-						role={role}
+				<p className="text-xs text-muted-foreground">
+					ADE runs only the roles a task needs: a typo gets the Quick Worker,
+					not a planner and an architect. Every role's model, effort, turn limit
+					and instructions can be changed.
+				</p>
+				{list.baseRoles.map(({ role, label }) => (
+					<RoleCard
+						key={role}
+						title={label}
+						inherited={inheritedFor(role)}
 						models={models.models}
-						onChange={(next: CustomRoleDraft) =>
-							set({
-								customRoles: draft.customRoles.map((r, j) =>
-									j === i ? next : r,
-								),
-							})
-						}
-						onRemove={() =>
-							set({ customRoles: draft.customRoles.filter((_, j) => j !== i) })
-						}
+						builtIn={{
+							...BUILT_IN_ROLES[role],
+							value: draft.roles[role] ?? {},
+							onChange: (value: RoleDraft) =>
+								set({ roles: { ...draft.roles, [role]: value } }),
+						}}
+					/>
+				))}
+				{draft.customRoles.map((role, i) => (
+					<RoleCard
+						key={role.id || `new-${i}`}
+						title={role.name}
+						inherited={inheritedForAdded(role.access)}
+						models={models.models}
+						added={{
+							role,
+							templateName: templates.find((t) => t.id === role.fromTemplate)
+								?.name,
+							onChange: (next: CustomRoleDraft) =>
+								set({
+									customRoles: draft.customRoles.map((r, j) =>
+										j === i ? next : r,
+									),
+								}),
+							onRemove: () =>
+								set({
+									customRoles: draft.customRoles.filter((_, j) => j !== i),
+								}),
+						}}
 					/>
 				))}
 			</div>

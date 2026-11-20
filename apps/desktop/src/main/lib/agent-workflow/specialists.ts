@@ -66,6 +66,8 @@ export interface CustomRole {
 	model?: string;
 	effort?: EffortLevel;
 	maxTurns?: number;
+	/** The template that added this role, if any (for display only). */
+	fromTemplate?: string;
 }
 
 export interface SpecialistTemplate {
@@ -94,8 +96,17 @@ export interface Specialist {
 	keywords?: string[];
 	roles: Partial<Record<RoleName, RoleOverride>>;
 	customRoles: CustomRole[];
-	/** Template custom roles the user switched off. */
+	/**
+	 * Legacy: template roles the user switched off, from before template
+	 * roles were copied into the specialist's own list.
+	 */
 	disabledTemplateRoles: string[];
+	/**
+	 * Templates whose roles have been copied into `customRoles`. Once set,
+	 * the specialist's own list is the only list: applying the same template
+	 * again adds nothing, and a removed role stays removed.
+	 */
+	appliedTemplates?: string[];
 	createdAt: string;
 	updatedAt: string;
 }
@@ -225,7 +236,7 @@ export function validateConfig(config: {
 		const key = role.name.trim().toLowerCase();
 		if (!key) errors.push("A custom role needs a name");
 		else if (names.has(key)) {
-			errors.push(`"${role.name}" is a base role's name; choose another`);
+			errors.push(`"${role.name}" is a built-in role's name; choose another`);
 		} else if (seen.has(key)) {
 			errors.push(`Two custom roles are called "${role.name}"`);
 		}
@@ -364,11 +375,22 @@ export function resolveSpecialist(
 			resolveRole(role, settings, template, specialist, task),
 		]),
 	) as Record<RoleName, ResolvedRole>;
-	const templateRoles = (
-		specialist.templateUses.instructions ? (template?.customRoles ?? []) : []
-	)
-		.filter((r) => !specialist.disabledTemplateRoles.includes(r.id))
-		.map((r) => ({ ...r, from: "template" as const }));
+	// Older specialists read their template's roles live; newer ones have
+	// them copied into their own list (see applyTemplateRoles).
+	const legacyTemplateRoles =
+		specialist.appliedTemplates === undefined &&
+		specialist.templateUses.instructions
+			? (template?.customRoles ?? []).filter(
+					(r) =>
+						!specialist.disabledTemplateRoles.includes(r.id) &&
+						!specialist.customRoles.some((own) => own.id === r.id),
+				)
+			: [];
+	const templateRoles = legacyTemplateRoles.map((r) => ({
+		...r,
+		fromTemplate: template?.id,
+		from: "template" as const,
+	}));
 	return {
 		specialist,
 		template,
@@ -483,6 +505,7 @@ export interface SpecialistInput {
 	roles?: Partial<Record<RoleName, RoleOverride>>;
 	customRoles?: CustomRole[];
 	disabledTemplateRoles?: string[];
+	appliedTemplates?: string[];
 }
 
 /** Drop empty strings so an unset field inherits instead of overriding. */
@@ -521,19 +544,74 @@ function normalizeCustomRoles(roles: CustomRole[] | undefined): CustomRole[] {
 	}));
 }
 
+/**
+ * Copy a template's roles into a specialist's own role list, matched by the
+ * roles' stable ids: a role already in the list (the user's edited copy, or
+ * a role of theirs with the same name) is kept as it is, and a template
+ * whose roles were applied before adds nothing, so removed roles stay
+ * removed and nothing is duplicated.
+ */
+export function applyTemplateRoles(
+	customRoles: CustomRole[],
+	template: SpecialistTemplate | undefined,
+	applied: string[] | undefined,
+	disabled: string[] = [],
+): { customRoles: CustomRole[]; appliedTemplates: string[] } {
+	const done = applied ?? [];
+	if (!template || done.includes(template.id)) {
+		return { customRoles, appliedTemplates: done };
+	}
+	const ids = new Set(customRoles.map((r) => r.id));
+	const names = new Set(customRoles.map((r) => r.name.trim().toLowerCase()));
+	const added = template.customRoles
+		.filter(
+			(r) =>
+				!ids.has(r.id) &&
+				!names.has(r.name.trim().toLowerCase()) &&
+				!disabled.includes(r.id),
+		)
+		.map((r) => ({ ...r, fromTemplate: template.id }));
+	return {
+		customRoles: [...customRoles, ...added],
+		appliedTemplates: [...done, template.id],
+	};
+}
+
 export function saveSpecialist(
 	project: Pick<ProjectWorkflow, "dir">,
 	input: SpecialistInput & { id?: string },
 	now: Date = new Date(),
+	homeDir?: string,
 ): Specialist {
 	const name = input.name.trim();
 	if (!name) throw new Error("Give the specialist a name");
 	const specialty = input.specialty.trim() || name;
 	const roles = cleanOverrides(input.roles);
-	const customRoles = normalizeCustomRoles(input.customRoles);
+	const all = listSpecialists(project);
+	const existingRecord = input.id
+		? all.find((s) => s.id === input.id)
+		: undefined;
+	const templateUses = input.templateUses ?? {
+		instructions: true,
+		models: true,
+	};
+	// Applying a template adds its roles to the one Roles list.
+	const applied =
+		input.templateId && templateUses.instructions && homeDir
+			? applyTemplateRoles(
+					normalizeCustomRoles(input.customRoles),
+					findTemplate(homeDir, input.templateId),
+					input.appliedTemplates ?? existingRecord?.appliedTemplates,
+					input.disabledTemplateRoles ?? existingRecord?.disabledTemplateRoles,
+				)
+			: {
+					customRoles: normalizeCustomRoles(input.customRoles),
+					appliedTemplates:
+						input.appliedTemplates ?? existingRecord?.appliedTemplates ?? [],
+				};
+	const customRoles = applied.customRoles;
 	const errors = validateConfig({ roles, customRoles });
 	if (errors.length) throw new Error(errors.join("; "));
-	const all = listSpecialists(project);
 	if (
 		all.some(
 			(s) => s.id !== input.id && s.name.toLowerCase() === name.toLowerCase(),
@@ -548,12 +626,13 @@ export function saveSpecialist(
 		name,
 		specialty,
 		templateId: input.templateId || undefined,
-		templateUses: input.templateUses ?? { instructions: true, models: true },
+		templateUses,
 		instructions: input.instructions?.trim() || undefined,
 		keywords: input.keywords?.map((k) => k.trim()).filter(Boolean),
 		roles,
 		customRoles,
-		disabledTemplateRoles: input.disabledTemplateRoles ?? [],
+		disabledTemplateRoles: [],
+		appliedTemplates: applied.appliedTemplates,
 		createdAt: existing?.createdAt ?? now.toISOString(),
 		updatedAt: now.toISOString(),
 	};

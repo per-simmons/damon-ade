@@ -38,8 +38,13 @@ function toDraft(s: SpecialistView): SpecialistDraft {
 		instructions: s.instructions,
 		keywords: s.keywords,
 		roles: s.roles as SpecialistDraft["roles"],
-		customRoles: s.customRoles as SpecialistDraft["customRoles"],
+		// One Roles list: older specialists' template roles join it here.
+		customRoles: s.effective.customRoles.map(({ from: _from, ...role }) => ({
+			...role,
+			fromTemplate: role.fromTemplate,
+		})) as SpecialistDraft["customRoles"],
 		disabledTemplateRoles: s.disabledTemplateRoles,
+		appliedTemplates: s.appliedTemplates,
 	};
 }
 
@@ -134,12 +139,12 @@ export function SpecialistsSheet({
 				...(draft.templateUses.models ? (template?.roles ?? {}) : {}),
 				...draft.roles,
 			}) as SpecialistDraft["roles"],
-			customRoles: [
-				...(fromTemplate?.customRoles ?? []).filter(
-					(r) => !draft.disabledTemplateRoles.includes(r.id),
-				),
-				...draft.customRoles,
-			].map((r) => ({ ...r, id: "" })),
+			// The Roles list already holds the template's roles.
+			customRoles: draft.customRoles.map((r) => ({
+				...r,
+				id: "",
+				fromTemplate: undefined,
+			})),
 		});
 	};
 

@@ -57,6 +57,7 @@ const customRole = z.object({
 	model: z.string().max(100).optional(),
 	effort: z.enum(EFFORT_LEVELS as [string, ...string[]]).optional(),
 	maxTurns: z.number().int().min(1).max(MAX_TURNS_LIMIT).optional(),
+	fromTemplate: z.string().max(100).optional(),
 });
 const specialistInput = z.object({
 	id: z.string().optional(),
@@ -71,6 +72,7 @@ const specialistInput = z.object({
 	roles: roleOverrides.default({}),
 	customRoles: z.array(customRole).max(30).default([]),
 	disabledTemplateRoles: z.array(z.string()).default([]),
+	appliedTemplates: z.array(z.string()).optional(),
 });
 
 function guarded<T>(fn: () => T): T {
@@ -170,6 +172,8 @@ export const createSpecialistsRouter = (
 					return saveSpecialist(
 						ctx.project,
 						input.specialist as Parameters<typeof saveSpecialist>[1],
+						new Date(),
+						deps.homeDir(),
 					);
 				}),
 			),
