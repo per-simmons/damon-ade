@@ -123,7 +123,28 @@ const TOOLS = [
 	},
 ] as const;
 
-/** The MCP config file the Coordinator session is started with (0600). */
+function writePrivate(path: string, value: unknown): void {
+	writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, {
+		encoding: "utf8",
+		mode: 0o600,
+	});
+	try {
+		chmodSync(path, 0o600);
+	} catch {
+		// Best effort (no-op on Windows, where the profile folder is private).
+	}
+}
+
+/** Where a team's Coordinator settings live, next to its MCP config. */
+function settingsPathFor(configPath: string): string {
+	return configPath.replace(/\.mcp\.json$/, ".settings.json");
+}
+
+/**
+ * The files the Coordinator session is started with (0600): its MCP config
+ * (the team server, with the token) and its settings (the Coordinator plans;
+ * the agents do the work, so it may not edit files). Returns the MCP config.
+ */
 export function writeTeamMcpConfig(
 	homeDir: string,
 	workspaceId: string,
@@ -143,29 +164,31 @@ export function writeTeamMcpConfig(
 			},
 		},
 	};
-	writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, {
-		encoding: "utf8",
-		mode: 0o600,
+	writePrivate(path, config);
+	writePrivate(settingsPathFor(path), {
+		permissions: {
+			allow: [
+				`mcp__${TEAM_MCP_NAME}__team_overview`,
+				`mcp__${TEAM_MCP_NAME}__plan_status`,
+			],
+			deny: ["Edit", "Write", "NotebookEdit"],
+		},
 	});
-	try {
-		chmodSync(path, 0o600);
-	} catch {
-		// Best effort (no-op on Windows, where the profile folder is private).
-	}
 	return path;
 }
 
 /** The command that starts the Coordinator session in a terminal. */
 export function teamChatCommand(configPath: string): string {
 	const config = configPath.replace(/\\/g, "/");
+	// Kept short: it is what the user sees typed into the terminal. The
+	// permissions are in the settings file, the role in the server's
+	// instructions.
 	return [
 		"claude",
-		`--name "${TEAM_CHAT_TAB}"`,
+		`-n "${TEAM_CHAT_TAB}"`,
 		`--mcp-config "${config}"`,
-		// The Coordinator plans; the agents do the work.
-		"--disallowedTools Edit Write NotebookEdit",
-		`--allowedTools mcp__${TEAM_MCP_NAME}__team_overview mcp__${TEAM_MCP_NAME}__plan_status`,
-		`--append-system-prompt "You are the Coordinator of this ADE team. Follow the ${TEAM_MCP_NAME} server's instructions: plan the work with the user, never edit files, and start it only with start_plan after they say go."`,
+		`--settings "${settingsPathFor(config)}"`,
+		`--append-system-prompt "You are this ADE team's Coordinator: follow the ${TEAM_MCP_NAME} instructions."`,
 	].join(" ");
 }
 

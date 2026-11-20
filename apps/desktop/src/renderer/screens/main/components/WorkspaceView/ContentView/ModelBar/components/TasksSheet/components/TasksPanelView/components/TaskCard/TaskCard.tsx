@@ -75,7 +75,10 @@ export function TaskCard({
 		task.state === "paused" ||
 		task.state === "blocked" ||
 		task.state === "failed" ||
-		(task.state === "needs-input" && task.planQuestions.length === 0);
+		(task.state === "needs-input" &&
+			task.planQuestions.length === 0 &&
+			// A team chat waiting for the user's reply is answered in Team plans.
+			!(task.chat && task.subtaskSlugs.length === 0));
 	// A team request has no steps of its own: its subtasks do the work.
 	const showSteps =
 		!task.isRequest &&

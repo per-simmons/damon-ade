@@ -7,6 +7,7 @@ import {
 	SheetTitle,
 } from "@superset/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@superset/ui/tabs";
+import { LuLink, LuListTodo, LuPlus } from "react-icons/lu";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { ExportImport } from "./components/ExportImport";
 import { ImportedList } from "./components/ImportedList";
@@ -65,8 +66,14 @@ export function HistorySheet({
 								project={data.project}
 							/>
 
-							<section className="space-y-2">
-								<h3 className="text-sm font-medium">Add conversations</h3>
+							<section className="space-y-2.5 rounded-lg border bg-card p-3 shadow-xs">
+								<div className="flex items-center gap-2">
+									<LuPlus
+										className="size-4 text-muted-foreground"
+										aria-hidden
+									/>
+									<h3 className="text-sm font-semibold">Add conversations</h3>
+								</div>
 								<Tabs defaultValue="sessions">
 									<TabsList>
 										<TabsTrigger value="sessions">
@@ -101,16 +108,26 @@ export function HistorySheet({
 								</Tabs>
 							</section>
 
-							<section className="space-y-2">
+							<section className="space-y-2.5 rounded-lg border bg-card p-3 shadow-xs">
 								<div className="flex items-center justify-between gap-2">
-									<h3 className="text-sm font-medium">
-										Linked to this project
-									</h3>
+									<div className="flex items-center gap-2">
+										<LuLink
+											className="size-4 text-muted-foreground"
+											aria-hidden
+										/>
+										<h3 className="text-sm font-semibold">
+											Linked to this project
+										</h3>
+										<span className="text-xs text-muted-foreground">
+											{data.conversations.length}
+										</span>
+									</div>
 									<Button
 										size="sm"
 										disabled={data.conversations.length === 0}
 										onClick={onStartTask}
 									>
+										<LuListTodo className="size-3.5" aria-hidden />
 										Start a task
 									</Button>
 								</div>

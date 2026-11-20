@@ -357,8 +357,8 @@ export function decideNext(
 			return {
 				type: "needs-input",
 				reason: latest?.plan
-					? "Your turn: press Go to start the plan, or reply to change it."
-					: "Your turn: reply to the Coordinator.",
+					? "Your turn: press Go in Team plans to start the plan, or reply to change it."
+					: "Your turn: reply to the Coordinator in Team plans.",
 			};
 		}
 		const splitRun = lastIndex(

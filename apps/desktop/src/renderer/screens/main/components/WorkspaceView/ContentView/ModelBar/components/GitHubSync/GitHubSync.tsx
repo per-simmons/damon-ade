@@ -12,6 +12,7 @@ import { toast } from "@superset/ui/sonner";
 import { Switch } from "@superset/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@superset/ui/tabs";
 import { useEffect, useRef, useState } from "react";
+import { LuGithub } from "react-icons/lu";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 
 interface GitHubSyncProps {
@@ -150,12 +151,16 @@ export function GitHubSync({ workspaceId }: GitHubSyncProps) {
 				type="button"
 				onClick={() => setOpen(true)}
 				data-github-sync
-				className={`flex h-7 items-center rounded-md px-2 text-xs transition-colors hover:bg-muted ${
+				className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-xs transition-colors hover:bg-muted ${
 					connected && (ahead || behind)
 						? "text-amber-600"
 						: "text-muted-foreground hover:text-foreground"
 				}`}
 			>
+				<LuGithub
+					className={`size-3.5 ${sync.isPending ? "animate-pulse" : ""}`}
+					aria-hidden
+				/>
 				{sync.isPending ? "Syncing…" : label}
 			</button>
 			<Dialog open={open} onOpenChange={setOpen}>
@@ -169,7 +174,7 @@ export function GitHubSync({ workspaceId }: GitHubSyncProps) {
 							left to you, with the reason.
 						</DialogDescription>
 					</DialogHeader>
-					<div className="space-y-1 rounded border p-2 text-xs">
+					<div className="space-y-1 rounded-lg border bg-muted/30 p-3 text-xs">
 						<p className="break-all">
 							<span className="text-muted-foreground">Local: </span>
 							{project?.project.root ?? "…"}

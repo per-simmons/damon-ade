@@ -1300,7 +1300,13 @@ describe.if(bash !== null && git !== null)("specialists and roles", () => {
 			/^Bearer [a-f0-9]{64}$/,
 		);
 		const command = teamMcpModule.teamChatCommand(config);
-		expect(command).toContain("--disallowedTools Edit Write NotebookEdit");
+		const settingsPath = config.replace(/\.mcp\.json$/, ".settings.json");
+		expect(
+			JSON.parse(fs.readFileSync(settingsPath, "utf8")).permissions.deny,
+		).toEqual(["Edit", "Write", "NotebookEdit"]);
+		expect(command).toContain(
+			`--settings "${settingsPath.replace(/\\/g, "/")}"`,
+		);
 		expect(command).toContain(`--mcp-config "${config.replace(/\\/g, "/")}"`);
 		expect(command).not.toContain(
 			written.mcpServers["ade-team"].headers.Authorization.slice(7),
