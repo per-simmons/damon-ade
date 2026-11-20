@@ -20,7 +20,7 @@ import {
 	useNewCategoryModalOpen,
 } from "renderer/stores/new-category-modal";
 
-type Source = "local" | "github";
+type Source = "local" | "github" | "blank";
 
 /** The last path segment of a folder or repository URL, without ".git". */
 function repoName(value: string): string {
@@ -58,9 +58,11 @@ export function NewCategoryModal() {
 	const [busy, setBusy] = useState(false);
 	const photoInputRef = useRef<HTMLInputElement>(null);
 
-	const { data: homeDir } = electronTrpc.window.getHomeDir.useQuery(undefined, {
-		enabled: isOpen,
-	});
+	const [blankDir, setBlankDir] = useState("");
+	const { data: projectsFolder } =
+		electronTrpc.projects.getProjectsFolder.useQuery(undefined, {
+			enabled: isOpen,
+		});
 	const github = electronTrpc.projectHistory.listGitHubRepos.useQuery(
 		undefined,
 		{ enabled: isOpen && showRepos, staleTime: 60_000 },
@@ -68,6 +70,7 @@ export function NewCategoryModal() {
 	const selectDirectory = electronTrpc.projects.selectDirectory.useMutation();
 	const createTeam = electronTrpc.projects.createTeam.useMutation();
 	const cloneRepo = electronTrpc.projects.cloneRepo.useMutation();
+	const createEmptyRepo = electronTrpc.projects.createEmptyRepo.useMutation();
 	const updateProject = electronTrpc.projects.update.useMutation();
 	const setProjectIcon = electronTrpc.projects.setProjectIcon.useMutation();
 
@@ -84,13 +87,17 @@ export function NewCategoryModal() {
 		setBusy(false);
 	}, [isOpen]);
 
+	// New projects and clones go to the projects folder from Settings unless
+	// the user picks another folder here.
 	useEffect(() => {
-		if (homeDir && !cloneDir) setCloneDir(`${homeDir}/.ade/projects`);
-	}, [homeDir, cloneDir]);
+		if (!isOpen || !projectsFolder) return;
+		setCloneDir(projectsFolder.path);
+		setBlankDir(projectsFolder.path);
+	}, [isOpen, projectsFolder]);
 
 	// The name follows the repository until the user types their own.
 	useEffect(() => {
-		if (nameEdited) return;
+		if (nameEdited || source === "blank") return;
 		setName(repoName(source === "local" ? localPath : url));
 	}, [source, localPath, url, nameEdited]);
 
@@ -132,7 +139,9 @@ export function NewCategoryModal() {
 		name.trim().length > 0 &&
 		(source === "local"
 			? localPath.trim().length > 0
-			: url.trim().length > 0 && cloneDir.trim().length > 0);
+			: source === "blank"
+				? blankDir.trim().length > 0
+				: url.trim().length > 0 && cloneDir.trim().length > 0);
 
 	const handleCreate = async () => {
 		if (!canCreate) return;
@@ -157,6 +166,29 @@ export function NewCategoryModal() {
 					toast.success(`Team "${result.project.name}" created`);
 				}
 				await openTeam(result.project.id, result.workspaceId);
+				return;
+			}
+
+			if (source === "blank") {
+				const created = await createEmptyRepo.mutateAsync({
+					name: name.trim(),
+					parentDir: blankDir.trim(),
+				});
+				if (!created.success || !("project" in created) || !created.project) {
+					toast.error(
+						("error" in created && created.error) ||
+							"Could not create the project",
+					);
+					return;
+				}
+				if (photoDataUrl) {
+					await setProjectIcon.mutateAsync({
+						id: created.project.id,
+						icon: photoDataUrl,
+					});
+				}
+				toast.success(`Project "${name.trim()}" created`);
+				await openTeam(created.project.id, null);
 				return;
 			}
 
@@ -228,10 +260,39 @@ export function NewCategoryModal() {
 					<TabsList>
 						<TabsTrigger value="local">Local repository</TabsTrigger>
 						<TabsTrigger value="github">GitHub</TabsTrigger>
+						<TabsTrigger value="blank">New project</TabsTrigger>
 					</TabsList>
 				</Tabs>
 
-				{source === "local" ? (
+				{source === "blank" ? (
+					<div className="flex flex-col gap-1.5" data-new-project>
+						<Label htmlFor="team-blank-dir">Create it in</Label>
+						<div className="flex gap-2">
+							<Input
+								id="team-blank-dir"
+								value={blankDir}
+								onChange={(e) => setBlankDir(e.target.value)}
+							/>
+							<Button
+								variant="outline"
+								onClick={() => void browse(setBlankDir, blankDir)}
+							>
+								Browse…
+							</Button>
+						</div>
+						<p className="text-xs text-muted-foreground">
+							A new folder named after the team, with an empty git repository.
+							{projectsFolder?.path && blankDir.trim() !== projectsFolder.path
+								? " (Not your default projects folder.)"
+								: " The default is set in Settings › Features › Projects folder."}
+						</p>
+						{name.trim() && blankDir.trim() && (
+							<p className="break-all text-xs text-muted-foreground">
+								{blankDir.trim().replace(/[\\/]+$/, "")}/{name.trim()}
+							</p>
+						)}
+					</div>
+				) : source === "local" ? (
 					<div className="flex flex-col gap-1.5">
 						<Label htmlFor="team-repo-path">Repository folder</Label>
 						<div className="flex gap-2">
@@ -377,7 +438,9 @@ export function NewCategoryModal() {
 							? source === "github"
 								? "Cloning…"
 								: "Creating…"
-							: "Create team"}
+							: source === "blank"
+								? "Create project"
+								: "Create team"}
 					</Button>
 				</div>
 			</DialogContent>

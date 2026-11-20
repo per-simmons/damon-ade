@@ -43,6 +43,7 @@ import {
 import { getDefaultProjectColor } from "./utils/colors";
 import { discoverAndSaveProjectIcon } from "./utils/favicon-discovery";
 import { fetchGitHubOwner, getGitHubAvatarUrl } from "./utils/github";
+import { getProjectsFolder, setProjectsFolder } from "./utils/projects-folder";
 import {
 	migrateTeam,
 	teamForRepository,
@@ -793,6 +794,13 @@ export const createProjectsRouter = (getWindow: () => BrowserWindow | null) => {
 					};
 				}
 			}),
+
+		/** Where new projects are created unless the user picks another folder. */
+		getProjectsFolder: publicProcedure.query(() => getProjectsFolder()),
+
+		setProjectsFolder: publicProcedure
+			.input(z.object({ path: z.string().min(1).nullable() }))
+			.mutation(({ input }) => setProjectsFolder(input.path)),
 
 		createEmptyRepo: publicProcedure
 			.input(
