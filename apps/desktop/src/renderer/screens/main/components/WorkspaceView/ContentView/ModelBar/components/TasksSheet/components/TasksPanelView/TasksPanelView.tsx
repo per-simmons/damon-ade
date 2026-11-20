@@ -17,6 +17,7 @@ import type {
 	ProjectTasks,
 	Route,
 	RoutePreview,
+	SpecialistOption,
 	TaskActions,
 } from "../../types";
 import { usd } from "../../utils/costLabel";
@@ -30,6 +31,8 @@ interface TasksPanelViewProps {
 	description: string;
 	preview: RoutePreview | undefined;
 	actions: TaskActions;
+	/** The team's specialists (optional; empty means the default workflow). */
+	specialists?: SpecialistOption[];
 }
 
 /**
@@ -47,7 +50,9 @@ export function TasksPanelView({
 	description,
 	preview,
 	actions,
+	specialists = [],
 }: TasksPanelViewProps) {
+	const [specialist, setSpecialist] = useState("auto");
 	const [route, setRoute] = useState<Route | typeof AUTOMATIC>(AUTOMATIC);
 	const [mode, setMode] = useState<Mode>("auto");
 	const [useHistory, setUseHistory] = useState(true);
@@ -102,6 +107,25 @@ export function TasksPanelView({
 							{mode === "auto" ? "Auto" : "Manual"}
 						</Label>
 					</div>
+					{specialists.length > 0 && (
+						<div className="space-y-1">
+							<Label className="text-xs">Specialist</Label>
+							<Select value={specialist} onValueChange={setSpecialist}>
+								<SelectTrigger className="w-[190px]" aria-label="Specialist">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="auto">Chosen by ADE</SelectItem>
+									<SelectItem value="none">None (default workflow)</SelectItem>
+									{specialists.map((s) => (
+										<SelectItem key={s.id} value={s.id}>
+											{s.name}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						</div>
+					)}
 					{historyAvailable > 0 && (
 						<div className="flex items-center gap-2 pb-2">
 							<Switch
@@ -122,6 +146,7 @@ export function TasksPanelView({
 								route: route === AUTOMATIC ? undefined : route,
 								mode,
 								useHistory: historyAvailable > 0 && useHistory,
+								specialist,
 							})
 						}
 					>

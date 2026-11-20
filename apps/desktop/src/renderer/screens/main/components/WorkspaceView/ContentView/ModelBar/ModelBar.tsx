@@ -16,6 +16,7 @@ import { useRuntimeAvailability } from "renderer/stores/model-bar/useRuntimeAvai
 import { useAgentSession } from "renderer/stores/tabs/useAgentSession";
 import { HistorySheet } from "./components/HistorySheet";
 import { RemoteUpdate } from "./components/RemoteUpdate";
+import { SpecialistsSheet } from "./components/SpecialistsSheet";
 import { TasksSheet } from "./components/TasksSheet";
 import { MODEL_BAR_MODELS, type ModelDescriptor } from "./models";
 
@@ -38,6 +39,7 @@ export function ModelBar() {
 	const [installBinary, setInstallBinary] = useState<AgentBinary | null>(null);
 	const [tasksOpen, setTasksOpen] = useState(false);
 	const [historyOpen, setHistoryOpen] = useState(false);
+	const [specialistsOpen, setSpecialistsOpen] = useState(false);
 
 	// Close the install dialog once a re-check confirms the tool is now present.
 	useEffect(() => {
@@ -137,6 +139,22 @@ export function ModelBar() {
 						<button
 							type="button"
 							disabled={!ready}
+							onClick={() => setSpecialistsOpen(true)}
+							className="flex h-7 items-center rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+						>
+							Specialists
+						</button>
+					</TooltipTrigger>
+					<TooltipContent side="bottom" showArrow={false}>
+						Optional specialists (UI, Backend, your own…) with their own
+						instructions, role models and extra roles
+					</TooltipContent>
+				</Tooltip>
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<button
+							type="button"
+							disabled={!ready}
 							onClick={() => setHistoryOpen(true)}
 							className="flex h-7 items-center rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
 						>
@@ -170,6 +188,12 @@ export function ModelBar() {
 				workspaceId={workspaceId}
 				open={tasksOpen}
 				onOpenChange={setTasksOpen}
+			/>
+
+			<SpecialistsSheet
+				workspaceId={workspaceId}
+				open={specialistsOpen}
+				onOpenChange={setSpecialistsOpen}
 			/>
 
 			<HistorySheet

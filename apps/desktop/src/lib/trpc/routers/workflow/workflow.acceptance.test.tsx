@@ -1154,4 +1154,5 @@ const noActions = {
 	onRefreshHistory: noop,
 	onExcludeHistory: noop,
 	onClearHistory: noop,
+	onSetSpecialist: noop,
 };

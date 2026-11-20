@@ -18,6 +18,8 @@ export interface TaskActions {
 		route?: Route;
 		mode: Mode;
 		useHistory: boolean;
+		/** "auto", "none", or a specialist id. */
+		specialist: string;
 	}) => void;
 	onStart: (slug: string) => void;
 	onResume: (slug: string) => void;
@@ -25,7 +27,14 @@ export interface TaskActions {
 	onCancel: (slug: string) => void;
 	onSetMode: (slug: string, mode: Mode) => void;
 	onAnswer: (slug: string, answers: string) => void;
-	onRunStep: (slug: string, kind: RunKind, model?: string) => void;
+	onRunStep: (
+		slug: string,
+		kind: RunKind,
+		model?: string,
+		customRoleId?: string,
+	) => void;
+	/** Manual: change the task's specialist ("auto", "none" or an id). */
+	onSetSpecialist: (slug: string, specialist: string) => void;
 	onMoveHere: (slug: string) => void;
 	onSetBudget: (slug: string, budgetUsd: number) => void;
 	onOpenSession: (slug: string, runId: string) => void;
@@ -37,4 +46,11 @@ export interface TaskActions {
 	onExcludeHistory: (slug: string, conversationId: string) => void;
 	/** Run the task without project history. */
 	onClearHistory: (slug: string) => void;
+}
+
+/** A team's specialists, for choosing one. */
+export interface SpecialistOption {
+	id: string;
+	name: string;
+	specialty: string;
 }

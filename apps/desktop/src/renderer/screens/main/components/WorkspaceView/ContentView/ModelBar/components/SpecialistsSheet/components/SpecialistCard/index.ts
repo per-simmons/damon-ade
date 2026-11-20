@@ -1,0 +1,1 @@
+export { SpecialistCard } from "./SpecialistCard";

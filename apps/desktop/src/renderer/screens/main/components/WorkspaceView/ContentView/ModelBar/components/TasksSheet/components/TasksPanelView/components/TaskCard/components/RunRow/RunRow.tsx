@@ -27,10 +27,16 @@ export function RunRow({ run, onOpenSession }: RunRowProps) {
 					</span>
 				)}
 				<span className="font-medium">
-					{RUN_LABELS[run.kind]}
+					{run.kind === "custom" && run.role ? run.role : RUN_LABELS[run.kind]}
 					{run.attempt > 1 ? ` #${run.attempt}` : ""}
 				</span>
 				<span className="text-muted-foreground">{run.status}</span>
+				{run.role && run.kind !== "custom" && (
+					<span className="text-muted-foreground">
+						{run.role}
+						{run.specialist ? ` (${run.specialist})` : ""}
+					</span>
+				)}
 				{run.model && (
 					<span className="text-muted-foreground">
 						on {run.model}

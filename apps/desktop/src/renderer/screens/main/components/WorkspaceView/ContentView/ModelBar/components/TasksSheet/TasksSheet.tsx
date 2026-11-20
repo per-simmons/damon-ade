@@ -130,6 +130,19 @@ export function TasksSheet({
 		onSuccess: refresh,
 		onError,
 	});
+	const setSpecialist = electronTrpc.workflow.setTaskSpecialist.useMutation({
+		onSuccess: refresh,
+		onError,
+	});
+	const { data: specialistList } = electronTrpc.specialists.list.useQuery(
+		{ workspaceId },
+		{ enabled: open },
+	);
+	const specialists = (specialistList?.specialists ?? []).map((s) => ({
+		id: s.id,
+		name: s.name,
+		specialty: s.specialty,
+	}));
 	const setChecks = electronTrpc.workflow.setChecks.useMutation({
 		onSuccess: (result) => {
 			toast.success(
@@ -157,6 +170,7 @@ export function TasksSheet({
 		refreshHistory,
 		excludeHistory,
 		clearHistory,
+		setSpecialist,
 	];
 	const busy = mutations.some((mutation) => mutation.isPending);
 
@@ -172,8 +186,10 @@ export function TasksSheet({
 			onSetMode: (slug, mode) => setMode.mutate({ workspaceId, slug, mode }),
 			onAnswer: (slug, answers) =>
 				answer.mutate({ workspaceId, slug, answers }),
-			onRunStep: (slug, kind, model) =>
-				runStep.mutate({ workspaceId, slug, kind, model }),
+			onRunStep: (slug, kind, model, customRoleId) =>
+				runStep.mutate({ workspaceId, slug, kind, model, customRoleId }),
+			onSetSpecialist: (slug, specialist) =>
+				setSpecialist.mutate({ workspaceId, slug, specialist }),
 			onMoveHere: (slug) => moveHere.mutate({ workspaceId, slug }),
 			onSetBudget: (slug, budgetUsd) =>
 				setBudget.mutate({ workspaceId, slug, budgetUsd }),
@@ -218,6 +234,7 @@ export function TasksSheet({
 			refreshHistory,
 			excludeHistory,
 			clearHistory,
+			setSpecialist,
 			utils,
 			launchInNewTab,
 		],
@@ -240,6 +257,7 @@ export function TasksSheet({
 					description={description}
 					preview={preview}
 					actions={actions}
+					specialists={specialists}
 				/>
 			</SheetContent>
 		</Sheet>

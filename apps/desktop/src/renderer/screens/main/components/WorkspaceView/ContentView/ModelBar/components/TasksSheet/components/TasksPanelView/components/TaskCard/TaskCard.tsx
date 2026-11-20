@@ -86,6 +86,24 @@ export function TaskCard({ task, actions }: TaskCardProps) {
 				</div>
 			</div>
 
+			<p className="text-xs text-muted-foreground" data-task-specialist>
+				{task.specialist
+					? `Specialist: ${task.specialist.name} (${task.specialist.specialty})`
+					: "No specialist: default workflow"}
+				{task.supportingSpecialists.length
+					? ` · also: ${task.supportingSpecialists.join(", ")}`
+					: ""}
+				{task.specialistReason ? ` · ${task.specialistReason}` : ""}
+			</p>
+			{task.nextRole && !finished && (
+				<p className="text-xs text-muted-foreground" data-task-next>
+					Next: {task.nextRole} on {task.nextModel}
+					{task.nextModelSource && task.nextModelSource !== "global"
+						? ` (${task.nextModelSource === "template" ? "from template" : task.nextModelSource === "task" ? "this task's override" : "specialist's setting"})`
+						: ""}
+				</p>
+			)}
+
 			{task.stateReason && (
 				<p className="break-words text-xs text-muted-foreground">
 					{task.stateReason}
@@ -243,6 +261,29 @@ export function TaskCard({ task, actions }: TaskCardProps) {
 							);
 						})}
 					</div>
+					{task.customRoles.length > 0 && (
+						<div className="flex flex-wrap gap-1.5">
+							{task.customRoles.map((role) => (
+								<Button
+									key={role.id}
+									size="sm"
+									variant="outline"
+									disabled={busy || task.manualBlockers.custom !== null}
+									title={task.manualBlockers.custom ?? undefined}
+									onClick={() =>
+										actions.onRunStep(
+											task.slug,
+											"custom",
+											model === BY_ROLE ? undefined : model,
+											role.id,
+										)
+									}
+								>
+									{role.name}
+								</Button>
+							))}
+						</div>
+					)}
 					<Select value={model} onValueChange={setModel}>
 						<SelectTrigger
 							className="h-8 w-[150px]"
