@@ -14,8 +14,8 @@ import { BinaryInstallDialog } from "renderer/components/BinaryInstallDialog/Bin
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useRuntimeAvailability } from "renderer/stores/model-bar/useRuntimeAvailability";
 import { useAgentSession } from "renderer/stores/tabs/useAgentSession";
+import { GitHubSync } from "./components/GitHubSync";
 import { HistorySheet } from "./components/HistorySheet";
-import { RemoteUpdate } from "./components/RemoteUpdate";
 import { SpecialistsSheet } from "./components/SpecialistsSheet";
 import { TasksSheet } from "./components/TasksSheet";
 import { MODEL_BAR_MODELS, type ModelDescriptor } from "./models";
@@ -133,7 +133,7 @@ export function ModelBar() {
 			</div>
 
 			<div className="ml-auto flex items-center">
-				{ready && <RemoteUpdate workspaceId={workspaceId} variant="bar" />}
+				{ready && <GitHubSync workspaceId={workspaceId} />}
 				<Tooltip>
 					<TooltipTrigger asChild>
 						<button

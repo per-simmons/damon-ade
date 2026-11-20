@@ -148,3 +148,166 @@ export function fastForward(worktree: string): UpdateResult {
 	const to = git(["rev-parse", "--short", "HEAD"]).stdout;
 	return { outcome: "updated", from, to, commits: status.behind };
 }
+
+export type PushResult =
+	| { outcome: "pushed"; commits: number; branch: string; upstream: string }
+	| { outcome: "up-to-date" }
+	| { outcome: "blocked"; reason: string };
+
+function remoteNames(git: Git): string[] {
+	return git(["remote"]).stdout.split(/\s+/).filter(Boolean);
+}
+
+/**
+ * Push the checked-out branch's own commits to its remote branch. Never
+ * forces: a branch that has diverged from its remote is left for the user.
+ * A branch without an upstream is pushed to origin under the same name and
+ * starts tracking it.
+ */
+export function pushToUpstream(worktree: string): PushResult {
+	const status = remoteStatus(worktree, { fetch: true });
+	if (status.fetchError) {
+		return {
+			outcome: "blocked",
+			reason: `Could not reach the remote: ${status.fetchError}`,
+		};
+	}
+	if (!status.branch) {
+		return { outcome: "blocked", reason: "The checkout is not on a branch" };
+	}
+	const git = gitIn(worktree);
+	if (!status.upstream) {
+		if (!remoteNames(git).includes("origin")) {
+			return {
+				outcome: "blocked",
+				reason: "This repository is not connected to GitHub yet",
+			};
+		}
+		const pushed = git(
+			["push", "--quiet", "-u", "origin", status.branch],
+			120_000,
+		);
+		if (!pushed.ok)
+			return { outcome: "blocked", reason: firstLine(pushed.stderr) };
+		const count = Number(git(["rev-list", "--count", "HEAD"]).stdout) || 0;
+		return {
+			outcome: "pushed",
+			commits: count,
+			branch: status.branch,
+			upstream: `origin/${status.branch}`,
+		};
+	}
+	if (status.ahead > 0 && status.behind > 0) {
+		return {
+			outcome: "blocked",
+			reason: `Branch ${status.branch} and ${status.upstream} have both changed (${status.ahead} local, ${status.behind} remote commit(s)). Merge or rebase it yourself; ADE never force-pushes.`,
+		};
+	}
+	if (status.ahead === 0) return { outcome: "up-to-date" };
+	const remote =
+		git(["config", `branch.${status.branch}.remote`]).stdout || "origin";
+	const merge =
+		git(["config", `branch.${status.branch}.merge`]).stdout.replace(
+			/^refs\/heads\//,
+			"",
+		) || status.branch;
+	const pushed = git(
+		["push", "--quiet", remote, `HEAD:refs/heads/${merge}`],
+		120_000,
+	);
+	if (!pushed.ok)
+		return { outcome: "blocked", reason: firstLine(pushed.stderr) };
+	return {
+		outcome: "pushed",
+		commits: status.ahead,
+		branch: status.branch,
+		upstream: status.upstream,
+	};
+}
+
+export interface SyncResult {
+	pull: UpdateResult;
+	push: PushResult;
+	/** Both sides now have the same commits on this branch. */
+	inSync: boolean;
+}
+
+/**
+ * Make the local branch and its GitHub branch the same: bring in remote
+ * commits (fast-forward only), then send local commits (no force). Anything
+ * that would need a merge, a rebase or discarding work is reported instead.
+ */
+export function syncWithRemote(worktree: string): SyncResult {
+	const before = remoteStatus(worktree, { fetch: true });
+	const pull: UpdateResult =
+		before.upstream && before.behind > 0
+			? fastForward(worktree)
+			: { outcome: "up-to-date" };
+	const push: PushResult =
+		pull.outcome === "blocked"
+			? { outcome: "up-to-date" }
+			: pushToUpstream(worktree);
+	const after = remoteStatus(worktree, { fetch: false });
+	return {
+		pull,
+		push,
+		inSync: !!after.upstream && after.ahead === 0 && after.behind === 0,
+	};
+}
+
+/**
+ * Connect a local repository to a GitHub (or any git) remote as origin. The
+ * remote must be empty or share history with this repository; unrelated
+ * histories are refused and nothing is left behind.
+ */
+export function connectRemote(
+	worktree: string,
+	url: string,
+): { connected: string; tracking: string | null; remoteEmpty: boolean } {
+	const git = gitIn(worktree);
+	if (!git(["rev-parse", "--is-inside-work-tree"]).ok) {
+		throw new Error("This folder is not a git repository");
+	}
+	const existing = git(["remote", "get-url", "origin"]);
+	if (existing.ok) {
+		throw new Error(`Already connected to ${existing.stdout}`);
+	}
+	if (!/^(https:\/\/|git@|ssh:\/\/)/.test(url.trim())) {
+		throw new Error("Use an https:// or git@ repository URL");
+	}
+	const added = git(["remote", "add", "origin", url.trim()]);
+	if (!added.ok) throw new Error(firstLine(added.stderr));
+	const undo = (reason: string): never => {
+		git(["remote", "remove", "origin"]);
+		throw new Error(reason);
+	};
+	const fetched = git(["fetch", "--quiet", "origin"], 120_000);
+	if (!fetched.ok) {
+		undo(`Could not reach ${url.trim()}: ${firstLine(fetched.stderr)}`);
+	}
+	const heads = git(["ls-remote", "--heads", "origin"]).stdout.trim();
+	const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]).stdout;
+	if (!heads)
+		return { connected: url.trim(), tracking: null, remoteEmpty: true };
+	const remoteBranches = heads
+		.split("\n")
+		.map((line) => line.split(/\s+/)[1]?.replace(/^refs\/heads\//, ""))
+		.filter((b): b is string => !!b);
+	const related = remoteBranches.some(
+		(b) => git(["merge-base", "HEAD", `origin/${b}`]).ok,
+	);
+	if (!related) {
+		undo(
+			"That repository has a different history from this one (no common commits). Choose the matching GitHub repository, or an empty one.",
+		);
+	}
+	if (branch !== "HEAD" && remoteBranches.includes(branch)) {
+		git(["branch", `--set-upstream-to=origin/${branch}`, branch]);
+		return {
+			connected: url.trim(),
+			tracking: `origin/${branch}`,
+			remoteEmpty: false,
+		};
+	}
+	return { connected: url.trim(), tracking: null, remoteEmpty: false };
+}
