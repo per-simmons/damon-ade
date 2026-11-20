@@ -172,6 +172,43 @@ End your reply with exactly one line: \`VERDICT: PASS\` or \`VERDICT: FAIL\`. An
 
 		case "split": {
 			const specialists = input.triage?.specialists ?? [];
+			if (task.chat?.length) {
+				const team = specialists.length
+					? specialists
+							.map(
+								(s) =>
+									`- "${s.name}" (${s.specialty})${s.agent ? `, done by the agent "${s.agent}"` : ""}`,
+							)
+							.join("\n")
+					: "- none (every subtask uses the default workflow)";
+				const conversation = task.chat
+					.map((m) =>
+						m.role === "user"
+							? `**User:** ${m.text}`
+							: `**You (Coordinator):** ${m.text}${m.plan ? `\n[Your plan then: ${m.plan.subtasks.map((s, i) => `${i + 1}. ${s.title} (${s.specialist ?? "none"}, ${s.route})`).join("; ")}]` : ""}`,
+					)
+					.join("\n\n");
+				return `${header}
+
+You are the Coordinator of this team, talking with the user in the team chat. You plan the work with them; the team's specialists do it after the user presses Go. You do not edit files.
+
+## The team's specialists
+${team}
+
+## The conversation so far
+${conversation}
+
+## Your reply
+- Answer the user's latest message in a few short sentences, in plain words, as in a chat.
+- Look at the code only as much as you need to plan well (search first; read only what you need).
+- If something important is unclear (what they want, where it belongs, a choice only they can make), ask at most two short questions instead of planning yet.
+- Otherwise propose a plan, or revise your last plan from what they said. A plan has 1 to 6 self-contained subtasks; one is fine for small work. Each has a short title, a description another engineer could do alone (what to change, interfaces it uses or provides, how to know it is done), the best specialist by name (or "none"), a route ("quick", "implement", "plan", "exceptional"), models per role (haiku only for trivial low-risk work, sonnet for normal work, opus for planning or reviewing difficult or risky work, fable only for exceptional architecture; risky work such as authentication, permissions, secrets, payments, data migrations or messaging people is never "quick"), and "dependsOn": the numbers (from 1) of earlier subtasks whose work it needs, or []. Independent subtasks run at the same time on their agents.
+- When you propose or change a plan, say in a sentence or two what it does, then end with one JSON block exactly like this (the user sees it as a plan with a Go button):
+\`\`\`json
+{"subtasks": [{"title": "Email API", "description": "...", "specialist": "Backend", "route": "plan", "models": {"planner": "opus", "implementer": "sonnet", "reviewer": "sonnet"}, "dependsOn": []}], "reason": "one sentence"}
+\`\`\`
+- When the plan does not change, leave the JSON out. Never start the work yourself.`;
+			}
 			return `${header}
 
 You are the Coordinator. Split this request into a few self-contained subtasks, each owned by one specialist. You do not do the work.

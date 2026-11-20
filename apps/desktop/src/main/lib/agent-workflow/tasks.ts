@@ -15,6 +15,7 @@ import {
 } from "shared/utils/task-routing";
 import type { ProjectWorkflow } from "./project-workflow";
 import type { TaskRoleOverrides } from "./specialists";
+import type { SplitPlan } from "./split";
 import type { TriageDecision } from "./triage";
 
 /**
@@ -154,6 +155,17 @@ export interface TaskRun {
 }
 
 /** Where the task runs, and the state of the tree when it was created. */
+/** One message in a team chat (a team request planned as a conversation). */
+export interface ChatMessage {
+	role: "user" | "coordinator";
+	text: string;
+	at: string;
+	/** A plan the Coordinator proposed with this message (Go starts it). */
+	plan?: SplitPlan;
+	/** The Coordinator run that wrote it. */
+	runId?: string;
+}
+
 /** An agent of the team: its own worktree of the team's repository. */
 export interface TeamAgent {
 	workspaceId: string;
@@ -236,6 +248,11 @@ export interface TaskRecord {
 	splitReason?: string;
 	/** For a subtask: the team request it belongs to. */
 	parentSlug?: string;
+	/**
+	 * A team chat: the request is planned in a conversation with the
+	 * Coordinator, and its subtasks start only when the user says Go.
+	 */
+	chat?: ChatMessage[];
 	/** For a team request: the team's agents when it was sent. */
 	teamAgents?: TeamAgent[];
 	/** For a subtask: the subtasks whose work it builds on. */

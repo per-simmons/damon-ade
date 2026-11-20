@@ -18,6 +18,7 @@ import { GitHubSync } from "./components/GitHubSync";
 import { HistorySheet } from "./components/HistorySheet";
 import { SpecialistsSheet } from "./components/SpecialistsSheet";
 import { TasksSheet } from "./components/TasksSheet";
+import { TeamChatSheet } from "./components/TeamChatSheet";
 import { MODEL_BAR_MODELS, type ModelDescriptor } from "./models";
 
 /**
@@ -38,6 +39,7 @@ export function ModelBar() {
 
 	const [installBinary, setInstallBinary] = useState<AgentBinary | null>(null);
 	const [tasksOpen, setTasksOpen] = useState(false);
+	const [chatOpen, setChatOpen] = useState(false);
 	const [historyOpen, setHistoryOpen] = useState(false);
 	const [specialistsOpen, setSpecialistsOpen] = useState(false);
 
@@ -182,12 +184,34 @@ export function ModelBar() {
 						verified finish
 					</TooltipContent>
 				</Tooltip>
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<button
+							type="button"
+							disabled={!ready}
+							onClick={() => setChatOpen(true)}
+							className="flex h-7 items-center rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+						>
+							Team chat
+						</button>
+					</TooltipTrigger>
+					<TooltipContent side="bottom" showArrow={false}>
+						Talk with the Coordinator, agree a plan for your specialists, then
+						press Go
+					</TooltipContent>
+				</Tooltip>
 			</div>
 
 			<TasksSheet
 				workspaceId={workspaceId}
 				open={tasksOpen}
 				onOpenChange={setTasksOpen}
+			/>
+
+			<TeamChatSheet
+				workspaceId={workspaceId}
+				open={chatOpen}
+				onOpenChange={setChatOpen}
 			/>
 
 			<SpecialistsSheet

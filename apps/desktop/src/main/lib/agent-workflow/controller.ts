@@ -23,7 +23,7 @@ import {
 	resolveSpecialist,
 	type Specialist,
 } from "./specialists";
-import { parseSplit, SPLIT_ROUTING } from "./split";
+import { parseSplit, SPLIT_ROUTING, type SplitPlan } from "./split";
 import { parseVerdict, stagePrompt } from "./stage-prompts";
 import type {
 	PermissionMode,
@@ -345,6 +345,22 @@ export function decideNext(
 	// (the controller runs them, see syncRequest).
 	if (task.isRequest) {
 		if (task.subtaskSlugs?.length) return { type: "none" };
+		if (task.chat) {
+			const latest = task.chat[task.chat.length - 1];
+			if (latest?.role === "user") {
+				return {
+					type: "run",
+					kind: "split",
+					reason: "reply in the team chat",
+				};
+			}
+			return {
+				type: "needs-input",
+				reason: latest?.plan
+					? "Your turn: press Go to start the plan, or reply to change it."
+					: "Your turn: reply to the Coordinator.",
+			};
+		}
 		const splitRun = lastIndex(
 			t,
 			(run) => run.kind === "split" && run.status === "succeeded",
@@ -1789,7 +1805,12 @@ export class TaskController {
 				this.applyTriageResult(project, task, run);
 			}
 			if (run.kind === "split" && run.status === "succeeded") {
-				this.createSubtasks(project, task, run);
+				if (task.chat) {
+					this.addCoordinatorReply(task, run);
+				} else {
+					const plan = parseSplit(run.summary);
+					if (plan) this.createSubtasks(project, task, plan);
+				}
 			}
 
 			if (task.mode === "manual" || !continueAfter) {
@@ -1823,10 +1844,8 @@ export class TaskController {
 	private createSubtasks(
 		project: ProjectWorkflow,
 		request: TaskRecord,
-		run: TaskRun,
+		plan: SplitPlan,
 	): void {
-		const plan = parseSplit(run.summary);
-		if (!plan) return;
 		const specialists = listSpecialists(project);
 		const slugs: string[] = [];
 		for (const sub of plan.subtasks) {
@@ -1883,6 +1902,102 @@ export class TaskController {
 		}
 		request.subtaskSlugs = slugs;
 		request.splitReason = plan.reason;
+	}
+
+	/** The Coordinator's reply in a team chat: its words, and any plan. */
+	private addCoordinatorReply(request: TaskRecord, run: TaskRun): void {
+		const reply = run.summary ?? "";
+		const plan = parseSplit(reply);
+		const words = reply.replace(/```(?:json)?\s*[\s\S]*?```/g, "").trim();
+		request.chat = [
+			...(request.chat ?? []),
+			{
+				role: "coordinator",
+				text:
+					words ||
+					(plan ? "Here is the plan." : "I have no answer to that yet."),
+				at: this.deps.now().toISOString(),
+				plan,
+				runId: run.id,
+			},
+		];
+	}
+
+	/**
+	 * A message from the user in a team chat. The Coordinator replies (a
+	 * short read-only run). "Go" (or "start") starts the latest plan.
+	 */
+	chatSay(
+		project: ProjectWorkflow,
+		slug: string,
+		text: string,
+	): Promise<TaskRecord> {
+		const message = text.trim();
+		if (
+			/^(go|start|start it|do it|yes,? go|go ahead|ship it)[.!]*$/i.test(
+				message,
+			)
+		) {
+			return this.approvePlan(project, slug);
+		}
+		return withTaskLock(project, slug, () => {
+			const task = this.load(project, slug);
+			if (!task.isRequest || !task.chat) {
+				throw new Error("This task is not a team chat");
+			}
+			if (task.subtaskSlugs?.length) {
+				throw new Error(
+					"This plan has started. Start a new conversation for more work.",
+				);
+			}
+			if (task.state === "cancelled")
+				throw new Error("This chat was cancelled");
+			if (activeRun(task)) {
+				throw new Error("The Coordinator is still replying");
+			}
+			if (!message) throw new Error("Write a message first");
+			task.chat = [
+				...task.chat,
+				{ role: "user", text: message, at: this.deps.now().toISOString() },
+			];
+			// A failed reply is behind us once the user writes again.
+			const last = task.runs[task.runs.length - 1];
+			if (last && last.status !== "succeeded") task.acknowledgedRunId = last.id;
+			task.pauseRequested = false;
+			task.state = "idle";
+			task.stateReason = undefined;
+			return this.advance(project, task);
+		});
+	}
+
+	/** Go: turn the chat's latest plan into subtasks and start them. */
+	approvePlan(project: ProjectWorkflow, slug: string): Promise<TaskRecord> {
+		return withTaskLock(project, slug, () => {
+			const task = this.load(project, slug);
+			if (!task.isRequest || !task.chat) {
+				throw new Error("This task is not a team chat");
+			}
+			if (task.subtaskSlugs?.length)
+				throw new Error("This plan has already started");
+			if (activeRun(task)) {
+				throw new Error("Wait for the Coordinator's reply first");
+			}
+			const plan = [...task.chat].reverse().find((m) => m.plan)?.plan;
+			if (!plan) {
+				throw new Error(
+					"There is no plan yet. Ask the Coordinator for one first.",
+				);
+			}
+			this.createSubtasks(project, task, plan);
+			task.chat = [
+				...task.chat,
+				{ role: "user", text: "Go", at: this.deps.now().toISOString() },
+			];
+			task.state = "running";
+			task.stateReason = "Starting the plan.";
+			saveTask(project, task);
+			return this.syncRequest(project, task);
+		});
 	}
 
 	/** Look at a team request's subtasks and move it forward. */

@@ -436,6 +436,8 @@ function describeTask(
 		triage: task.triage ?? null,
 		/** A team request: the Coordinator splits it into subtasks. */
 		isRequest: task.isRequest ?? false,
+		/** A team chat: the conversation with the Coordinator, with its plans. */
+		chat: task.chat ?? null,
 		subtaskSlugs: task.subtaskSlugs ?? [],
 		splitReason: task.splitReason ?? null,
 		parentSlug: task.parentSlug ?? null,
@@ -953,6 +955,89 @@ export const createWorkflowRouter = (
 					return { state: task.state, stateReason: task.stateReason ?? null };
 				}),
 			),
+
+		/**
+		 * Team chat: start a conversation with the Coordinator. It replies
+		 * (a short read-only run), the plan is agreed in the conversation, and
+		 * nothing is built until the user says Go.
+		 */
+		startChat: publicProcedure
+			.input(
+				z.object({
+					workspaceId: z.string(),
+					message: z.string().trim().min(1).max(20_000),
+				}),
+			)
+			.mutation(({ input }) =>
+				guarded(async () => {
+					const ctx = deps.resolveWorkspace(input.workspaceId);
+					const execution = loadWorkflowSettings(deps.homeDir()).execution;
+					const created = createTask(ctx.project, {
+						description: input.message,
+						mode: "auto",
+						identity: deps.captureIdentity(input.workspaceId, ctx.worktreePath),
+						limits: {
+							budgetUsd: execution.taskBudgetUsd,
+							maxCorrections: execution.maxCorrections,
+							maxReviewRounds: execution.maxReviewRounds,
+							maxEscalations: execution.maxEscalations,
+						},
+					});
+					const chat: TaskRecord = {
+						...created,
+						isRequest: true,
+						chat: [
+							{
+								role: "user",
+								text: input.message,
+								at: new Date().toISOString(),
+							},
+						],
+						teamAgents: deps.listAgents?.(input.workspaceId) ?? [],
+						routeBy: "ai",
+						routeReasons: ["a team chat: planned with the Coordinator"],
+						specialistReason:
+							"the Coordinator assigns a specialist to each subtask",
+					};
+					saveTask(ctx.project, chat);
+					const started = await deps.controller().start(ctx.project, chat.slug);
+					return {
+						slug: started.slug,
+						state: started.state,
+						stateReason: started.stateReason ?? null,
+					};
+				}),
+			),
+
+		/** Team chat: the user's next message ("go" starts the plan). */
+		chatSay: publicProcedure
+			.input(
+				taskInput.extend({ message: z.string().trim().min(1).max(20_000) }),
+			)
+			.mutation(({ input }) =>
+				guarded(async () => {
+					const { ctx } = taskFor(input.workspaceId, input.slug, {
+						allowOtherWorktree: true,
+					});
+					const task = await deps
+						.controller()
+						.chatSay(ctx.project, input.slug, input.message);
+					return { state: task.state, stateReason: task.stateReason ?? null };
+				}),
+			),
+
+		/** Team chat: Go, start the latest plan. */
+		chatGo: publicProcedure.input(taskInput).mutation(({ input }) =>
+			guarded(async () => {
+				const { ctx } = taskFor(input.workspaceId, input.slug, {
+					allowOtherWorktree: true,
+				});
+				const task = await deps
+					.controller()
+					.approvePlan(ctx.project, input.slug);
+				return { state: task.state, stateReason: task.stateReason ?? null };
+			}),
+		),
 
 		setBudget: publicProcedure
 			.input(taskInput.extend({ budgetUsd: z.number().positive().max(10_000) }))

@@ -1033,6 +1033,131 @@ describe.if(bash !== null && git !== null)("specialists and roles", () => {
 		await tasks.cancel({ workspaceId: "ws-lead", slug: created.slug });
 	}, 120_000);
 
+	it("team chat: the Coordinator asks, proposes a plan, and nothing is built until Go", async () => {
+		fake.setSteps([
+			{
+				name: "ask",
+				text: "Which email service does the app use, and where should the button go?",
+				cost: 0.01,
+			},
+			{
+				name: "plan",
+				text: 'An API first, then the button on the class screen.\n```json\n{"subtasks": [{"title": "Email API", "description": "Add sendTeacherEmail using Resend.", "specialist": "Backend", "route": "implement", "models": {"implementer": "sonnet", "reviewer": "sonnet"}, "dependsOn": []}, {"title": "Email button", "description": "A button on the class screen.", "specialist": "Frontend", "route": "quick", "dependsOn": [1]}], "reason": "the button needs the API"}\n```',
+				cost: 0.01,
+			},
+			{
+				name: "api",
+				write: {
+					"src/chat-mail.js": "export const send = 1;\n",
+					"{task}/progress.md": "Status: implemented\n",
+				},
+				cost: 0.02,
+			},
+			{ name: "api-review", text: "VERDICT: PASS", cost: 0.01 },
+			{
+				name: "button",
+				write: { "src/chat-button.js": "export const b = 1;\n" },
+				cost: 0.01,
+			},
+			{ name: "button-review", text: "VERDICT: PASS", cost: 0.01 },
+		]);
+		const before = fake.calls().length;
+		const started = await tasks.startChat({
+			workspaceId: "ws-team",
+			message: "Let students email their teacher from the app",
+		});
+		await controller.idle();
+		const view = async () =>
+			(await tasks.getProjectTasks({ workspaceId: "ws-team" })).tasks.find(
+				(t) => t.slug === started.slug,
+			);
+		let chat = await view();
+		// A question, no plan: the chat waits for the user, nothing is built.
+		expect(chat?.chat?.map((m) => [m.role, m.text, !!m.plan])).toEqual([
+			["user", "Let students email their teacher from the app", false],
+			[
+				"coordinator",
+				"Which email service does the app use, and where should the button go?",
+				false,
+			],
+		]);
+		expect(chat?.state).toBe("needs-input");
+		expect(chat?.stateReason).toContain("reply to the Coordinator");
+		await expect(
+			tasks.chatGo({ workspaceId: "ws-team", slug: started.slug }),
+		).rejects.toThrow("no plan yet");
+
+		await tasks.chatSay({
+			workspaceId: "ws-team",
+			slug: started.slug,
+			message: "Resend. Put it on the class screen.",
+		});
+		await controller.idle();
+		chat = await view();
+		const reply = chat?.chat?.[3];
+		expect(reply?.text).toBe(
+			"An API first, then the button on the class screen.",
+		);
+		expect(
+			reply?.plan?.subtasks.map((t) => [t.title, t.specialist, t.dependsOn]),
+		).toEqual([
+			["Email API", "Backend", []],
+			["Email button", "Frontend", [0]],
+		]);
+		expect(chat?.subtaskSlugs).toEqual([]);
+		expect(chat?.stateReason).toContain("press Go");
+
+		const calls = fake.calls().slice(before);
+		// Each reply is a short read-only Coordinator run that sees the conversation.
+		expect(calls.map((c) => c.step)).toEqual(["ask", "plan"]);
+		expect(flag(calls[1].args, "--effort")).toBe("medium");
+		expect(calls[1].args).toContain("--disallowedTools");
+		expect(calls[1].stdin).toContain("talking with the user in the team chat");
+		expect(calls[1].stdin).toContain(
+			"**User:** Let students email their teacher from the app",
+		);
+		expect(calls[1].stdin).toContain(
+			"**You (Coordinator):** Which email service",
+		);
+		expect(calls[1].stdin).toContain(
+			"**User:** Resend. Put it on the class screen.",
+		);
+
+		// "go" starts the agreed plan; then the conversation is closed.
+		await tasks.chatSay({
+			workspaceId: "ws-team",
+			slug: started.slug,
+			message: "go",
+		});
+		await controller.idle();
+		chat = await view();
+		expect(chat?.chat?.at(-1)).toMatchObject({ role: "user", text: "Go" });
+		expect(chat?.state).toBe("done");
+		const all = (await tasks.getProjectTasks({ workspaceId: "ws-team" })).tasks;
+		expect(
+			(chat?.subtaskSlugs ?? []).map((slug) => {
+				const t = all.find((x) => x.slug === slug);
+				return [t?.title, t?.specialist?.name, t?.state];
+			}),
+		).toEqual([
+			["Email API", "Backend", "done"],
+			["Email button", "Frontend", "done"],
+		]);
+		expect(
+			fake
+				.calls()
+				.slice(before)
+				.map((c) => c.step),
+		).toEqual(["ask", "plan", "api", "api-review", "button", "button-review"]);
+		await expect(
+			tasks.chatSay({
+				workspaceId: "ws-team",
+				slug: started.slug,
+				message: "one more thing",
+			}),
+		).rejects.toThrow("This plan has started");
+	}, 120_000);
+
 	it("an older specialist keeps a template role it switched off when it moves to one list", async () => {
 		const project = (
 			await import("main/lib/agent-workflow/project-workflow")
