@@ -15,6 +15,7 @@ import {
 } from "shared/utils/task-routing";
 import type { ProjectWorkflow } from "./project-workflow";
 import type { TaskRoleOverrides } from "./specialists";
+import type { TriageDecision } from "./triage";
 
 /**
  * Tasks of one project, stored in its workflow folder (project-workflow.ts).
@@ -35,6 +36,8 @@ export const MODEL_STAGES = [
 	"escalate",
 	/** A specialist's custom role (see specialists.ts). */
 	"custom",
+	/** The AI pathway choice before an Auto task starts (see triage.ts). */
+	"triage",
 ] as const;
 export type ModelStage = (typeof MODEL_STAGES)[number];
 
@@ -212,6 +215,10 @@ export interface TaskRecord {
 	specialistReason?: string;
 	/** Role settings for this task only (they override the specialist's). */
 	roleOverrides?: TaskRoleOverrides;
+	/** "ai": a triage run chooses the pathway before the work starts. */
+	routeBy?: "ai" | "rules" | "user";
+	/** The AI pathway choice, once made (or why ADE's rules were used). */
+	triage?: TriageDecision;
 }
 
 const MAX_DESCRIPTION_LENGTH = 20_000;

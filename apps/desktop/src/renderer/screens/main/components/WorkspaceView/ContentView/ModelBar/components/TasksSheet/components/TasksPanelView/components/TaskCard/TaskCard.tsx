@@ -86,6 +86,21 @@ export function TaskCard({ task, actions }: TaskCardProps) {
 				</div>
 			</div>
 
+			{task.routeBy === "ai" && (
+				<p className="text-xs text-muted-foreground" data-task-pathway>
+					{task.triage
+						? task.triage.applied
+							? `Pathway chosen by AI: ${ROUTE_LABELS[task.triage.route as Route]}${
+									Object.keys(task.triage.models).length
+										? ` · ${Object.entries(task.triage.models)
+												.map(([role, model]) => `${role} ${model}`)
+												.join(", ")}`
+										: ""
+								} · ${task.triage.reason}`
+							: task.triage.reason
+						: "Pathway: chosen by AI when the task starts"}
+				</p>
+			)}
 			<p className="text-xs text-muted-foreground" data-task-specialist>
 				{task.specialist
 					? `Specialist: ${task.specialist.name} (${task.specialist.specialty})`

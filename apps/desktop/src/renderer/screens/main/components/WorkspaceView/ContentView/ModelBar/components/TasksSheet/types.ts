@@ -20,6 +20,8 @@ export interface TaskActions {
 		useHistory: boolean;
 		/** "auto", "none", or a specialist id. */
 		specialist: string;
+		/** Let a short AI run choose the pathway and models (Auto only). */
+		aiRouting: boolean;
 	}) => void;
 	onStart: (slug: string) => void;
 	onResume: (slug: string) => void;

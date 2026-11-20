@@ -16,6 +16,7 @@ export const RUN_LABELS: Record<RunKind, string> = {
 	review: "Review",
 	escalate: "Escalate",
 	custom: "Specialist role",
+	triage: "Choose pathway",
 	checks: "Run checks",
 };
 
@@ -41,3 +42,5 @@ export const STATE_LABELS: Record<string, string> = {
 export const MODEL_CHOICES = ["fable", "opus", "sonnet", "haiku"] as const;
 export const BY_ROLE = "by-role";
 export const AUTOMATIC = "automatic";
+/** Route value: a short AI run chooses the pathway when the task starts. */
+export const BY_AI = "ai";

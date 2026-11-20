@@ -10,7 +10,7 @@ import {
 import { Switch } from "@superset/ui/switch";
 import { Textarea } from "@superset/ui/textarea";
 import { useState } from "react";
-import { AUTOMATIC, ROUTE_LABELS } from "../../constants";
+import { AUTOMATIC, BY_AI, ROUTE_LABELS } from "../../constants";
 import type {
 	ChecksView,
 	Mode,
@@ -53,7 +53,9 @@ export function TasksPanelView({
 	specialists = [],
 }: TasksPanelViewProps) {
 	const [specialist, setSpecialist] = useState("auto");
-	const [route, setRoute] = useState<Route | typeof AUTOMATIC>(AUTOMATIC);
+	const [route, setRoute] = useState<Route | typeof AUTOMATIC | typeof BY_AI>(
+		BY_AI,
+	);
 	const [mode, setMode] = useState<Mode>("auto");
 	const [useHistory, setUseHistory] = useState(true);
 	const historyAvailable = data?.historyAvailable ?? 0;
@@ -69,26 +71,36 @@ export function TasksPanelView({
 					value={description}
 					onChange={(event) => actions.onDescriptionChange(event.target.value)}
 				/>
-				{preview && route === AUTOMATIC && (
-					<p className="text-xs text-muted-foreground">
-						Route: <strong>{ROUTE_LABELS[preview.route]}</strong>, first step on{" "}
-						{preview.model}. {preview.reasons.join("; ")}
+				{route === BY_AI && mode === "auto" && (
+					<p className="text-xs text-muted-foreground" data-route-ai>
+						Route: chosen by AI. When the task starts, a short read-only Sonnet
+						run (low effort, a few cents) looks at the request and the code and
+						picks the pathway and the model for each role; then ADE runs it.
+						Fable joins only if the work gets stuck.
 					</p>
 				)}
+				{preview &&
+					(route === AUTOMATIC || (route === BY_AI && mode === "manual")) && (
+						<p className="text-xs text-muted-foreground">
+							Route: <strong>{ROUTE_LABELS[preview.route]}</strong>, first step
+							on {preview.model}. {preview.reasons.join("; ")}
+						</p>
+					)}
 				<div className="flex flex-wrap items-end gap-3">
 					<div className="space-y-1">
 						<Label className="text-xs">Route</Label>
 						<Select
 							value={route}
 							onValueChange={(value) =>
-								setRoute(value as Route | typeof AUTOMATIC)
+								setRoute(value as Route | typeof AUTOMATIC | typeof BY_AI)
 							}
 						>
 							<SelectTrigger className="w-[190px]" aria-label="Route">
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value={AUTOMATIC}>Chosen by ADE</SelectItem>
+								<SelectItem value={BY_AI}>Chosen by AI</SelectItem>
+								<SelectItem value={AUTOMATIC}>Chosen by ADE's rules</SelectItem>
 								{(Object.keys(ROUTE_LABELS) as Route[]).map((r) => (
 									<SelectItem key={r} value={r}>
 										{ROUTE_LABELS[r]}
@@ -143,7 +155,9 @@ export function TasksPanelView({
 						onClick={() =>
 							actions.onCreate({
 								description,
-								route: route === AUTOMATIC ? undefined : route,
+								route:
+									route === AUTOMATIC || route === BY_AI ? undefined : route,
+								aiRouting: route === BY_AI,
 								mode,
 								useHistory: historyAvailable > 0 && useHistory,
 								specialist,

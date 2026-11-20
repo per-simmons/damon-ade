@@ -556,6 +556,120 @@ describe.if(bash !== null && git !== null)("specialists and roles", () => {
 		]);
 	}, 60_000);
 
+	it("Chosen by AI: a short triage run picks the pathway and models, then ADE runs it", async () => {
+		const repo = makeRepo("mail");
+		workspaces.set("ws-mail", { root: repo, worktree: repo });
+		await tasks.setChecks({ workspaceId: "ws-mail", commands: [] });
+		fake.setSteps([
+			{
+				name: "triage",
+				text: 'Looked at src/api.js.\n```json\n{"route": "plan", "models": {"planner": "opus", "implementer": "sonnet", "reviewer": "opus"}, "specialist": "none", "reason": "sends email through a third-party service and needs credentials"}\n```',
+				cost: 0.01,
+			},
+			{
+				name: "plan",
+				write: {
+					"{task}/plan.md":
+						"# Plan\n\n## Steps\n1. Add a mailer\n\n## Questions for the user\nNone\n",
+				},
+				cost: 0.1,
+			},
+			{
+				name: "build",
+				write: {
+					"src/api.js": "export const mail = true;\n",
+					"{task}/progress.md": "Status: implemented\n",
+				},
+				cost: 0.05,
+			},
+			{ name: "review", text: "VERDICT: PASS", cost: 0.03 },
+		]);
+		const before = fake.calls().length;
+		const created = await tasks.createTask({
+			workspaceId: "ws-mail",
+			description: "Add the ability to email my teacher in my app",
+			aiRouting: true,
+		});
+		await controller.idle();
+		const task = (
+			await tasks.getProjectTasks({ workspaceId: "ws-mail" })
+		).tasks.find((t) => t.slug === created.slug);
+		expect(task?.state).toBe("done");
+		expect(task?.route).toBe("plan");
+		expect(task?.triage).toMatchObject({
+			applied: true,
+			route: "plan",
+			models: { planner: "opus", implementer: "sonnet", reviewer: "opus" },
+		});
+		expect(task?.routeReasons[0]).toContain("chosen by AI: sends email");
+		expect(task?.runs.map((r) => [r.kind, r.model])).toEqual([
+			["triage", "claude-sonnet-5-5"],
+			["plan", "claude-opus-5-5"],
+			["build", "claude-sonnet-5-5"],
+			["review", "claude-opus-5-5"],
+		]);
+		const calls = fake.calls().slice(before);
+		// The triage run is short, cheap and read-only.
+		expect(flag(calls[0].args, "--effort")).toBe("low");
+		expect(flag(calls[0].args, "--max-turns")).toBe("8");
+		expect(calls[0].args).toContain("--disallowedTools");
+		expect(calls[0].stdin).toContain("You choose the most economical pathway");
+	}, 60_000);
+
+	it("Chosen by AI falls back to ADE's rules when the answer cannot be read, and keeps a model the user set", async () => {
+		fake.setSteps([
+			{ name: "triage", text: "I think this is easy.", cost: 0.01 },
+			{ name: "quick", write: { "README.md": "# Fixed\n" }, cost: 0.01 },
+			{ name: "review", text: "VERDICT: PASS", cost: 0.01 },
+		]);
+		const before = fake.calls().length;
+		const created = await tasks.createTask({
+			workspaceId: "ws-mail",
+			description: "Fix typo in README",
+			aiRouting: true,
+			roleOverrides: { quick: { model: "sonnet" } },
+		});
+		await controller.idle();
+		const task = (
+			await tasks.getProjectTasks({ workspaceId: "ws-mail" })
+		).tasks.find((t) => t.slug === created.slug);
+		expect(task?.state).toBe("done");
+		expect(task?.triage?.applied).toBe(false);
+		expect(task?.triage?.reason).toContain("ADE's rules chose the route");
+		expect(task?.runs.map((r) => r.kind)).toEqual([
+			"triage",
+			"quick",
+			"review",
+		]);
+		expect(flag(fake.calls()[before + 1].args, "--model")).toBe(
+			"claude-sonnet-5-5",
+		);
+
+		// The AI's model choice never replaces one the user set for the task.
+		const { applyTriage, parseTriage } = await import(
+			"main/lib/agent-workflow/triage"
+		);
+		const decision = parseTriage(
+			'```json\n{"route":"implement","models":{"implementer":"opus","reviewer":"haiku"},"reason":"x"}\n```',
+		);
+		expect(decision?.models).toEqual({
+			implementer: "opus",
+			reviewer: "haiku",
+		});
+		const applied = applyTriage(
+			{
+				route: "quick",
+				routeReasons: [],
+				roleOverrides: { implementer: { model: "sonnet" } },
+			} as never,
+			decision as NonNullable<typeof decision>,
+			undefined,
+		);
+		expect(applied.roleOverrides?.implementer?.model).toBe("sonnet");
+		expect(applied.roleOverrides?.reviewer?.model).toBe("haiku");
+		expect(parseTriage('{"route":"teleport"}')).toBeUndefined();
+	}, 60_000);
+
 	it("an older specialist keeps a template role it switched off when it moves to one list", async () => {
 		const project = (
 			await import("main/lib/agent-workflow/project-workflow")

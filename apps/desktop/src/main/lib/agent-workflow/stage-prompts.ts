@@ -33,6 +33,11 @@ export interface StagePromptInput {
 	changes?: TaskChanges;
 	/** For escalations: the report to resolve. */
 	escalationReport?: string;
+	/** For the pathway choice: the team's specialists and the budget left. */
+	triage?: {
+		specialists: Array<{ name: string; specialty: string }>;
+		remainingUsd: number;
+	};
 	/** For a custom role: what it is and what it must return. */
 	customRole?: {
 		name: string;
@@ -163,6 +168,30 @@ ${changed}${preexisting}
 Use \`git diff\` on those files. ${input.mayRunChecks && input.checks.length ? "You may run the project's checks." : "ADE has already run the project's checks."}
 
 End your reply with exactly one line: \`VERDICT: PASS\` or \`VERDICT: FAIL\`. Any FAIL criterion means FAIL.`;
+		}
+
+		case "triage": {
+			const specialists = input.triage?.specialists ?? [];
+			return `${header}
+
+You choose the most economical pathway that will reliably get this task done. You do not do the task.
+
+## The task
+${task.description}
+
+## How to decide
+Look at the request and, briefly, at the code it touches (search first; read only what you need; at most a few files). Then choose:
+- route: "quick" (a small, fully specified, low-risk change: one model, no plan), "implement" (a focused change that needs no separate plan), "plan" (a feature or change with design decisions, several parts, external services, credentials or data changes: a planner writes a plan first, then it is built, checked and reviewed), or "exceptional" (a hard architecture problem: Fable plans).
+- models: the model for each role this task will use. Costs per million output tokens, roughly: haiku $5, sonnet $15, opus $20, fable $40. Use haiku only for trivial low-risk work; sonnet for normal implementation and review; opus for planning or reviewing difficult or high-risk work (security, data, money, concurrency); fable only for exceptional architecture. ADE escalates to the architect by itself if implementation gets stuck, so you do not need fable for that.
+- specialist: ${specialists.length ? `one of ${specialists.map((s) => `"${s.name}" (${s.specialty})`).join(", ")}, or "none"` : `"none" (this team has no specialists)`}.
+
+Risk matters more than size: authentication, permissions, secrets, payments, data migrations and anything that sends messages or emails to people are never "quick". About $${(input.triage?.remainingUsd ?? 0).toFixed(2)} of the task's budget is left.
+
+## Return
+Do not edit any file. End your reply with one JSON block exactly like this:
+\`\`\`json
+{"route": "plan", "models": {"planner": "opus", "implementer": "sonnet", "reviewer": "sonnet"}, "specialist": "none", "reason": "one sentence"}
+\`\`\``;
 		}
 
 		case "custom": {

@@ -45,6 +45,7 @@ import {
 	type TaskRun,
 	withTaskLock,
 } from "./tasks";
+import { applyTriage, parseTriage, TRIAGE_ROUTING } from "./triage";
 import type { RoleName, WorkflowSettings } from "./workflow-settings";
 
 /**
@@ -65,7 +66,10 @@ import type { RoleName, WorkflowSettings } from "./workflow-settings";
 
 const IMPLEMENTATION_KINDS: RunKind[] = ["quick", "implement", "build", "fix"];
 
-export const STAGE_ROLE: Record<Exclude<ModelStage, "custom">, RoleName> = {
+export const STAGE_ROLE: Record<
+	Exclude<ModelStage, "custom" | "triage">,
+	RoleName
+> = {
 	quick: "quick",
 	implement: "implementer",
 	plan: "planner",
@@ -331,6 +335,15 @@ export function decideNext(
 					reason: `The ${kind} run failed: ${(last.error ?? "unknown error").slice(0, 300)}`,
 				};
 		}
+	}
+
+	// "Chosen by AI": one short triage run picks the pathway first.
+	if (task.routeBy === "ai" && !task.triage) {
+		return {
+			type: "run",
+			kind: "triage",
+			reason: "choose the pathway and models",
+		};
 	}
 
 	// Routing for quick tasks that turned out not to be small: the quick run
@@ -685,6 +698,26 @@ export function stageRouting(
 	kind: ModelStage,
 	customRoleId?: string,
 ) {
+	if (kind === "triage") {
+		const resolvedRole = resolveRole(
+			"reviewer",
+			settings,
+			undefined,
+			undefined,
+			undefined,
+		);
+		return {
+			customRole: undefined,
+			resolvedRole: { ...resolvedRole, label: "Pathway", instructions: [] },
+			routing: {
+				role: "Pathway",
+				model: TRIAGE_ROUTING.model,
+				effort: TRIAGE_ROUTING.effort,
+				maxTurns: TRIAGE_ROUTING.maxTurns,
+				modelSource: "global" as const,
+			},
+		};
+	}
 	const customRole =
 		kind === "custom"
 			? specialists.primary?.customRoles.find((r) => r.id === customRoleId)
@@ -701,7 +734,7 @@ export function stageRouting(
 			: "implementer"
 		: kind === "plan" && task.route === "exceptional"
 			? "architect"
-			: STAGE_ROLE[kind as Exclude<ModelStage, "custom">];
+			: STAGE_ROLE[kind as Exclude<ModelStage, "custom" | "triage">];
 	let resolvedRole =
 		specialists.primary?.roles[role] ??
 		resolveRole(role, settings, undefined, undefined, task.roleOverrides);
@@ -1411,6 +1444,7 @@ export class TaskController {
 		);
 		const readOnly =
 			kind === "review" ||
+			kind === "triage" ||
 			(kind === "custom" && customRole?.access === "read-only");
 		const configured =
 			options.modelOverride?.trim() ||
@@ -1456,6 +1490,19 @@ export class TaskController {
 						? taskChanges(task.identity)
 						: undefined,
 				customRole,
+				triage:
+					kind === "triage"
+						? {
+								specialists: listSpecialists(project).map((s) => ({
+									name: s.name,
+									specialty: s.specialty,
+								})),
+								remainingUsd: Math.max(
+									task.limits.budgetUsd - taskSpend(task).worstCaseUsd,
+									0,
+								),
+							}
+						: undefined,
 				escalationReport:
 					kind === "escalate" && files.openEscalations[0]
 						? `${portablePath(project.tasksDir)}/${task.slug}/escalations/${files.openEscalations[0]}`
@@ -1466,13 +1513,14 @@ export class TaskController {
 				: "") +
 			reconcileNote(task, kind) +
 			rerouteNote(task, kind) +
-			specialtyNote(
-				specialists,
-				task,
-				kind,
-				customRole ? [] : resolvedRole.instructions,
-			) +
-			historyNote(project, task, kind);
+			(kind === "triage"
+				? ""
+				: specialtyNote(
+						specialists,
+						task,
+						kind,
+						customRole ? [] : resolvedRole.instructions,
+					) + historyNote(project, task, kind));
 
 		const spend = taskSpend(task);
 		// Uncertain costs count at their cap, so the remainder is never overstated.
@@ -1664,6 +1712,10 @@ export class TaskController {
 					run.verdict = parseVerdict(result.text);
 			}
 
+			if (run.kind === "triage") {
+				this.applyTriageResult(project, task, run);
+			}
+
 			if (task.mode === "manual" || !continueAfter) {
 				task.state = run.status === "succeeded" ? "idle" : "blocked";
 				task.stateReason =
@@ -1683,6 +1735,47 @@ export class TaskController {
 			}
 			return this.advance(project, task);
 		});
+	}
+
+	/**
+	 * Apply the AI's pathway choice to the task, or fall back to ADE's
+	 * rule-based route (with the reason) when the run failed or its answer
+	 * could not be read. A failed triage never blocks the task by itself.
+	 */
+	private applyTriageResult(
+		project: ProjectWorkflow,
+		task: TaskRecord,
+		run: TaskRun,
+	): void {
+		const decision =
+			run.status === "succeeded" ? parseTriage(run.summary) : undefined;
+		if (!decision) {
+			task.triage = {
+				applied: false,
+				route: task.route,
+				models: {},
+				reason:
+					run.status === "succeeded"
+						? "The pathway choice could not be read; ADE's rules chose the route."
+						: `The pathway choice failed (${run.failure ?? "error"}); ADE's rules chose the route.`,
+			};
+			if (run.status !== "succeeded") task.acknowledgedRunId = run.id;
+			return;
+		}
+		const wanted = decision.specialist?.toLowerCase();
+		const match = wanted
+			? listSpecialists(project).find(
+					(s) =>
+						s.name.toLowerCase() === wanted ||
+						s.specialty.toLowerCase() === wanted,
+				)
+			: undefined;
+		// A specialist the user chose is kept.
+		const keepUsers = task.specialistReason === "chosen by you";
+		Object.assign(
+			task,
+			applyTriage(task, decision, keepUsers ? undefined : match?.id),
+		);
 	}
 
 	private launchChecks(
