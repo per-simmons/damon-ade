@@ -63,6 +63,7 @@ import {
 	getMetricsDir,
 	loadSessions,
 } from "main/lib/usage-metrics";
+import { env } from "shared/env.shared";
 import { classifyTask, TASK_ROUTES } from "shared/utils/task-routing";
 import { z } from "zod";
 import { publicProcedure, router } from "../..";
@@ -1025,6 +1026,37 @@ export const createWorkflowRouter = (
 					return { state: task.state, stateReason: task.stateReason ?? null };
 				}),
 			),
+
+		/**
+		 * The Team chat tab: for a team's own workspace, the command that starts
+		 * Claude Code as the Coordinator (with the team's MCP server).
+		 */
+		teamChatLaunch: publicProcedure
+			.input(z.object({ workspaceId: z.string() }))
+			.query(async ({ input }) => {
+				const workspace = localDb
+					.select()
+					.from(workspaces)
+					.where(eq(workspaces.id, input.workspaceId))
+					.get();
+				const worktreePath = workspace ? getWorkspacePath(workspace) : null;
+				if (!workspace || workspace.type !== "branch" || !worktreePath) {
+					return { enabled: false as const };
+				}
+				const { teamChatCommand, writeTeamMcpConfig, TEAM_CHAT_TAB } =
+					await import("./team-mcp");
+				const config = writeTeamMcpConfig(
+					deps.homeDir(),
+					input.workspaceId,
+					env.DESKTOP_NOTIFICATIONS_PORT,
+				);
+				return {
+					enabled: true as const,
+					tabName: TEAM_CHAT_TAB,
+					cwd: worktreePath,
+					command: teamChatCommand(config),
+				};
+			}),
 
 		/** Team chat: Go, start the latest plan. */
 		chatGo: publicProcedure.input(taskInput).mutation(({ input }) =>

@@ -11,17 +11,22 @@ import { join } from "node:path";
  * - hook-token: given to ADE terminals as SUPERSET_HOOK_TOKEN. It lets the
  *   notify hook record usage and lets agents post to the feed
  *   (POST /agent/message); it cannot start agents.
+ * - team-token: only in the Team chat session's MCP config file
+ *   (<ADE home>/team-chat/*.mcp.json, 0600). It lets that Coordinator
+ *   session start an agreed plan (POST /team-mcp/:workspaceId); every
+ *   start is a tool call Claude Code asks the user to approve.
  *
  * Browsers are kept out by three checks: no CORS headers (so a page cannot
  * send a JSON POST), a Host check (so DNS rebinding cannot reach the server
  * under another name), and refusing any request with a browser Origin.
  */
 
-export type LocalTokenKind = "invoke" | "hook";
+export type LocalTokenKind = "invoke" | "hook" | "team";
 
 const TOKEN_FILES: Record<LocalTokenKind, string> = {
 	invoke: "invoke-token",
 	hook: "hook-token",
+	team: "team-token",
 };
 
 const cache = new Map<string, string>();

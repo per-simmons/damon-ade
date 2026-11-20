@@ -155,12 +155,12 @@ export function TeamChatSheet({
 			<SheetContent className="flex w-[560px] flex-col sm:max-w-[560px]">
 				<SheetHeader>
 					<SheetTitle>
-						Team chat{data ? ` · ${data.project.name}` : ""}
+						Team plans{data ? ` · ${data.project.name}` : ""}
 					</SheetTitle>
 					<SheetDescription>
-						Talk with the Coordinator. It reads the code, asks what it needs and
-						proposes a plan for your specialists and their agents. Nothing is
-						built until you press Go.
+						Every plan for this team and how far it got, including those started
+						from the Team chat tab. You can also plan one here with the
+						Coordinator; nothing is built until you press Go.
 					</SheetDescription>
 				</SheetHeader>
 

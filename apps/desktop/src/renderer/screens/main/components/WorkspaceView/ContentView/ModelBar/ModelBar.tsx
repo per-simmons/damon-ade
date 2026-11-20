@@ -19,6 +19,7 @@ import { HistorySheet } from "./components/HistorySheet";
 import { SpecialistsSheet } from "./components/SpecialistsSheet";
 import { TasksSheet } from "./components/TasksSheet";
 import { TeamChatSheet } from "./components/TeamChatSheet";
+import { useTeamChatTab } from "./hooks/useTeamChatTab";
 import { MODEL_BAR_MODELS, type ModelDescriptor } from "./models";
 
 /**
@@ -40,6 +41,8 @@ export function ModelBar() {
 	const [installBinary, setInstallBinary] = useState<AgentBinary | null>(null);
 	const [tasksOpen, setTasksOpen] = useState(false);
 	const [chatOpen, setChatOpen] = useState(false);
+	// The team's Coordinator: a Claude Code tab that starts by itself.
+	const teamChat = useTeamChatTab(workspaceId);
 	const [historyOpen, setHistoryOpen] = useState(false);
 	const [specialistsOpen, setSpecialistsOpen] = useState(false);
 
@@ -192,14 +195,30 @@ export function ModelBar() {
 							onClick={() => setChatOpen(true)}
 							className="flex h-7 items-center rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
 						>
-							Team chat
+							Team plans
 						</button>
 					</TooltipTrigger>
 					<TooltipContent side="bottom" showArrow={false}>
-						Talk with the Coordinator, agree a plan for your specialists, then
-						press Go
+						Every team plan and how far it got; you can also plan one here
 					</TooltipContent>
 				</Tooltip>
+				{teamChat.available && (
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<button
+								type="button"
+								onClick={teamChat.open}
+								className="flex h-7 items-center rounded-md bg-primary/10 px-2 text-xs font-medium text-foreground transition-colors hover:bg-primary/20"
+							>
+								Team chat
+							</button>
+						</TooltipTrigger>
+						<TooltipContent side="bottom" showArrow={false}>
+							Claude Code as your team's Coordinator: plan the work together,
+							say go, and it hands each part to the right agent
+						</TooltipContent>
+					</Tooltip>
+				)}
 			</div>
 
 			<TasksSheet

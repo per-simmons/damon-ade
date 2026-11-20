@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import fs, { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -34,6 +34,8 @@ let specialists: ReturnType<
 	>["createCaller"]
 >;
 let settingsModule: typeof import("main/lib/agent-workflow/workflow-settings");
+let teamMcp: (workspaceId: string, body: unknown) => Promise<unknown>;
+let teamMcpModule: typeof import("../workflow/team-mcp");
 const workspaces = new Map<string, { root: string; worktree: string }>();
 /** The team's agents, as ADE's database would list them. */
 const agentsByWorkspace = new Map<
@@ -128,6 +130,15 @@ beforeAll(async () => {
 			events: new EventEmitter(),
 		})
 		.createCaller({});
+	teamMcpModule = await import("../workflow/team-mcp");
+	teamMcp = teamMcpModule.createTeamMcpHandler({
+		homeDir: () => TEST_HOME,
+		resolveWorkspace,
+		controller: () => controller,
+		captureIdentity: identity.captureIdentity,
+		events: new EventEmitter(),
+		listAgents: (id) => agentsByWorkspace.get(id) ?? [],
+	});
 	specialists = specialistsRouter
 		.createSpecialistsRouter({
 			resolveWorkspace,
@@ -1156,6 +1167,144 @@ describe.if(bash !== null && git !== null)("specialists and roles", () => {
 				message: "one more thing",
 			}),
 		).rejects.toThrow("This plan has started");
+	}, 120_000);
+
+	it("the Team chat tab's MCP server: overview, start an agreed plan, status", async () => {
+		type Reply = {
+			result?: Record<string, unknown>;
+			error?: { message: string };
+		};
+		const rpc = async (method: string, params: Record<string, unknown> = {}) =>
+			(await teamMcp("ws-team", {
+				jsonrpc: "2.0",
+				id: 1,
+				method,
+				params,
+			})) as Reply;
+		const tool = async (name: string, args: Record<string, unknown> = {}) => {
+			const r = (await rpc("tools/call", { name, arguments: args })).result as {
+				content: Array<{ text: string }>;
+				isError?: boolean;
+			};
+			return { text: r.content[0].text, isError: !!r.isError };
+		};
+
+		const init = await rpc("initialize", { protocolVersion: "2025-06-18" });
+		expect(init.result?.protocolVersion).toBe("2025-06-18");
+		expect(String(init.result?.instructions)).toContain(
+			"You are the Coordinator of this ADE team",
+		);
+		expect(
+			await teamMcp("ws-team", {
+				jsonrpc: "2.0",
+				method: "notifications/initialized",
+			}),
+		).toBeUndefined();
+		const listed = (await rpc("tools/list")).result as {
+			tools: Array<{ name: string }>;
+		};
+		expect(listed.tools.map((t) => t.name)).toEqual([
+			"team_overview",
+			"start_plan",
+			"plan_status",
+		]);
+		expect((await rpc("no/such")).error?.message).toContain("Method not found");
+
+		const overview = await tool("team_overview");
+		expect(overview.text).toContain('"Backend" (APIs and email)');
+		expect(overview.text).toContain("Specialists:");
+
+		const bad = await tool("start_plan", {
+			request: "x",
+			plan: { subtasks: [] },
+		});
+		expect(bad.isError).toBe(true);
+
+		fake.setSteps([
+			{
+				name: "api",
+				write: {
+					"src/mcp-api.js": "export const a = 1;\n",
+					"{task}/progress.md": "Status: implemented\n",
+				},
+				cost: 0.02,
+			},
+			{ name: "api-review", text: "VERDICT: PASS", cost: 0.01 },
+			{
+				name: "page",
+				write: { "src/mcp-page.js": "export const p = 1;\n" },
+				cost: 0.01,
+			},
+			{ name: "page-review", text: "VERDICT: PASS", cost: 0.01 },
+		]);
+		const before = fake.calls().length;
+		const started = await tool("start_plan", {
+			request: "A grades API and a page that shows it",
+			plan: {
+				reason: "the page needs the API",
+				subtasks: [
+					{
+						title: "Grades API",
+						description: "GET /grades.",
+						specialist: "Backend",
+						route: "implement",
+						models: { implementer: "sonnet", reviewer: "sonnet" },
+						dependsOn: [],
+					},
+					{
+						title: "Grades page",
+						description: "Shows /grades.",
+						specialist: "Frontend",
+						route: "quick",
+						dependsOn: [1],
+					},
+				],
+			},
+		});
+		expect(started.isError).toBe(false);
+		expect(started.text).toContain("Started.");
+		await controller.idle();
+		// No Coordinator run in ADE: the plan came from the Claude Code session.
+		expect(
+			fake
+				.calls()
+				.slice(before)
+				.map((c) => c.step),
+		).toEqual(["api", "api-review", "page", "page-review"]);
+		const status = await tool("plan_status");
+		expect(status.text).toContain(
+			'"A grades API and a page that shows it" — done',
+		);
+		expect(status.text).toContain("1. Grades API");
+		const id = status.text.match(/^Plan (\S+):/)?.[1];
+		const all = (await tasks.getProjectTasks({ workspaceId: "ws-team" })).tasks;
+		const request = all.find((t) => t.slug === id);
+		expect(request?.chat?.map((m) => m.role)).toEqual([
+			"user",
+			"coordinator",
+			"user",
+		]);
+		expect(request?.runs).toEqual([]);
+
+		// The command and its config: the token only in the 0600 file.
+		const config = teamMcpModule.writeTeamMcpConfig(
+			TEST_HOME,
+			"ws-team",
+			51741,
+		);
+		const written = JSON.parse(fs.readFileSync(config, "utf8"));
+		expect(written.mcpServers["ade-team"].url).toBe(
+			"http://127.0.0.1:51741/team-mcp/ws-team",
+		);
+		expect(written.mcpServers["ade-team"].headers.Authorization).toMatch(
+			/^Bearer [a-f0-9]{64}$/,
+		);
+		const command = teamMcpModule.teamChatCommand(config);
+		expect(command).toContain("--disallowedTools Edit Write NotebookEdit");
+		expect(command).toContain(`--mcp-config "${config.replace(/\\/g, "/")}"`);
+		expect(command).not.toContain(
+			written.mcpServers["ade-team"].headers.Authorization.slice(7),
+		);
 	}, 120_000);
 
 	it("an older specialist keeps a template role it switched off when it moves to one list", async () => {

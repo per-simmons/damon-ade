@@ -438,6 +438,42 @@ app.post("/agent/message", (req, res) => {
 	}
 });
 
+/**
+ * The Team chat's MCP server (lib/trpc/routers/workflow/team-mcp.ts): the
+ * Coordinator Claude Code session reads the team and starts agreed plans.
+ * JSON responses only; there is no server-to-client stream.
+ */
+let teamMcp:
+	| ((workspaceId: string, body: unknown) => Promise<unknown>)
+	| undefined;
+app.post("/team-mcp/:workspaceId", async (req, res) => {
+	if (!requireToken(req, res, ["team"])) return;
+	try {
+		if (!teamMcp) {
+			const { createTeamMcpHandler } = await import(
+				"lib/trpc/routers/workflow/team-mcp"
+			);
+			teamMcp = createTeamMcpHandler();
+		}
+		const reply = await teamMcp(req.params.workspaceId, req.body);
+		if (reply === undefined) return res.status(202).end();
+		res.json(reply);
+	} catch (error) {
+		console.error("[team-mcp] failed:", error);
+		res.status(500).json({
+			jsonrpc: "2.0",
+			id: null,
+			error: { code: -32603, message: String(error) },
+		});
+	}
+});
+app.get("/team-mcp/:workspaceId", (_req, res) => {
+	res.status(405).set("Allow", "POST").end();
+});
+app.delete("/team-mcp/:workspaceId", (_req, res) => {
+	res.status(405).set("Allow", "POST").end();
+});
+
 // Health check
 app.get("/health", (_req, res) => {
 	res.json({ status: "ok" });
