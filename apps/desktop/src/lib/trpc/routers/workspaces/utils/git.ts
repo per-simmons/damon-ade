@@ -682,10 +682,7 @@ export async function removeWorktree(
 
 		// Rename the worktree to a sibling temp dir (same filesystem to avoid EXDEV),
 		// then `git worktree prune` to clean metadata, then delete in background.
-		const tempPath = join(
-			dirname(worktreePath),
-			`.ade-delete-${randomUUID()}`,
-		);
+		const tempPath = join(dirname(worktreePath), `.ade-delete-${randomUUID()}`);
 		await renameWhenReleased(worktreePath, tempPath);
 
 		await execFileAsync("git", ["-C", mainRepoPath, "worktree", "prune"], {

@@ -20,6 +20,7 @@ import type {
 	SpecialistList,
 	TemplateView,
 } from "../../types";
+import { TRIGGER_LABELS } from "../../types";
 import { RoleCard } from "./components/RoleCard";
 
 /** The workflow's own roles: when they run and what they may do is fixed. */
@@ -144,11 +145,11 @@ export function SpecialistEditor({
 			specialty: draft.specialty || t?.specialty || "",
 			name: draft.name || t?.name || "",
 			// Its roles join the Roles list (once; edits are kept).
-			customRoles: draft.templateUses.instructions
+			customRoles: draft.templateUses.models
 				? withTemplateRoles(draft.customRoles, t)
 				: draft.customRoles,
 			appliedTemplates:
-				t && draft.templateUses.instructions
+				t && draft.templateUses.models
 					? [...new Set([...(draft.appliedTemplates ?? []), t.id])]
 					: draft.appliedTemplates,
 		});
@@ -236,7 +237,7 @@ export function SpecialistEditor({
 					<div className="flex gap-4 text-xs">
 						<div className="flex items-center gap-1.5">
 							<Checkbox
-								aria-label="Use its instructions and roles"
+								aria-label="Use its instructions"
 								checked={draft.templateUses.instructions}
 								onCheckedChange={(on) =>
 									set({
@@ -247,11 +248,11 @@ export function SpecialistEditor({
 									})
 								}
 							/>
-							Use its instructions and roles
+							Use its instructions
 						</div>
 						<div className="flex items-center gap-1.5">
 							<Checkbox
-								aria-label="Use its model settings"
+								aria-label="Use its role and model settings"
 								checked={draft.templateUses.models}
 								onCheckedChange={(on) =>
 									set({
@@ -262,9 +263,51 @@ export function SpecialistEditor({
 									})
 								}
 							/>
-							Use its model settings
+							Use its role and model settings
 						</div>
 					</div>
+				)}
+				{template && (
+					<table className="w-full text-[11px]" data-template-preview>
+						<thead className="text-left text-muted-foreground">
+							<tr>
+								<th className="font-normal">Role</th>
+								<th className="font-normal">Model</th>
+								<th className="font-normal">Effort</th>
+								<th className="font-normal">Max turns</th>
+								<th className="font-normal">Runs</th>
+								<th className="font-normal">Files</th>
+							</tr>
+						</thead>
+						<tbody>
+							{list.baseRoles.map(({ role, label }) => {
+								const v = inheritedFor(role);
+								return (
+									<tr key={role}>
+										<td>{label}</td>
+										<td>{v.model}</td>
+										<td>{v.effort}</td>
+										<td>{v.maxTurns} (global)</td>
+										<td>{BUILT_IN_ROLES[role].runs}</td>
+										<td>{BUILT_IN_ROLES[role].files}</td>
+									</tr>
+								);
+							})}
+							{template.customRoles.map((r) => (
+								<tr key={r.id}>
+									<td>{r.name}</td>
+									<td>{r.model ?? "as Reviewer"}</td>
+									<td>{r.effort ?? "as Reviewer"}</td>
+									<td>{r.maxTurns ?? "as Reviewer"}</td>
+									<td>
+										{TRIGGER_LABELS[r.trigger]}, when the task or its changed
+										files match
+									</td>
+									<td>{r.access === "read-only" ? "read-only" : "may edit"}</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
 				)}
 			</div>
 

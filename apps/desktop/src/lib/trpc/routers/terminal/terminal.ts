@@ -3,17 +3,17 @@ import { TRPCError } from "@trpc/server";
 import { observable } from "@trpc/server/observable";
 import { eq } from "drizzle-orm";
 import { regenerateCodexAgentsMd } from "main/lib/agent-scaffold";
+import { appState } from "main/lib/app-state";
 import { requestAppleEventsAccessOnce } from "main/lib/apple-events-permission";
 import { MEMORY_SCAFFOLD_ENABLED } from "main/lib/feature-flags";
-import { appState } from "main/lib/app-state";
 import { localDb } from "main/lib/local-db";
 import { restartDaemon as restartDaemonShared } from "main/lib/terminal";
 import {
 	TERMINAL_SESSION_KILLED_MESSAGE,
 	TerminalKilledError,
 } from "main/lib/terminal/errors";
-import { getTerminalHostClient } from "main/lib/terminal-host/client";
 import { writeClaudeSessionIdToHistory } from "main/lib/terminal-history";
+import { getTerminalHostClient } from "main/lib/terminal-host/client";
 import { getWorkspaceRuntimeRegistry } from "main/lib/workspace-runtime";
 import { z } from "zod";
 import { publicProcedure, router } from "../..";

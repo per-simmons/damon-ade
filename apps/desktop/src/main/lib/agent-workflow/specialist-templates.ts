@@ -1,48 +1,60 @@
+import type { EffortLevel } from "./agent-workflow";
 import type {
 	CustomRole,
 	RoleOverride,
 	SpecialistTemplate,
 } from "./specialists";
+import type { RoleName } from "./workflow-settings";
 
 /**
- * Built-in specialty templates. A template is a starting point: its
- * instructions, routing keywords, role overrides and optional extra roles
- * are read live from here, while everything the user edits is stored on the
- * specialist (or in a personal template), so updating these never
- * overwrites a user's changes.
+ * Built-in specialty templates: recommended, balanced starting presets.
  *
- * Models are role-relative aliases (haiku, sonnet, opus, fable) resolved
- * through models.ts; a template only names a model where the specialty
- * needs a different one than the global default for that role.
+ * Every template sets the model and reasoning effort of all five workflow
+ * roles and specializes each role's instructions; maximum turns inherit the
+ * global defaults. Additional roles are conditional: they run only when their
+ * trigger applies (task wording or the files the task changed), never on
+ * every task. Principles: Sonnet is the working model, Haiku only for small
+ * low-risk work, Opus for difficult or high-risk reasoning and review, Fable
+ * only for exceptional escalation (the "Exceptional" route). Effort is low,
+ * medium or high; xhigh and max are never preset.
+ *
+ * Templates are read live; user edits live on the specialist (or a personal
+ * template), so updating these never overwrites a user's changes. Role ids
+ * are stable: renaming a role here keeps its id.
  */
 
-const reviewRole = (
-	id: string,
-	name: string,
-	description: string,
-	instructions: string,
-	keywords: string[],
-	extra: Partial<CustomRole> = {},
-): CustomRole => ({
-	id,
-	name,
-	description,
-	instructions,
-	access: "read-only",
-	trigger: "after-implementation",
-	keywords,
-	expectedOutput:
-		"Findings ordered by severity, each with file and line, then exactly one line `VERDICT: PASS` or `VERDICT: FAIL`.",
-	...extra,
-});
+type ModelAlias = "haiku" | "sonnet" | "opus" | "fable";
+type Preset = [ModelAlias, EffortLevel, string];
 
-const planner = (focus: string): RoleOverride => ({
-	instructions: `As a planner for this specialty, make the plan cover: ${focus}`,
-});
-const reviewer = (focus: string, model?: string): RoleOverride => ({
-	instructions: `As a reviewer for this specialty, check in particular: ${focus}`,
-	...(model ? { model } : {}),
-});
+function roles(
+	preset: Record<RoleName, Preset>,
+): Record<RoleName, RoleOverride> {
+	return Object.fromEntries(
+		Object.entries(preset).map(([role, [model, effort, instructions]]) => [
+			role,
+			{ model, effort, instructions },
+		]),
+	) as Record<RoleName, RoleOverride>;
+}
+
+const VERDICT_OUTPUT =
+	"Concrete findings ordered by severity, each with file and line and why it matters, plus what could not be verified; then exactly one line `VERDICT: PASS` or `VERDICT: FAIL`.";
+
+function reviewer(
+	role: Omit<CustomRole, "access" | "trigger" | "expectedOutput" | "maxTurns"> &
+		Partial<Pick<CustomRole, "trigger" | "expectedOutput" | "maxTurns">>,
+): CustomRole {
+	return {
+		access: "read-only",
+		trigger: "after-implementation",
+		expectedOutput: VERDICT_OUTPUT,
+		maxTurns: 20,
+		...role,
+	};
+}
+
+const SHORT =
+	"Quick Worker: only for small, clearly specified, low-risk changes. If the change turns out to need design decisions or touches risky code, stop and say it needs the implementer.";
 
 export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 	{
@@ -63,34 +75,58 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 			"dialog",
 			"icon",
 			"theme",
+			"spacing",
+			"typography",
+			"responsive",
 		],
-		instructions: `You build user interface components.
-- Reuse the project's existing design system and components before creating new ones; match their naming, props and styling conventions.
-- Keep component structure consistent with neighbouring components (one component per file where the project does that).
-- Cover loading, empty, error and disabled states, not only the happy path.
+		instructions: `You build the visual interface.
+- Reuse the project's design system and existing components before creating new ones; match their naming, props, tokens and styling conventions. Do not add a component library for something the project already has.
+- Keep typography, spacing and hierarchy consistent with neighbouring screens.
+- Cover loading, empty, error, success and disabled states, not only the happy path.
 - Make layouts responsive at the breakpoints the project already uses.
-- Make interactive elements clear: visible focus, sensible hover/active states, labels that say what happens.
-- Apply accessibility appropriate to the component: semantic elements, labels, keyboard operation, contrast.`,
-		roles: {
-			planner: planner(
-				"affected components, states (loading/empty/error/disabled), responsive behaviour, and which existing components to reuse.",
-			),
-			reviewer: reviewer(
-				"design-system consistency, missing states, responsive behaviour, keyboard operation and labels.",
-			),
-		},
+- Keep keyboard operation and visible focus working for everything interactive.`,
+		roles: roles({
+			planner: [
+				"sonnet",
+				"medium",
+				"List the affected components, every state they need (loading, empty, error, success, disabled), the breakpoints involved, and which existing primitives to reuse.",
+			],
+			architect: [
+				"sonnet",
+				"high",
+				"Decide component boundaries and any design-system change (new token, variant or primitive); prefer extending what exists, and record why.",
+			],
+			implementer: [
+				"sonnet",
+				"medium",
+				"Build the interface with the project's existing components, tokens and conventions; implement every state the plan lists.",
+			],
+			reviewer: [
+				"sonnet",
+				"high",
+				"Check visual consistency with the design system, interactions, responsive behaviour, keyboard operation and every missing state. Point to the exact component.",
+			],
+			quick: [
+				"haiku",
+				"medium",
+				`${SHORT} Typical: a spacing, colour-token or label change in one component.`,
+			],
+		}),
 		customRoles: [
-			reviewRole(
-				"ui-accessibility-reviewer",
-				"Accessibility Reviewer",
-				"Checks changed UI for accessibility problems.",
-				"Review only the changed UI for accessibility: semantic roles, accessible names and labels, keyboard reachability and order, focus management in dialogs and menus, colour contrast, and announcements for dynamic content. Report concrete problems with file and line; do not restyle.",
-				[
+			reviewer({
+				id: "ui-accessibility-reviewer",
+				name: "Accessibility Reviewer",
+				description:
+					"Checks changed interactive UI for accessibility problems.",
+				instructions:
+					"Review only the changed UI for accessibility: semantic elements and roles, accessible names and labels, keyboard operation and order, focus management in dialogs and menus, announcements for dynamic content, and contrast where evidence (tokens or values) exists. Report concrete issues with file and line and say what you could not verify. Never claim full accessibility compliance from code inspection alone.",
+				keywords: [
 					"form",
 					"input",
 					"dialog",
 					"modal",
 					"menu",
+					"navigation",
 					"keyboard",
 					"focus",
 					"aria",
@@ -99,7 +135,32 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 					"contrast",
 					"screen reader",
 				],
-			),
+				paths: ["dialog", "modal", "menu", "form", "nav"],
+				model: "sonnet",
+				effort: "high",
+			}),
+			reviewer({
+				id: "ui-visual-consistency-reviewer",
+				name: "Visual Consistency Reviewer",
+				description:
+					"Compares the result with the design system and the requested look.",
+				instructions:
+					"Compare the changed interface with the design system and the requested result: spacing, typography, colour tokens, alignment, iconography and states. Use screenshots or rendered output if the task folder or repository provides them; without rendered evidence, say clearly that your conclusion covers the code only.",
+				keywords: [
+					"visual",
+					"pixel",
+					"screenshot",
+					"mockup",
+					"figma",
+					"looks",
+					"spacing",
+					"typography",
+					"alignment",
+					"polish",
+				],
+				model: "sonnet",
+				effort: "medium",
+			}),
 		],
 	},
 	{
@@ -114,28 +175,73 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 			"onboarding",
 			"usability",
 			"discoverab",
-			"copy",
 			"wording",
 			"empty state",
 			"friction",
+			"navigation",
+			"steps",
+			"settings page",
+			"error message",
 		],
-		instructions: `You improve how the product works for its users.
-- Start from the user's journey: what they are trying to do, where they start, and what they see at each step.
-- Make features discoverable where users look for them; avoid hidden or dead-end routes.
-- Keep information hierarchy clear: the most important action and status first.
-- Remove friction: fewer steps, sensible defaults, no repeated input.
-- Give feedback for every action and a way to recover from errors (undo, retry, clear messages).
-- Use plain, specific language; say what will happen before it happens.
-- Consider keyboard use and accessibility as part of the flow.`,
-		roles: {
-			planner: planner(
-				"the user journey before and after the change, defaults, wording, error recovery and discoverability.",
-			),
-			reviewer: reviewer(
-				"whether the journey is discoverable, the wording is clear, and errors can be recovered from.",
-			),
-		},
-		customRoles: [],
+		instructions: `You improve how people get things done in the product.
+- Start from the user's goal: where they enter, what they must know first, and what tells them they succeeded.
+- Make features discoverable where users look for them; remove dead ends and hidden controls.
+- Keep navigation and information architecture predictable; the most important action and status come first.
+- Reduce steps and repeated input; choose sensible defaults.
+- Give feedback for every action and a clear way to recover from errors.
+- Use plain, specific wording that says what will happen.
+- Keep keyboard use and accessibility working across the whole journey.`,
+		roles: roles({
+			planner: [
+				"sonnet",
+				"high",
+				"Describe the current journey and the proposed one step by step (entry point, prerequisites, main path, failure path, completion feedback), and the wording that changes.",
+			],
+			architect: [
+				"opus",
+				"medium",
+				"Decide significant navigation or product-structure changes (where a feature lives, what is merged or split) and their effect on existing paths.",
+			],
+			implementer: [
+				"sonnet",
+				"medium",
+				"Make the flow, interaction and wording changes; keep existing entry points working or redirect them.",
+			],
+			reviewer: [
+				"sonnet",
+				"high",
+				"Check that a user can discover the feature, complete the task, understand each label, and recover from errors; flag dead ends and repeated input.",
+			],
+			quick: [
+				"haiku",
+				"medium",
+				`${SHORT} Typical: clearer wording on one label or message, or a better default.`,
+			],
+		}),
+		customRoles: [
+			reviewer({
+				id: "ux-journey-reviewer",
+				name: "Usability and Journey Reviewer",
+				description: "Walks the changed journey end to end.",
+				instructions:
+					"Walk through the changed journey in the code: the actual entry point, prerequisites, main path, failure path and completion feedback. Identify hidden controls, dead ends, confusing labels, repeated input and missing recovery. Separate what you observed in the code from what you assume. Do not invent user research or claim real-user validation.",
+				keywords: [
+					"onboarding",
+					"navigation",
+					"flow",
+					"wizard",
+					"multi-step",
+					"settings",
+					"recover",
+					"journey",
+					"sign up",
+					"checkout",
+				],
+				paths: ["onboarding", "settings", "wizard", "nav"],
+				model: "sonnet",
+				effort: "high",
+			}),
+		],
 	},
 	{
 		id: "frontend",
@@ -154,23 +260,68 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 			"fetch",
 			"query",
 			"store",
+			"effect",
+			"subscription",
 		],
-		instructions: `You work on the client application.
-- Follow the project's existing state and data-flow patterns (stores, query hooks, context) instead of introducing new ones.
-- Keep rendering efficient: avoid unnecessary re-renders and effects; derive state instead of duplicating it.
-- Respect client/server boundaries the framework defines.
-- Integrate with existing APIs through the project's established client layer; handle loading and error responses.
-- Keep accessibility and performance in mind for anything user-facing.
+		instructions: `You work on client application logic.
+- Keep one owner for each piece of state; derive instead of duplicating.
+- Follow the project's data-flow patterns (stores, query hooks, context) and framework boundaries (client/server components, routing).
+- Handle async behaviour fully: loading, errors, cancellation and stale responses.
+- Integrate with APIs through the project's client layer.
+- Keep rendering efficient without speculative micro-optimization; keep accessibility intact.
 - Add or update component and integration tests where the project has them.`,
-		roles: {
-			planner: planner(
-				"data flow, state ownership, API calls and their error handling, and tests to add.",
-			),
-			reviewer: reviewer(
-				"state and data flow, error handling of API calls, unnecessary re-renders, and test coverage.",
-			),
-		},
-		customRoles: [],
+		roles: roles({
+			planner: [
+				"sonnet",
+				"medium",
+				"Identify state ownership, data flow, async calls and their failure handling, routing changes, and the tests to add.",
+			],
+			architect: [
+				"sonnet",
+				"high",
+				"Decide state ownership and boundaries between components, stores and the server when they change.",
+			],
+			implementer: [
+				"sonnet",
+				"medium",
+				"Implement with the project's state and data patterns; handle loading, error and cancellation.",
+			],
+			reviewer: [
+				"sonnet",
+				"high",
+				"Check state ownership, async correctness, error handling, framework boundaries and test coverage.",
+			],
+			quick: [
+				"haiku",
+				"medium",
+				`${SHORT} Typical: a prop, a small conditional or a text change in one component.`,
+			],
+		}),
+		customRoles: [
+			reviewer({
+				id: "frontend-state-reviewer",
+				name: "State and Lifecycle Reviewer",
+				description: "Checks shared state, effects and async lifecycles.",
+				instructions:
+					"Review changed shared state, effects, subscriptions, async requests and navigation: stale state, races, missing cleanup or cancellation, duplicate requests, derived state stored separately, and effects that should not exist. Every problem you report needs concrete evidence in the code. Avoid speculative micro-optimization.",
+				keywords: [
+					"state",
+					"store",
+					"effect",
+					"useeffect",
+					"subscription",
+					"async",
+					"fetch",
+					"query",
+					"navigation",
+					"lifecycle",
+					"cache",
+				],
+				paths: ["store", "hook", "context", "query"],
+				model: "sonnet",
+				effort: "high",
+			}),
+		],
 	},
 	{
 		id: "backend",
@@ -190,29 +341,52 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 			"worker",
 			"auth",
 			"validation",
+			"webhook",
 		],
 		instructions: `You work on server-side logic.
-- Follow the existing service, module and error-handling conventions of this codebase.
-- Validate inputs at the boundary; never trust client data.
-- Enforce authorization where data is read or changed, not only in the UI.
-- Make operations reliable: handle partial failure, make retries idempotent where they can repeat.
-- Return errors with the project's established shapes and status codes.
-- Add or update API and integration tests for the behaviour you change.`,
-		roles: {
-			planner: planner(
-				"data validation, authorization checks, failure handling and idempotency, and the tests that prove them.",
-			),
-			reviewer: reviewer(
-				"input validation, authorization, error handling, idempotency and missing tests.",
-			),
-		},
+- Follow the existing service boundaries, module layout and error-handling conventions.
+- Validate input at the boundary; never trust client data.
+- Enforce authentication and authorization where data is read or changed, not only in the UI.
+- Keep data consistent: transactions where several writes must succeed together.
+- Handle partial failure; make retried operations (jobs, webhooks, queues) idempotent; watch concurrency.
+- Return errors in the project's established shapes.
+- Add or update API and integration tests for changed behaviour.`,
+		roles: roles({
+			planner: [
+				"sonnet",
+				"high",
+				"Cover validation, authorization, transactions, failure handling, idempotency and concurrency for the change, and the tests that prove them.",
+			],
+			architect: [
+				"opus",
+				"medium",
+				"Decide service boundaries, data ownership and consistency strategy when the change crosses services or needs a new pattern.",
+			],
+			implementer: [
+				"sonnet",
+				"medium",
+				"Implement in the existing service style; validate input, check authorization, and keep writes consistent.",
+			],
+			reviewer: [
+				"sonnet",
+				"high",
+				"Check validation, authorization, transactions and consistency, partial failure, idempotency, retries, concurrency and missing tests.",
+			],
+			quick: [
+				"haiku",
+				"medium",
+				`${SHORT} Never for authentication, authorization, data handling or transactions, however short.`,
+			],
+		}),
 		customRoles: [
-			reviewRole(
-				"backend-api-contract-reviewer",
-				"API Contract Reviewer",
-				"Checks changed endpoints for contract and compatibility problems.",
-				"Review only changed endpoints and their types: request/response shapes, backward compatibility for existing clients, validation, status codes and error semantics, and whether consumers or docs need updating.",
-				[
+			reviewer({
+				id: "backend-api-contract-reviewer",
+				name: "API Contract Reviewer",
+				description:
+					"Checks changed endpoints and shared types for contract problems.",
+				instructions:
+					"Review only changed endpoints, externally consumed types, messages and service contracts: request and response shapes, compatibility for existing consumers, validation, error semantics, authorization, and which consumers or docs must change. Do not repeat a general implementation review.",
+				keywords: [
 					"api",
 					"endpoint",
 					"route",
@@ -223,8 +397,21 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 					"trpc",
 					"rest",
 					"graphql",
+					"webhook",
+					"message",
 				],
-			),
+				paths: [
+					"routes",
+					"router",
+					"api/",
+					"controller",
+					"schema",
+					"contract",
+					"proto",
+				],
+				model: "sonnet",
+				effort: "high",
+			}),
 		],
 	},
 	{
@@ -242,22 +429,68 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 			"trpc",
 			"sdk",
 			"webhook",
+			"pagination",
+			"rate limit",
+			"versioning",
 		],
 		instructions: `You design and change APIs.
-- Treat the contract as the product: request and response shapes, status codes and error semantics are deliberate.
-- Keep changes backward compatible unless the task says otherwise; version or deprecate instead of breaking clients.
+- Treat the contract as the product: shapes, status codes, error semantics, defaults and optionality are deliberate.
+- Keep changes backward compatible unless the task says otherwise; version or deprecate instead of breaking.
 - Validate requests and responses with the project's schema tooling.
 - Require the right authentication and authorization for every operation.
+- Where relevant, define pagination, rate-limit behaviour, and webhook retries with idempotency.
 - Update documentation and consumers affected by the change.`,
-		roles: {
-			planner: planner(
-				"the contract change, compatibility for existing clients, validation, auth and documentation updates.",
-			),
-			reviewer: reviewer(
-				"contract compatibility, validation, auth and error semantics.",
-			),
-		},
-		customRoles: [],
+		roles: roles({
+			planner: [
+				"sonnet",
+				"high",
+				"Specify the contract change, compatibility for existing consumers, validation, auth, pagination or rate behaviour, and docs to update.",
+			],
+			architect: [
+				"opus",
+				"medium",
+				"Decide versioning, deprecation and contract shape when a change would break or fork existing consumers.",
+			],
+			implementer: [
+				"sonnet",
+				"medium",
+				"Implement the contract exactly as specified, with schema validation and auth; update docs and examples.",
+			],
+			reviewer: [
+				"sonnet",
+				"high",
+				"Check the contract against the plan: compatibility, validation, auth, error semantics, pagination and documentation.",
+			],
+			quick: [
+				"haiku",
+				"medium",
+				`${SHORT} Typical: a doc string or an example; never a contract change.`,
+			],
+		}),
+		customRoles: [
+			reviewer({
+				id: "api-contract-compatibility-reviewer",
+				name: "Contract Compatibility Reviewer",
+				description:
+					"Compares old and new API behaviour for existing consumers.",
+				instructions:
+					"When an existing contract changes or a new public one is added: compare old and new behaviour, list affected consumers, and check error behaviour, optionality, defaults and compatibility assumptions. Suggest focused contract tests for anything not covered.",
+				keywords: [
+					"api",
+					"endpoint",
+					"contract",
+					"breaking",
+					"version",
+					"deprecat",
+					"public",
+					"schema",
+					"openapi",
+				],
+				paths: ["openapi", "schema", "contract", "routes", "router", "api/"],
+				model: "sonnet",
+				effort: "high",
+			}),
+		],
 	},
 	{
 		id: "database",
@@ -276,38 +509,68 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 			"orm",
 			"drizzle",
 			"prisma",
+			"backfill",
+			"transaction",
 		],
-		instructions: `You work on data storage.
-- Design schema changes for data integrity: constraints, nullability, defaults and relations.
-- Write queries that are correct first, then efficient; check indexes for new access patterns.
-- Plan migrations safely: existing rows, backfills, locking and rollback.
-- Follow this repository's migration rules exactly (for example generated migration files that must not be edited by hand, or migrations the user runs themselves).
-- Never run a migration against a shared or production database.`,
-		roles: {
-			planner: planner(
-				"schema and migration steps, effect on existing data, indexes, and the repository's migration rules.",
-			),
-			reviewer: reviewer(
-				"data integrity, migration safety on existing rows, query correctness and indexes.",
-			),
-		},
+		instructions: `You work on stored data.
+- Protect integrity first: constraints, relations, nullability and defaults.
+- Write queries that are correct, then efficient; check indexes for new access patterns.
+- Think about existing rows: backfills, defaults, compatibility while old and new code run together.
+- Consider locking and reversibility of every migration.
+- Follow this repository's migration rules exactly (for example generated migration files that must not be edited, or migrations only the user runs).
+- Never run operations against a shared or production database.`,
+		roles: roles({
+			planner: [
+				"opus",
+				"medium",
+				"Plan schema and migration steps, the effect on existing rows, backfills, indexes, rollout compatibility and the repository's migration rules.",
+			],
+			architect: [
+				"opus",
+				"high",
+				"Decide data modelling and migration strategy for risky changes: destructive steps, large backfills, transaction boundaries.",
+			],
+			implementer: [
+				"sonnet",
+				"high",
+				"Implement schema and query changes following the repository's migration rules; never edit generated migration files by hand when the rules forbid it.",
+			],
+			reviewer: [
+				"opus",
+				"high",
+				"Check integrity, query correctness, indexes, existing-row behaviour, locking and reversibility.",
+			],
+			quick: [
+				"haiku",
+				"medium",
+				`${SHORT} Only for wording, comments or formatting; never schema, migrations or queries that change data.`,
+			],
+		}),
 		customRoles: [
-			reviewRole(
-				"database-migration-reviewer",
-				"Migration Reviewer",
-				"Checks migrations for data loss and unsafe operations.",
-				"Review only migration and schema changes: data loss, unsafe locking on large tables, missing backfills or defaults, irreversible steps, and edits to generated migration files the repository forbids.",
-				[
+			reviewer({
+				id: "database-migration-reviewer",
+				name: "Migration Safety Reviewer",
+				description:
+					"Checks schema changes and migrations for data loss and unsafe rollout.",
+				instructions:
+					"Review schema changes, migrations, backfills, destructive operations and substantial transaction changes: existing-row behaviour, data loss, compatibility during rollout, locking, nullability, defaults, backfills and recovery. Follow the project's migration rules. Do not execute anything against a database, and do not invent table sizes or lock timings.",
+				keywords: [
 					"migration",
 					"schema",
 					"column",
 					"table",
 					"index",
 					"alter",
+					"drop",
+					"backfill",
 					"drizzle",
 					"prisma",
+					"transaction",
 				],
-			),
+				paths: ["migration", "schema", ".sql", "drizzle", "prisma"],
+				model: "opus",
+				effort: "high",
+			}),
 		],
 	},
 	{
@@ -324,24 +587,65 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 			"coverage",
 			"e2e",
 			"reproduce",
-			"bug",
+			"mock",
+			"fixture",
 		],
 		instructions: `You make sure work is verifiably done.
-- Turn the request into checkable acceptance criteria.
-- Choose the smallest set of tests that prove them; prefer the project's existing test style.
-- Reproduce a bug with a failing test before fixing it where practical.
-- Add regression coverage for fixed defects.
+- Turn the request into observable acceptance criteria.
+- Reproduce a bug with a failing test before fixing it, where practical.
+- Choose the smallest set of tests that proves the criteria, in the project's test style; keep them isolated and deterministic.
+- Assert behaviour, not implementation details; cover negative paths.
 - Diagnose failures from their output instead of retrying blindly.
-- Report evidence: which command ran and what it showed.`,
-		roles: {
-			planner: planner(
-				"acceptance criteria and the tests or commands that prove each one.",
-			),
-			reviewer: reviewer(
-				"whether each acceptance criterion is covered by a test or check that actually ran.",
-			),
-		},
-		customRoles: [],
+- Never write tests only to raise a count. Report which commands actually ran.`,
+		roles: roles({
+			planner: [
+				"sonnet",
+				"high",
+				"Write observable acceptance criteria and the test or command that proves each; plan reproduction first for bugs.",
+			],
+			architect: [
+				"sonnet",
+				"high",
+				"Decide test infrastructure changes (fixtures, fakes, isolation) when existing tooling cannot support the needed tests.",
+			],
+			implementer: [
+				"sonnet",
+				"medium",
+				"Write focused, deterministic tests with meaningful assertions, then the fix; keep mocks scoped.",
+			],
+			reviewer: [
+				"sonnet",
+				"high",
+				"Check that each criterion is proved by a test that actually ran, and that the tests would fail without the change.",
+			],
+			quick: [
+				"haiku",
+				"medium",
+				`${SHORT} Typical: renaming a test or fixing an assertion message.`,
+			],
+		}),
+		customRoles: [
+			reviewer({
+				id: "qa-test-quality-reviewer",
+				name: "Test Quality Reviewer",
+				description:
+					"Checks whether new or changed tests would catch the defect.",
+				instructions:
+					"For substantial new tests, changed mocks, flaky-test fixes or test infrastructure: decide whether the tests would catch the intended defect. Look for false positives, leaked or global mocks, assertions that mirror the implementation, missing negative paths, timing dependence, and accidental real network or model access. Separate tests that ran from tests that are only proposed.",
+				keywords: [
+					"test",
+					"tests",
+					"mock",
+					"flaky",
+					"fixture",
+					"e2e",
+					"coverage",
+				],
+				paths: [".test.", ".spec.", "__tests__", "fixtures", "mocks"],
+				model: "sonnet",
+				effort: "high",
+			}),
+		],
 	},
 	{
 		id: "security",
@@ -351,6 +655,7 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 		keywords: [
 			"security",
 			"auth",
+			"login",
 			"token",
 			"secret",
 			"permission",
@@ -361,48 +666,74 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 			"exec",
 			"encrypt",
 			"password",
+			"session",
+			"credential",
 		],
-		instructions: `You work with security in mind.
-- Identify trust boundaries the change crosses: user input, network, filesystem, other processes.
+		instructions: `You work on security-sensitive code.
+- Identify the assets and trust boundaries the change crosses: user input, network, filesystem, other processes.
 - Check authentication and authorization on every changed operation.
 - Keep secrets out of code, logs, URLs and error messages.
 - Validate and encode input; never build shell commands or queries by string interpolation.
-- Constrain file and command execution to what the feature needs.
+- Constrain file access and command execution to what the feature needs.
+- Handle sessions and tokens safely (lifetime, storage, revocation); avoid exposing sensitive data.
 - Consider dependency and integration risks the change introduces.`,
-		roles: {
-			planner: planner(
-				"trust boundaries, authorization, secret handling and input validation for the change.",
-			),
-			reviewer: reviewer(
-				"authorization, secret exposure, injection and unsafe file or command execution.",
+		roles: roles({
+			planner: [
 				"opus",
-			),
-		},
+				"high",
+				"Identify assets, trust boundaries and abuse cases for the change, and the mitigations the plan must include.",
+			],
+			architect: [
+				"opus",
+				"high",
+				"Decide trust-boundary and authorization design for the change; prefer established mechanisms over custom crypto or auth.",
+			],
+			implementer: [
+				"sonnet",
+				"high",
+				"Implement with the mitigations from the plan; validate input, check authorization, and keep secrets out of logs.",
+			],
+			reviewer: [
+				"opus",
+				"high",
+				"Independently check authorization, secret exposure, injection, unsafe file or command execution, and session/token handling in the changes.",
+			],
+			quick: [
+				"haiku",
+				"medium",
+				`${SHORT} Only for wording or formatting; never authentication, permissions, secrets or input handling.`,
+			],
+		}),
 		customRoles: [
-			reviewRole(
-				"security-threat-modeler",
-				"Threat Modeler",
-				"Lists the threats a sensitive change must handle before it is built.",
-				"Before implementation, list the realistic threats for this change (who could abuse it and how), with the mitigation the implementation must include for each. Read only the code needed; do not edit files.",
-				[
+			reviewer({
+				id: "security-threat-modeler",
+				name: "Threat Modeler",
+				description:
+					"Lists realistic threats and required mitigations before a sensitive change.",
+				instructions:
+					"Before implementation of a meaningful change to authentication, authorization, secret handling, uploads, remote input, process execution or privileged boundaries: identify realistic actors, assets, entry points and abuse cases, and the mitigations the implementation must include. Keep it scoped to this change; no generic checklists. Do not run scans or attack anything.",
+				keywords: [
 					"auth",
 					"login",
 					"token",
 					"secret",
 					"permission",
+					"role",
 					"upload",
 					"exec",
 					"shell",
 					"password",
 					"encrypt",
 					"session",
+					"credential",
+					"admin",
 				],
-				{
-					trigger: "before-implementation",
-					expectedOutput:
-						"A short threat list with a required mitigation for each, then `VERDICT: PASS` (the mitigations are in the plan or task) or `VERDICT: FAIL` (something essential is unaddressed).",
-				},
-			),
+				trigger: "before-implementation",
+				expectedOutput:
+					"A short threat list (actor, entry point, abuse case, required mitigation), then `VERDICT: PASS` if the task and plan cover the mitigations or `VERDICT: FAIL` if something essential is missing.",
+				model: "opus",
+				effort: "high",
+			}),
 		],
 	},
 	{
@@ -422,21 +753,75 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 			"kubernetes",
 			"terraform",
 			"github actions",
+			"packaging",
 		],
 		instructions: `You work on build, release and operations.
-- Follow the project's existing build and deployment conventions.
-- Keep configuration explicit and environment-specific values out of code.
-- Make changes reliable and recoverable: idempotent steps, clear failure output, a way back.
-- Add observability where the change can fail silently.
-- Never print or commit secrets; reference them through the platform's secret store.
-- Do not deploy or publish anything as part of a task.`,
-		roles: {
-			planner: planner(
-				"affected pipelines and environments, rollback, and secret handling.",
-			),
-			reviewer: reviewer("secret exposure, reproducibility and rollback."),
-		},
-		customRoles: [],
+- Follow the project's existing CI and build conventions.
+- Keep builds reproducible: pinned versions, deterministic steps.
+- Keep environments separate and their configuration explicit.
+- Reference secrets through the platform's secret store; never print or commit them.
+- Make failures visible and recoverable; plan rollback.
+- Prepare configuration only: never publish, deploy, install or change infrastructure as part of a task.`,
+		roles: roles({
+			planner: [
+				"sonnet",
+				"high",
+				"Identify affected pipelines, environments, secrets, artifacts and the rollback path.",
+			],
+			architect: [
+				"opus",
+				"medium",
+				"Decide pipeline or infrastructure structure when environments, permissions or release flow change.",
+			],
+			implementer: [
+				"sonnet",
+				"high",
+				"Change configuration in the project's conventions; keep steps reproducible and secrets in the secret store.",
+			],
+			reviewer: [
+				"sonnet",
+				"high",
+				"Check reproducibility, environment targeting, secret handling, failure visibility and rollback.",
+			],
+			quick: [
+				"haiku",
+				"medium",
+				`${SHORT} Typical: a version bump or a comment; never permissions, secrets or deploy targets.`,
+			],
+		}),
+		customRoles: [
+			reviewer({
+				id: "devops-release-safety-reviewer",
+				name: "Release Safety Reviewer",
+				description:
+					"Checks release, infrastructure and credentials changes before they ship.",
+				instructions:
+					"Review changed release pipelines, infrastructure definitions, credential handling, packaging or deployment configuration: permissions, environment targeting, destructive steps, reproducibility, failure handling and recovery. Distinguish preparing a configuration from executing it. Never publish, deploy, install or change infrastructure.",
+				keywords: [
+					"release",
+					"deploy",
+					"pipeline",
+					"infra",
+					"terraform",
+					"credential",
+					"secret",
+					"packag",
+					"publish",
+					"workflow",
+				],
+				paths: [
+					".github/workflows",
+					"terraform",
+					"docker",
+					"helm",
+					"deploy",
+					"release",
+					"electron-builder",
+				],
+				model: "sonnet",
+				effort: "high",
+			}),
+		],
 	},
 	{
 		id: "performance",
@@ -453,21 +838,67 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 			"profil",
 			"benchmark",
 			"cache",
+			"throughput",
 		],
 		instructions: `You improve performance with evidence.
-- Find the actual bottleneck before changing code; measure where practical.
-- Prefer the simplest change that removes the measured cost; avoid speculative optimization.
-- Check that the change does not regress correctness or other paths.
-- Keep measurements cheap and repeatable; record before and after numbers.`,
-		roles: {
-			planner: planner(
-				"how the bottleneck is measured, the change, and how improvement and regressions are checked.",
-			),
-			reviewer: reviewer(
-				"whether the improvement is measured and correctness is preserved.",
-			),
-		},
-		customRoles: [],
+- Work on one specific, observed problem.
+- Measure a credible baseline on a representative workload before changing code.
+- Keep correctness: compare behaviour before and after.
+- Prefer the simplest change that removes the measured cost; no speculative optimization.
+- Repeat measurements and check other paths for regressions. Never invent numbers.`,
+		roles: roles({
+			planner: [
+				"sonnet",
+				"high",
+				"Define the metric, workload, baseline method, success threshold and how correctness is preserved.",
+			],
+			architect: [
+				"opus",
+				"high",
+				"Decide structural changes (caching layers, data structures, concurrency) when measurements show the design is the bottleneck.",
+			],
+			implementer: [
+				"sonnet",
+				"high",
+				"Make the change the measurements justify; keep it minimal and keep behaviour identical.",
+			],
+			reviewer: [
+				"sonnet",
+				"high",
+				"Check correctness and that the claimed improvement is backed by before/after measurements.",
+			],
+			quick: [
+				"haiku",
+				"medium",
+				`${SHORT} Typical: a tunable constant the measurements already justify.`,
+			],
+		}),
+		customRoles: [
+			reviewer({
+				id: "performance-measurement-analyst",
+				name: "Measurement Analyst",
+				description:
+					"Defines how a performance problem is measured before optimizing.",
+				instructions:
+					"Before an optimization: define the metric, a representative workload, the baseline, the measurement method and the success threshold, and analyse any existing profiles. ADE runs approved local measurement commands through its checks; do not invent timings, claim a speedup without evidence, or start paid benchmarks or external load tests.",
+				keywords: [
+					"slow",
+					"performance",
+					"latency",
+					"optimiz",
+					"memory",
+					"cpu",
+					"profil",
+					"benchmark",
+					"throughput",
+				],
+				trigger: "before-implementation",
+				expectedOutput:
+					"The metric, workload, baseline and method, success threshold, and what evidence exists; then `VERDICT: PASS` if there is enough to proceed or `VERDICT: FAIL` if measurements are needed first.",
+				model: "sonnet",
+				effort: "high",
+			}),
+		],
 	},
 	{
 		id: "documentation",
@@ -483,20 +914,65 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 			"changelog",
 			"comment",
 			"typo",
+			"tutorial",
+			"example",
 		],
 		instructions: `You write documentation.
-- Describe the behaviour as implemented; read the code before documenting it.
-- Write clear, specific instructions a new user can follow.
-- Keep examples correct and runnable.
-- Match the existing documentation's tone, structure and terminology.
-- Do not claim support for things the code does not do.`,
-		roles: {
-			quick: { model: "haiku" },
-			reviewer: reviewer(
-				"accuracy against the code and whether examples work.",
-			),
-		},
-		customRoles: [],
+- Describe what the code does now; read it before documenting it.
+- Write clear steps a new reader can follow, with correct terminology.
+- Keep examples correct and runnable against the current interfaces.
+- Match the existing documentation's structure, tone and level of detail.
+- Never claim support for something the code does not do.`,
+		roles: roles({
+			planner: [
+				"sonnet",
+				"medium",
+				"Identify the pages, sections and examples to change and the code they describe.",
+			],
+			architect: [
+				"sonnet",
+				"medium",
+				"Decide documentation structure (new pages, reorganization) when content no longer fits the existing layout.",
+			],
+			implementer: [
+				"sonnet",
+				"medium",
+				"Write accurate, specific documentation in the existing style; verify each statement against the code.",
+			],
+			reviewer: [
+				"sonnet",
+				"medium",
+				"Check accuracy against the code, clarity of steps, terminology and unsupported claims.",
+			],
+			quick: [
+				"haiku",
+				"medium",
+				`${SHORT} Typical: spelling, grammar or a broken link.`,
+			],
+		}),
+		customRoles: [
+			reviewer({
+				id: "documentation-example-reviewer",
+				name: "Example Accuracy Reviewer",
+				description:
+					"Checks commands and code examples against the real interfaces.",
+				instructions:
+					"For changed commands, code examples, installation steps, configuration examples or API documentation: check them against the actual interfaces and supported versions. Flag wrong commands, missing prerequisites, stale options and unsupported claims. Do not run commands copied from documentation; ADE runs only approved checks.",
+				keywords: [
+					"example",
+					"command",
+					"install",
+					"setup",
+					"config",
+					"api doc",
+					"snippet",
+					"usage",
+					"cli",
+				],
+				model: "sonnet",
+				effort: "medium",
+			}),
+		],
 	},
 	{
 		id: "mobile",
@@ -512,22 +988,66 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 			"swift",
 			"kotlin",
 			"app store",
+			"push notification",
+			"offline",
 		],
 		instructions: `You build mobile app features.
 - Follow platform conventions for navigation, gestures and system UI.
-- Handle lifecycle: backgrounding, resume, interrupted work.
-- Respect device constraints: small screens, battery, flaky networks, offline.
-- Provide accessible touch targets and screen reader labels.
-- Use the project's framework conventions (for example Expo or native modules) rather than new libraries.`,
-		roles: {
-			planner: planner(
-				"navigation, lifecycle, offline/error behaviour and platform differences.",
-			),
-			reviewer: reviewer(
-				"lifecycle handling, offline/error states and platform conventions.",
-			),
-		},
-		customRoles: [],
+- Handle the lifecycle: backgrounding, resume, interruption and restoration.
+- Request permissions only when needed and handle denial.
+- Respect device constraints: small screens, battery, flaky or offline networks.
+- Provide accessible touch targets and screen-reader labels.
+- Use the project's framework conventions (Expo, React Native, native modules) instead of new libraries.`,
+		roles: roles({
+			planner: [
+				"sonnet",
+				"medium",
+				"Cover navigation, lifecycle, permissions, offline behaviour and platform differences for the change.",
+			],
+			architect: [
+				"opus",
+				"medium",
+				"Decide navigation structure, persistence and background-work strategy when they change across platforms.",
+			],
+			implementer: [
+				"sonnet",
+				"medium",
+				"Implement in the project's framework conventions; handle lifecycle, permissions and offline states.",
+			],
+			reviewer: [
+				"sonnet",
+				"high",
+				"Check lifecycle handling, permissions, offline and error states, platform conventions and accessibility.",
+			],
+			quick: [
+				"haiku",
+				"medium",
+				`${SHORT} Typical: a string, a style value or an icon.`,
+			],
+		}),
+		customRoles: [
+			reviewer({
+				id: "mobile-lifecycle-reviewer",
+				name: "Mobile Lifecycle Reviewer",
+				description:
+					"Checks lifecycle, permissions, persistence and offline behaviour.",
+				instructions:
+					"For changes to lifecycle, navigation, permissions, persistence, background work or offline behaviour: check interruption, restoration, cancellation, platform differences and device-specific assumptions. State which platforms and devices were actually tested; unit tests are not device testing.",
+				keywords: [
+					"lifecycle",
+					"background",
+					"resume",
+					"permission",
+					"offline",
+					"persist",
+					"navigation",
+					"push",
+					"notification",
+				],
+				model: "sonnet",
+				effort: "high",
+			}),
+		],
 	},
 	{
 		id: "desktop",
@@ -543,22 +1063,75 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 			"native",
 			"installer",
 			"menu",
+			"preload",
+			"main process",
 		],
 		instructions: `You build desktop application features.
-- Keep privileged work in the main process and pass only what is needed over IPC; validate IPC input.
-- Handle the application lifecycle: windows closing, app quitting, single instance, restarts.
-- Be careful with filesystem access: user paths, permissions, Windows and macOS differences.
-- Keep packaging working: native modules, paths inside the packaged app.
-- Follow this project's existing Electron and IPC conventions.`,
-		roles: {
-			planner: planner(
-				"process boundaries, IPC validation, lifecycle and packaging impact.",
-			),
-			reviewer: reviewer(
-				"IPC validation, privilege boundaries, lifecycle and cross-platform paths.",
-			),
-		},
-		customRoles: [],
+- Keep privileged work in the main process; expose only what is needed over IPC, and validate every IPC input.
+- Handle the application lifecycle: windows closing, quitting, single instance and restarts.
+- Treat filesystem access carefully: user paths, permissions, Windows and macOS path differences.
+- Launch processes without shell interpolation and clean them up.
+- Keep packaging working: native modules and paths inside the packaged app.
+- Follow the project's Electron and IPC conventions.`,
+		roles: roles({
+			planner: [
+				"sonnet",
+				"high",
+				"Map the process boundaries, IPC calls, filesystem access, lifecycle effects and packaging impact of the change.",
+			],
+			architect: [
+				"opus",
+				"medium",
+				"Decide process and privilege boundaries when new capabilities cross renderer and main.",
+			],
+			implementer: [
+				"sonnet",
+				"medium",
+				"Implement with validated IPC and the project's conventions; handle paths cross-platform.",
+			],
+			reviewer: [
+				"sonnet",
+				"high",
+				"Check IPC validation, privilege boundaries, lifecycle, cross-platform paths and packaging.",
+			],
+			quick: [
+				"haiku",
+				"medium",
+				`${SHORT} Typical: a label, a menu text or a style; never IPC or filesystem code.`,
+			],
+		}),
+		customRoles: [
+			reviewer({
+				id: "desktop-ipc-reviewer",
+				name: "IPC and Privilege Reviewer",
+				description:
+					"Checks changes that cross renderer/main or other privilege boundaries.",
+				instructions:
+					"For changes crossing renderer/main, process, filesystem or local-server boundaries: check input validation, authorization, exposed capabilities, process launching, path handling and cleanup, following the project's Electron/IPC conventions. Say when a trust-boundary question needs escalation. Skip harmless label changes.",
+				keywords: [
+					"ipc",
+					"preload",
+					"main process",
+					"filesystem",
+					"spawn",
+					"exec",
+					"local server",
+					"privilege",
+					"trpc",
+					"electron",
+				],
+				paths: [
+					"preload",
+					"/main/",
+					"ipc",
+					"trpc/routers",
+					"local-server",
+					"electron",
+				],
+				model: "sonnet",
+				effort: "high",
+			}),
+		],
 	},
 	{
 		id: "gamedev",
@@ -571,33 +1144,56 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 			"unreal",
 			"unity",
 			"godot",
+			"roblox",
 			"player",
 			"level",
 			"physics",
 			"input",
 			"shader",
 			"blueprint",
+			"multiplayer",
 		],
 		instructions: `You work on games.
-- Identify the engine and follow its conventions (for example Unreal C++/Blueprints, Unity C#, Godot GDScript).
+- Identify the engine and language from the project (Unreal C++/Blueprints, Unity C#, Godot GDScript, Roblox Luau…) and follow its conventions.
 - Keep gameplay state and input handling predictable and frame-rate independent.
-- Mind performance budgets per frame; avoid work in hot loops.
-- Describe how to reproduce and play-test the change.`,
-		roles: {
-			planner: planner(
-				"engine-specific approach, gameplay state, performance per frame, and play-test steps.",
-			),
-			reviewer: reviewer(
-				"frame-rate independence, per-frame cost, and engine conventions.",
-			),
-		},
+- Respect per-frame performance budgets; avoid work in hot loops.
+- For multiplayer, respect server authority and synchronization.
+- Describe concrete play-test steps for every gameplay change.`,
+		roles: roles({
+			planner: [
+				"sonnet",
+				"high",
+				"Identify the engine-specific approach, gameplay state, input, timing, performance budget, networking authority and play-test steps.",
+			],
+			architect: [
+				"opus",
+				"medium",
+				"Decide gameplay system structure and authority model when systems interact or replicate.",
+			],
+			implementer: [
+				"sonnet",
+				"medium",
+				"Implement in the engine's conventions; keep logic frame-rate independent.",
+			],
+			reviewer: [
+				"sonnet",
+				"high",
+				"Check frame-rate independence, per-frame cost, engine conventions and play-test steps.",
+			],
+			quick: [
+				"haiku",
+				"medium",
+				`${SHORT} Typical: a tuning value or a UI string.`,
+			],
+		}),
 		customRoles: [
-			reviewRole(
-				"gamedev-gameplay-reviewer",
-				"Gameplay Systems Reviewer",
-				"Checks gameplay changes for state and timing bugs.",
-				"Review only changed gameplay systems: state transitions, frame-rate dependence, input edge cases, and interactions with existing systems. Suggest a concrete play-test.",
-				[
+			reviewer({
+				id: "gamedev-gameplay-reviewer",
+				name: "Gameplay Systems Reviewer",
+				description: "Checks gameplay state, timing and input changes.",
+				instructions:
+					"For movement, input, combat, abilities, physics, gameplay state or replicated behaviour: check timing, state transitions, interruptions, frame-rate dependence, input edge cases and interactions with existing systems; for multiplayer, authority and synchronization. Give concrete play-test scenarios. Never claim a play-test happened without evidence.",
+				keywords: [
 					"gameplay",
 					"player",
 					"input",
@@ -605,8 +1201,13 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 					"ability",
 					"combat",
 					"movement",
+					"replicat",
+					"multiplayer",
+					"spawn",
 				],
-			),
+				model: "sonnet",
+				effort: "high",
+			}),
 		],
 	},
 ];

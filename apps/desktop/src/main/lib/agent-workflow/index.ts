@@ -20,6 +20,7 @@ export {
 export {
 	type ApprovedChecks,
 	type ControllerDeps,
+	changedFilesOf,
 	correctionFeedback,
 	customRoleContext,
 	type Decision,

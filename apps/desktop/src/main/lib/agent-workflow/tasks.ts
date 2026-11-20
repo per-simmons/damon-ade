@@ -128,6 +128,8 @@ export interface TaskRun {
 	role?: string;
 	/** The specialist whose configuration the run used. */
 	specialist?: string;
+	/** Set when the environment overrides the requested effort. */
+	effortNote?: string;
 	/** For a custom-role run: which role, and whether it could edit files. */
 	customRoleId?: string;
 	customAccess?: "read-only" | "edit";

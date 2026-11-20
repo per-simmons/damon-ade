@@ -85,6 +85,48 @@ const SIMPLE_TERMS = [
 	"one line",
 ];
 
+/**
+ * Short edits that are still risky: never routed to the Quick Worker,
+ * whatever their length. Task risk matters more than line count.
+ */
+const HIGH_RISK_TERMS = [
+	"auth",
+	"login",
+	"logout",
+	"password",
+	"permission",
+	"role check",
+	"access control",
+	"admin",
+	"token",
+	"secret",
+	"credential",
+	"session",
+	"cookie",
+	"encrypt",
+	"decrypt",
+	"hash",
+	"sanitiz",
+	"escape",
+	"injection",
+	"xss",
+	"csrf",
+	"cors",
+	"sql",
+	"migration",
+	"drop ",
+	"delete data",
+	"truncate",
+	"payment",
+	"billing",
+	"pii",
+	"privacy",
+	"upload",
+	"exec",
+	"shell",
+	"deploy",
+];
+
 /** Things that look like file paths or file names: a/b, x.ts, ./y. */
 const FILE_REFERENCE =
 	/(?:^|[\s`'"(])(?:\.{0,2}\/)?[\w@-]+(?:\/[\w@.-]+)+|\b[\w-]+\.(?:tsx?|jsx?|mjs|cjs|py|go|rs|java|kt|rb|php|cs|swift|css|scss|html|json|ya?ml|toml|md|sql|sh)\b/g;
@@ -126,6 +168,18 @@ export function classifyTask(description: string): RouteDecision {
 	}
 	if (files >= 4) {
 		return { route: "plan", reasons: [`${files} files mentioned`] };
+	}
+	const risky = matchedTerms(text, HIGH_RISK_TERMS);
+	if (risky.length > 0 && complex.length === 0) {
+		return {
+			route: "implement",
+			reasons: [
+				`touches ${risky
+					.slice(0, 2)
+					.map((t) => t.trim())
+					.join(", ")}: not a quick change, however short`,
+			],
+		};
 	}
 	if (simple.length > 0 && complex.length === 0 && words <= 30 && files <= 1) {
 		return {

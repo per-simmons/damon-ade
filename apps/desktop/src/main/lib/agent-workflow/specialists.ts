@@ -62,6 +62,12 @@ export interface CustomRole {
 	trigger: CustomRoleTrigger;
 	/** Run only when the task mentions one of these (empty = always). */
 	keywords: string[];
+	/**
+	 * Also run when a file the task changed has one of these in its path
+	 * (after-implementation roles only), so a sensitive change is reviewed
+	 * even when the request never named it.
+	 */
+	paths?: string[];
 	expectedOutput: string;
 	model?: string;
 	effort?: EffortLevel;
@@ -483,13 +489,18 @@ export function applicableCustomRoles(
 	resolved: ResolvedSpecialist | undefined,
 	description: string,
 	trigger: CustomRoleTrigger,
+	changedFiles: string[] = [],
 ): ResolvedSpecialist["customRoles"] {
 	if (!resolved) return [];
+	const files = changedFiles.map((f) => f.replace(/\\/g, "/").toLowerCase());
 	return resolved.customRoles.filter(
 		(role) =>
 			role.trigger === trigger &&
 			(role.keywords.length === 0 ||
-				role.keywords.some((k) => mentions(description, k))),
+				role.keywords.some((k) => mentions(description, k)) ||
+				(role.paths ?? []).some((fragment) =>
+					files.some((f) => f.includes(fragment.toLowerCase())),
+				)),
 	);
 }
 
@@ -535,6 +546,7 @@ function normalizeCustomRoles(roles: CustomRole[] | undefined): CustomRole[] {
 		description: r.description?.trim() ?? "",
 		instructions: r.instructions?.trim() ?? "",
 		keywords: (r.keywords ?? []).map((k) => k.trim()).filter(Boolean),
+		paths: r.paths?.map((k) => k.trim()).filter(Boolean),
 		expectedOutput:
 			r.expectedOutput?.trim() ||
 			(r.access === "read-only"
@@ -595,9 +607,9 @@ export function saveSpecialist(
 		instructions: true,
 		models: true,
 	};
-	// Applying a template adds its roles to the one Roles list.
+	// Applying a template's role settings adds its roles to the one Roles list.
 	const applied =
-		input.templateId && templateUses.instructions && homeDir
+		input.templateId && templateUses.models && homeDir
 			? applyTemplateRoles(
 					normalizeCustomRoles(input.customRoles),
 					findTemplate(homeDir, input.templateId),

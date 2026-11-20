@@ -194,13 +194,15 @@ describe.if(bash !== null && git !== null)("specialists and roles", () => {
 			model: "opus",
 			source: { model: "specialist" },
 		});
+		// The Backend preset sets every role's model and effort explicitly.
 		expect(spec.effective.roles.implementer).toMatchObject({
 			model: "sonnet",
+			effort: "medium",
 			maxTurns: 12,
-			source: { model: "global", maxTurns: "specialist" },
+			source: { model: "template", effort: "template", maxTurns: "specialist" },
 		});
 		expect(spec.effective.roles.planner.instructions[0]).toContain(
-			"authorization checks",
+			"Cover validation, authorization",
 		);
 
 		// Changing a global default leaves explicit customizations alone.
@@ -210,8 +212,10 @@ describe.if(bash !== null && git !== null)("specialists and roles", () => {
 		settingsModule.saveWorkflowSettings(TEST_HOME, s);
 		const after = (await specialists.list({ workspaceId: "ws-shop" }))
 			.specialists[0];
+		// The specialist's own choice and the template's preset both outrank
+		// the global default.
 		expect(after.effective.roles.reviewer.model).toBe("opus");
-		expect(after.effective.roles.implementer.model).toBe("opus");
+		expect(after.effective.roles.implementer.model).toBe("sonnet");
 		settingsModule.saveWorkflowSettings(
 			TEST_HOME,
 			settingsModule.defaultWorkflowSettings(),
@@ -313,7 +317,12 @@ describe.if(bash !== null && git !== null)("specialists and roles", () => {
 		const calls = fake.calls().slice(before);
 		// The specialty and role instructions reach the prompts.
 		expect(calls[0].stdin).toContain("## Specialty: Backend (Backend)");
-		expect(calls[0].stdin).toContain("Enforce authorization");
+		expect(calls[0].stdin).toContain(
+			"Enforce authentication and authorization",
+		);
+		// Effort reaches the runner too: Backend implementer medium, reviewer high.
+		expect(flag(calls[0].args, "--effort")).toBe("medium");
+		expect(flag(calls[4].args, "--effort")).toBe("high");
 		expect(calls[1].stdin).toContain("You are the API Contract Reviewer");
 		expect(calls[1].args).toContain("--disallowedTools");
 		expect(calls[2].stdin).toContain("API Contract Reviewer found problems");
@@ -321,7 +330,9 @@ describe.if(bash !== null && git !== null)("specialists and roles", () => {
 		expect(flag(calls[0].args, "--model")).toBe("claude-sonnet-5-5");
 		expect(flag(calls[0].args, "--max-turns")).toBe("12");
 		expect(flag(calls[4].args, "--model")).toBe("claude-opus-5-5");
-		expect(calls[4].stdin).toContain("check in particular: input validation");
+		expect(calls[4].stdin).toContain(
+			"Check validation, authorization, transactions",
+		);
 		for (const call of calls) {
 			expect(call.args).not.toContain("--dangerously-skip-permissions");
 		}
@@ -448,6 +459,7 @@ describe.if(bash !== null && git !== null)("specialists and roles", () => {
 		).toEqual([
 			["Copy Editor", null],
 			["Accessibility Reviewer", "ui"],
+			["Visual Consistency Reviewer", "ui"],
 		]);
 		expect(saved.appliedTemplates).toEqual(["ui"]);
 		let spec = (await specialists.list({ workspaceId: "ws-web" }))
@@ -455,6 +467,7 @@ describe.if(bash !== null && git !== null)("specialists and roles", () => {
 		expect(spec.effective.customRoles.map((r) => r.name)).toEqual([
 			"Copy Editor",
 			"Accessibility Reviewer",
+			"Visual Consistency Reviewer",
 		]);
 
 		// 2. Its model and instructions are edited like any role.
@@ -490,6 +503,7 @@ describe.if(bash !== null && git !== null)("specialists and roles", () => {
 			expect(again.customRoles.map((r) => r.name)).toEqual([
 				"Copy Editor",
 				"Accessibility Reviewer",
+				"Visual Consistency Reviewer",
 			]);
 			const reviewer = again.customRoles.find(
 				(r) => r.name === "Accessibility Reviewer",
@@ -538,6 +552,7 @@ describe.if(bash !== null && git !== null)("specialists and roles", () => {
 		expect(reloaded.customRoles.map((r) => r.name)).toEqual([
 			"Copy Editor",
 			"Accessibility Reviewer",
+			"Visual Consistency Reviewer",
 		]);
 	}, 60_000);
 

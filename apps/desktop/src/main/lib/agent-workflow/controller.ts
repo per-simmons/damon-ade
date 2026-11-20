@@ -642,7 +642,9 @@ export function taskSpecialists(
 export function customRoleContext(
 	specialists: TaskSpecialists,
 	task: TaskRecord,
-): DecisionContext["customRoles"] {
+	/** Files the task has changed so far (for after-implementation roles). */
+	changedFiles: string[] = [],
+): NonNullable<DecisionContext["customRoles"]> {
 	// A quick change stays quick: no extra roles.
 	if (task.route === "quick" || !specialists.primary) {
 		return { before: [], after: [] };
@@ -663,6 +665,7 @@ export function customRoleContext(
 			specialists.primary,
 			text,
 			"after-implementation",
+			changedFiles,
 		)
 			.filter((r) => r.access === "read-only")
 			.map(ref),
@@ -699,9 +702,27 @@ export function stageRouting(
 		: kind === "plan" && task.route === "exceptional"
 			? "architect"
 			: STAGE_ROLE[kind as Exclude<ModelStage, "custom">];
-	const resolvedRole =
+	let resolvedRole =
 		specialists.primary?.roles[role] ??
 		resolveRole(role, settings, undefined, undefined, task.roleOverrides);
+	// The Exceptional route is the escalation tier: it plans with the global
+	// Architect (Fable by default) unless the user set this specialist's or
+	// task's Architect model themselves. A template's ordinary Architect
+	// preset does not downgrade it.
+	if (
+		!customRole &&
+		kind === "plan" &&
+		task.route === "exceptional" &&
+		resolvedRole.source.model === "template"
+	) {
+		resolvedRole = resolveRole(
+			"architect",
+			settings,
+			undefined,
+			undefined,
+			task.roleOverrides,
+		);
+	}
 	return {
 		customRole,
 		resolvedRole,
@@ -715,6 +736,15 @@ export function stageRouting(
 				: resolvedRole.source.model,
 		},
 	};
+}
+
+/** Files the task has changed so far (empty outside git). */
+export function changedFilesOf(task: TaskRecord): string[] {
+	try {
+		return taskChanges(task.identity).files;
+	} catch {
+		return [];
+	}
 }
 
 /** The specialty guidance a stage gets (empty without a specialist). */
@@ -1300,6 +1330,7 @@ export class TaskController {
 				customRoles: customRoleContext(
 					taskSpecialists(this.deps.homeDir, project, task, settings),
 					task,
+					changedFilesOf(task),
 				),
 			},
 		);
@@ -1465,6 +1496,9 @@ export class TaskController {
 			costState: "pending",
 			role: customRole?.name ?? resolvedRole.label,
 			specialist: specialists.primary?.specialist.name,
+			effortNote: this.deps.env?.CLAUDE_CODE_EFFORT_LEVEL
+				? `CLAUDE_CODE_EFFORT_LEVEL=${this.deps.env.CLAUDE_CODE_EFFORT_LEVEL} overrides the requested effort`
+				: undefined,
 			customRoleId: customRole?.id,
 			customAccess: customRole?.access,
 		};

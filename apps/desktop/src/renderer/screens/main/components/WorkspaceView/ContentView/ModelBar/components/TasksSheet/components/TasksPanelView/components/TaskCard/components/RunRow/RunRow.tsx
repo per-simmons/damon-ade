@@ -43,6 +43,18 @@ export function RunRow({ run, onOpenSession }: RunRowProps) {
 						{observed.length > 0 ? ` (reported ${observed.join(", ")})` : ""}
 					</span>
 				)}
+				{run.effort && (
+					<span
+						className="text-muted-foreground"
+						title={
+							run.effortNote ??
+							"The effort ADE requested; Claude Code does not report the effective effort back"
+						}
+					>
+						effort {run.effort} (requested)
+						{run.effortNote ? " · overridden by the environment" : ""}
+					</span>
+				)}
 				{run.fallbackFrom && (
 					<span className="text-amber-600">
 						cheaper retry of {run.fallbackFrom}

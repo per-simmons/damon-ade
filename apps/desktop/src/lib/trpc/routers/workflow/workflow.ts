@@ -7,6 +7,7 @@ import {
 	activeRun,
 	buildResumeCommand,
 	captureIdentity,
+	changedFilesOf,
 	chooseSpecialists,
 	codeState,
 	createTask,
@@ -312,7 +313,11 @@ function describeTask(
 			? undefined
 			: decideNext(task, files, checks, settings, {
 					codeState: probes.codeStateOf(task.identity.worktreePath),
-					customRoles: customRoleContext(specialists, task),
+					customRoles: customRoleContext(
+						specialists,
+						task,
+						changedFilesOf(task),
+					),
 				});
 	let nextRouting: ReturnType<typeof stageRouting>["routing"] | null = null;
 	if (next?.type === "run") {
@@ -407,6 +412,7 @@ function describeTask(
 			model: run.model ?? null,
 			observedModels: run.observedModels ?? [],
 			effort: run.effort ?? null,
+			effortNote: run.effortNote ?? null,
 			maxTurns: run.maxTurns ?? null,
 			permissionMode: run.permissionMode ?? null,
 			maxBudgetUsd: run.maxBudgetUsd ?? null,
