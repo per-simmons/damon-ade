@@ -28,6 +28,8 @@ import { TaskHistory } from "./components/TaskHistory";
 interface TaskCardProps {
 	task: TaskView;
 	actions: TaskActions;
+	/** A team request's subtasks, in the order they run. */
+	subtasks?: TaskView[];
 }
 
 /**
@@ -36,7 +38,7 @@ interface TaskCardProps {
  * question. In Manual mode (or while an Auto task is paused or blocked) each
  * step has its own button, disabled with the reason when it cannot run.
  */
-export function TaskCard({ task, actions }: TaskCardProps) {
+export function TaskCard({ task, actions, subtasks = [] }: TaskCardProps) {
 	const [answer, setAnswer] = useState("");
 	const [model, setModel] = useState<string>(BY_ROLE);
 	const [budget, setBudget] = useState(String(task.limits.budgetUsd));
@@ -49,8 +51,13 @@ export function TaskCard({ task, actions }: TaskCardProps) {
 		task.state === "blocked" ||
 		task.state === "failed" ||
 		(task.state === "needs-input" && task.planQuestions.length === 0);
+	// A team request has no steps of its own: its subtasks do the work.
 	const showSteps =
-		!finished && !elsewhere && (task.mode === "manual" || stopped) && !running;
+		!task.isRequest &&
+		!finished &&
+		!elsewhere &&
+		(task.mode === "manual" || stopped) &&
+		!running;
 	// Uncertain costs count at their cap, as in ADE's budget decisions. A run
 	// in progress always counts at its cap (the rest of the budget), so the
 	// budget prompt waits until it has finished and reported its cost.
@@ -86,7 +93,19 @@ export function TaskCard({ task, actions }: TaskCardProps) {
 				</div>
 			</div>
 
-			{task.routeBy === "ai" && (
+			{task.isRequest && (
+				<p className="text-xs text-muted-foreground" data-task-request>
+					{task.subtaskSlugs.length
+						? `Team request: the Coordinator split it into ${task.subtaskSlugs.length} subtask(s), run one after another${task.splitReason ? ` · ${task.splitReason}` : ""}`
+						: "Team request: the Coordinator (Sonnet, read-only) splits it into subtasks and assigns each to a specialist."}
+				</p>
+			)}
+			{task.parentSlug && (
+				<p className="text-xs text-muted-foreground" data-task-parent>
+					Subtask of a team request
+				</p>
+			)}
+			{task.routeBy === "ai" && !task.isRequest && (
 				<p className="text-xs text-muted-foreground" data-task-pathway>
 					{task.triage
 						? task.triage.applied
@@ -101,7 +120,11 @@ export function TaskCard({ task, actions }: TaskCardProps) {
 						: "Pathway: chosen by AI when the task starts"}
 				</p>
 			)}
-			<p className="text-xs text-muted-foreground" data-task-specialist>
+			<p
+				className="text-xs text-muted-foreground"
+				data-task-specialist
+				hidden={task.isRequest}
+			>
 				{task.specialist
 					? `Specialist: ${task.specialist.name} (${task.specialist.specialty})`
 					: "No specialist: default workflow"}
@@ -335,6 +358,19 @@ export function TaskCard({ task, actions }: TaskCardProps) {
 						/>
 					))}
 				</ol>
+			)}
+
+			{subtasks.length > 0 && (
+				<div className="space-y-2 border-l-2 pl-3" data-task-subtasks>
+					{subtasks.map((subtask, index) => (
+						<div key={subtask.slug} className="space-y-1">
+							<p className="text-xs font-medium text-muted-foreground">
+								Subtask {index + 1} of {subtasks.length}
+							</p>
+							<TaskCard task={subtask} actions={actions} />
+						</div>
+					))}
+				</div>
 			)}
 		</div>
 	);

@@ -170,6 +170,33 @@ Use \`git diff\` on those files. ${input.mayRunChecks && input.checks.length ? "
 End your reply with exactly one line: \`VERDICT: PASS\` or \`VERDICT: FAIL\`. Any FAIL criterion means FAIL.`;
 		}
 
+		case "split": {
+			const specialists = input.triage?.specialists ?? [];
+			return `${header}
+
+You are the Coordinator. Split this request into a few self-contained subtasks, each owned by one specialist. You do not do the work.
+
+## The request
+${task.description}
+
+## The team's specialists
+${specialists.length ? specialists.map((s) => `- "${s.name}" (${s.specialty})`).join("\n") : "- none (every subtask uses the default workflow; split only if it helps)"}
+
+## How to split
+- Look briefly at the code the request touches (search first; read only what you need).
+- Make between 1 and 6 subtasks. One subtask is fine when the request is small or belongs to one specialty; do not split for its own sake.
+- Order them so each one's dependencies come first (for example the API before the screen that calls it). They run one after another in this order, in the same folder.
+- Give each a short title and a description another engineer could do alone: what to change, the interfaces it must use or provide, and how to know it is done.
+- Assign each to the best specialist by name, or "none".
+- Choose each subtask's route ("quick", "implement", "plan", "exceptional") and models per role, as cheaply as is reliable: haiku only for trivial low-risk work, sonnet for normal work, opus for planning or reviewing difficult or risky work, fable only for exceptional architecture. Risky work (authentication, permissions, secrets, payments, data migrations, sending messages to people) is never "quick".
+
+## Return
+Do not edit any file. End your reply with one JSON block exactly like this:
+\`\`\`json
+{"subtasks": [{"title": "Email API", "description": "...", "specialist": "Backend", "route": "plan", "models": {"planner": "opus", "implementer": "sonnet", "reviewer": "sonnet"}}], "reason": "one sentence"}
+\`\`\``;
+		}
+
 		case "triage": {
 			const specialists = input.triage?.specialists ?? [];
 			return `${header}

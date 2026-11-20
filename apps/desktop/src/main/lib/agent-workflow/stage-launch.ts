@@ -24,7 +24,7 @@ export function stageModel(
 		return settings.roles.architect.model;
 	}
 	if (stage === "custom") return settings.roles.reviewer.model;
-	if (stage === "triage") return "sonnet";
+	if (stage === "triage" || stage === "split") return "sonnet";
 	return settings.roles[STAGE_ROLE[stage]].model;
 }
 

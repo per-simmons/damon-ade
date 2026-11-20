@@ -22,6 +22,8 @@ export interface TaskActions {
 		specialist: string;
 		/** Let a short AI run choose the pathway and models (Auto only). */
 		aiRouting: boolean;
+		/** A team request: a Coordinator splits it across the specialists. */
+		split: boolean;
 	}) => void;
 	onStart: (slug: string) => void;
 	onResume: (slug: string) => void;

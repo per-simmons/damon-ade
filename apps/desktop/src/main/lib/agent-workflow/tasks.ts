@@ -38,6 +38,8 @@ export const MODEL_STAGES = [
 	"custom",
 	/** The AI pathway choice before an Auto task starts (see triage.ts). */
 	"triage",
+	/** A team request's Coordinator, which splits it into subtasks. */
+	"split",
 ] as const;
 export type ModelStage = (typeof MODEL_STAGES)[number];
 
@@ -219,6 +221,14 @@ export interface TaskRecord {
 	routeBy?: "ai" | "rules" | "user";
 	/** The AI pathway choice, once made (or why ADE's rules were used). */
 	triage?: TriageDecision;
+	/** A team request: split into subtasks for the team's specialists. */
+	isRequest?: boolean;
+	/** For a team request: its subtasks, in the order they run. */
+	subtaskSlugs?: string[];
+	/** For a team request: the Coordinator's reason for the split. */
+	splitReason?: string;
+	/** For a subtask: the team request it belongs to. */
+	parentSlug?: string;
 }
 
 const MAX_DESCRIPTION_LENGTH = 20_000;

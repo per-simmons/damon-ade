@@ -670,6 +670,152 @@ describe.if(bash !== null && git !== null)("specialists and roles", () => {
 		expect(parseTriage('{"route":"teleport"}')).toBeUndefined();
 	}, 60_000);
 
+	it("a team request: the Coordinator splits it and each specialist's subtask runs in order", async () => {
+		const repo = makeRepo("team");
+		workspaces.set("ws-team", { root: repo, worktree: repo });
+		await tasks.setChecks({ workspaceId: "ws-team", commands: [] });
+		await specialists.save({
+			workspaceId: "ws-team",
+			specialist: { name: "Backend", specialty: "APIs and email" },
+		});
+		await specialists.save({
+			workspaceId: "ws-team",
+			specialist: { name: "Frontend", specialty: "Screens and buttons" },
+		});
+		fake.setSteps([
+			{
+				name: "split",
+				text: 'Looked at src/api.js.\n```json\n{"subtasks": [{"title": "Email API", "description": "Add sendTeacherEmail to src/mail.js.", "specialist": "Backend", "route": "implement", "models": {"implementer": "opus", "reviewer": "sonnet"}}, {"title": "Email button", "description": "Add a button that calls sendTeacherEmail.", "specialist": "Frontend", "route": "quick", "models": {"quick": "haiku"}}, {"title": "", "description": "ignored: no title"}], "reason": "the API comes first, then the screen that calls it"}\n```',
+				cost: 0.02,
+			},
+			{
+				name: "api",
+				write: {
+					"src/mail.js": "export const sendTeacherEmail = () => true;\n",
+					"{task}/progress.md": "Status: implemented\n",
+				},
+				cost: 0.05,
+			},
+			{ name: "api-review", text: "VERDICT: PASS", cost: 0.01 },
+			{
+				name: "button",
+				write: { "src/button.js": "export const button = 1;\n" },
+				cost: 0.01,
+			},
+			{ name: "button-review", text: "VERDICT: PASS", cost: 0.01 },
+		]);
+		const before = fake.calls().length;
+		const created = await tasks.createTask({
+			workspaceId: "ws-team",
+			description: "Add the ability to email my teacher in my app",
+			split: true,
+		});
+		await controller.idle();
+		const all = (await tasks.getProjectTasks({ workspaceId: "ws-team" })).tasks;
+		const request = all.find((t) => t.slug === created.slug);
+		expect(request?.isRequest).toBe(true);
+		expect(request?.runs.map((r) => [r.kind, r.role])).toEqual([
+			["split", "Coordinator"],
+		]);
+		expect(request?.splitReason).toContain("the API comes first");
+		expect(request?.subtaskSlugs).toHaveLength(2);
+		const [api, button] = (request?.subtaskSlugs ?? []).map((slug) =>
+			all.find((t) => t.slug === slug),
+		);
+		expect(api?.title).toBe("Email API");
+		expect(api?.parentSlug).toBe(created.slug);
+		expect(api?.specialist?.name).toBe("Backend");
+		expect(api?.route).toBe("implement");
+		expect(api?.runs.map((r) => [r.kind, r.model])).toEqual([
+			["implement", "claude-opus-5-5"],
+			["review", "claude-sonnet-5-5"],
+		]);
+		expect(api?.state).toBe("done");
+		expect(button?.specialist?.name).toBe("Frontend");
+		expect(button?.runs.map((r) => [r.kind, r.model])).toEqual([
+			["quick", "claude-haiku-5-5"],
+			["review", expect.any(String)],
+		]);
+		expect(button?.state).toBe("done");
+		expect(request?.state).toBe("done");
+		expect(request?.stateReason).toContain("all 2 subtask(s) are done");
+
+		const calls = fake.calls().slice(before);
+		// The Coordinator is short, read-only and on Sonnet at medium effort.
+		expect(flag(calls[0].args, "--model")).toBe("claude-sonnet-5-5");
+		expect(flag(calls[0].args, "--effort")).toBe("medium");
+		expect(flag(calls[0].args, "--max-turns")).toBe("10");
+		expect(calls[0].args).toContain("--disallowedTools");
+		expect(calls[0].stdin).toContain("You are the Coordinator");
+		expect(calls[0].stdin).toContain('"Backend" (APIs and email)');
+		// The subtasks ran one after another, the API first.
+		expect(calls.map((c) => c.step)).toEqual([
+			"split",
+			"api",
+			"api-review",
+			"button",
+			"button-review",
+		]);
+		expect(calls[1].stdin).toContain("Add sendTeacherEmail");
+		// Each subtask's changes are its own: the button's review sees only its file.
+		expect(calls[4].stdin).toContain(
+			"## This task's changes\n- src/button.js\n\n",
+		);
+		expect(calls[4].stdin).toContain(
+			"ignore their pre-existing edits:\n- src/mail.js",
+		);
+	}, 90_000);
+
+	it("a team request waits when a subtask stops, cancels its subtasks, and a bad split blocks", async () => {
+		fake.setSteps([
+			{ name: "split", text: "I would do it all at once.", cost: 0.01 },
+		]);
+		const bad = await tasks.createTask({
+			workspaceId: "ws-team",
+			description: "Rebuild the settings screen",
+			split: true,
+		});
+		await controller.idle();
+		let all = (await tasks.getProjectTasks({ workspaceId: "ws-team" })).tasks;
+		const blocked = all.find((t) => t.slug === bad.slug);
+		expect(blocked?.state).toBe("blocked");
+		expect(blocked?.stateReason).toContain("could not be read");
+		expect(blocked?.subtaskSlugs).toEqual([]);
+
+		fake.setSteps([
+			{
+				name: "split",
+				text: '```json\n{"subtasks": [{"title": "Settings API", "description": "Add a settings endpoint.", "specialist": "Backend", "route": "implement"}, {"title": "Settings screen", "description": "Show the settings.", "specialist": "Nobody"}], "reason": "API first"}\n```',
+				cost: 0.01,
+			},
+			// The first subtask fails its run: the request waits.
+			{ name: "api", exit: 1, isError: true, text: "crashed", cost: 0.01 },
+		]);
+		const created = await tasks.createTask({
+			workspaceId: "ws-team",
+			description: "Add a settings page",
+			split: true,
+		});
+		await controller.idle();
+		all = (await tasks.getProjectTasks({ workspaceId: "ws-team" })).tasks;
+		const request = all.find((t) => t.slug === created.slug);
+		const [first, second] = (request?.subtaskSlugs ?? []).map((slug) =>
+			all.find((t) => t.slug === slug),
+		);
+		expect(second?.specialist).toBeNull();
+		expect(second?.specialistReason).toContain('"Nobody"');
+		expect(first?.state).not.toBe("done");
+		expect(second?.state).toBe("idle");
+		expect(request?.state).toBe("paused");
+		expect(request?.stateReason).toContain('Subtask "Settings API"');
+
+		await tasks.cancel({ workspaceId: "ws-team", slug: created.slug });
+		all = (await tasks.getProjectTasks({ workspaceId: "ws-team" })).tasks;
+		for (const slug of [created.slug, ...(request?.subtaskSlugs ?? [])]) {
+			expect(all.find((t) => t.slug === slug)?.state).toBe("cancelled");
+		}
+	}, 90_000);
+
 	it("an older specialist keeps a template role it switched off when it moves to one list", async () => {
 		const project = (
 			await import("main/lib/agent-workflow/project-workflow")

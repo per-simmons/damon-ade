@@ -17,6 +17,7 @@ export const RUN_LABELS: Record<RunKind, string> = {
 	escalate: "Escalate",
 	custom: "Specialist role",
 	triage: "Choose pathway",
+	split: "Split across the team",
 	checks: "Run checks",
 };
 

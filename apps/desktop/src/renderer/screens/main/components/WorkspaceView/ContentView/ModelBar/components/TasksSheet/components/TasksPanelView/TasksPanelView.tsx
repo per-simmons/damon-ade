@@ -19,6 +19,7 @@ import type {
 	RoutePreview,
 	SpecialistOption,
 	TaskActions,
+	TaskView,
 } from "../../types";
 import { usd } from "../../utils/costLabel";
 import { ChecksSection } from "./components/ChecksSection";
@@ -58,6 +59,10 @@ export function TasksPanelView({
 	);
 	const [mode, setMode] = useState<Mode>("auto");
 	const [useHistory, setUseHistory] = useState(true);
+	const [teamRequest, setTeamRequest] = useState(false);
+	const split = teamRequest && mode === "auto";
+	const tasks = data?.tasks ?? [];
+	const bySlug = new Map(tasks.map((t) => [t.slug, t]));
 	const historyAvailable = data?.historyAvailable ?? 0;
 	const usage = data?.usage;
 
@@ -66,12 +71,25 @@ export function TasksPanelView({
 			<section className="space-y-3">
 				<Textarea
 					aria-label="Task description"
-					placeholder="What should be done?"
+					placeholder={
+						split
+							? "What should the team do? The Coordinator splits it across your specialists."
+							: "What should be done?"
+					}
 					rows={4}
 					value={description}
 					onChange={(event) => actions.onDescriptionChange(event.target.value)}
 				/>
-				{route === BY_AI && mode === "auto" && (
+				{split && (
+					<p className="text-xs text-muted-foreground" data-team-request>
+						Team request: a Coordinator run (Sonnet, medium effort, read-only)
+						reads the request and the code, splits it into up to 6 subtasks in
+						the order they depend on each other, and gives each to the best
+						specialist with its own pathway and models. ADE then runs them one
+						after another, each with its checks and review.
+					</p>
+				)}
+				{!split && route === BY_AI && mode === "auto" && (
 					<p className="text-xs text-muted-foreground" data-route-ai>
 						Route: chosen by AI. When the task starts, a short read-only Sonnet
 						run (low effort, a few cents) looks at the request and the code and
@@ -80,6 +98,7 @@ export function TasksPanelView({
 					</p>
 				)}
 				{preview &&
+					!split &&
 					(route === AUTOMATIC || (route === BY_AI && mode === "manual")) && (
 						<p className="text-xs text-muted-foreground">
 							Route: <strong>{ROUTE_LABELS[preview.route]}</strong>, first step
@@ -87,7 +106,7 @@ export function TasksPanelView({
 						</p>
 					)}
 				<div className="flex flex-wrap items-end gap-3">
-					<div className="space-y-1">
+					<div className="space-y-1" hidden={split}>
 						<Label className="text-xs">Route</Label>
 						<Select
 							value={route}
@@ -119,7 +138,19 @@ export function TasksPanelView({
 							{mode === "auto" ? "Auto" : "Manual"}
 						</Label>
 					</div>
-					{specialists.length > 0 && (
+					{mode === "auto" && (
+						<div className="flex items-center gap-2 pb-2">
+							<Switch
+								id="new-task-team"
+								checked={teamRequest}
+								onCheckedChange={setTeamRequest}
+							/>
+							<Label htmlFor="new-task-team" className="text-xs">
+								Split across the team
+							</Label>
+						</div>
+					)}
+					{specialists.length > 0 && !split && (
 						<div className="space-y-1">
 							<Label className="text-xs">Specialist</Label>
 							<Select value={specialist} onValueChange={setSpecialist}>
@@ -161,10 +192,15 @@ export function TasksPanelView({
 								mode,
 								useHistory: historyAvailable > 0 && useHistory,
 								specialist,
+								split,
 							})
 						}
 					>
-						{mode === "auto" ? "Run task" : "Create task"}
+						{split
+							? "Send to the team"
+							: mode === "auto"
+								? "Run task"
+								: "Create task"}
 					</Button>
 				</div>
 				<p className="text-xs text-muted-foreground">
@@ -201,14 +237,24 @@ export function TasksPanelView({
 			/>
 
 			<section className="space-y-3">
-				{data?.tasks.length === 0 && (
+				{tasks.length === 0 && (
 					<p className="text-sm text-muted-foreground">
 						No tasks in this project yet.
 					</p>
 				)}
-				{data?.tasks.map((task) => (
-					<TaskCard key={task.slug} task={task} actions={actions} />
-				))}
+				{tasks
+					// Subtasks show inside their team request.
+					.filter((task) => !task.parentSlug || !bySlug.has(task.parentSlug))
+					.map((task) => (
+						<TaskCard
+							key={task.slug}
+							task={task}
+							actions={actions}
+							subtasks={task.subtaskSlugs
+								.map((slug) => bySlug.get(slug))
+								.filter((t): t is TaskView => !!t)}
+						/>
+					))}
 			</section>
 
 			{data && usage && (

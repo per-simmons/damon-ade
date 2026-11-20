@@ -400,6 +400,11 @@ function describeTask(
 		routeBy: task.routeBy ?? null,
 		/** The AI pathway choice, once made. */
 		triage: task.triage ?? null,
+		/** A team request: the Coordinator splits it into subtasks. */
+		isRequest: task.isRequest ?? false,
+		subtaskSlugs: task.subtaskSlugs ?? [],
+		splitReason: task.splitReason ?? null,
+		parentSlug: task.parentSlug ?? null,
 		runs: task.runs.map((run, index) => ({
 			id: run.id,
 			role: run.role ?? null,
@@ -698,6 +703,8 @@ export const createWorkflowRouter = (
 					useHistory: z.boolean().default(true),
 					/** Let a short AI run choose the pathway and models (Auto only). */
 					aiRouting: z.boolean().default(false),
+					/** A team request: a Coordinator splits it across the specialists (Auto only). */
+					split: z.boolean().default(false),
 					/** "auto": ADE picks from the team's specialists; "none": default workflow. */
 					specialist: z.string().default("auto"),
 					/** Model settings for this task only. */
@@ -728,12 +735,21 @@ export const createWorkflowRouter = (
 						input.roleOverrides,
 					);
 					const routed: TaskRecord =
-						input.aiRouting && input.mode === "auto" && !input.route
-							? { ...withSpecialist, routeBy: "ai" }
-							: {
-									...withSpecialist,
-									routeBy: input.route ? "user" : "rules",
-								};
+						input.split && input.mode === "auto"
+							? {
+									...created,
+									isRequest: true,
+									routeBy: "ai",
+									routeReasons: ["a team request: the Coordinator splits it"],
+									specialistReason:
+										"the Coordinator assigns a specialist to each subtask",
+								}
+							: input.aiRouting && input.mode === "auto" && !input.route
+								? { ...withSpecialist, routeBy: "ai" }
+								: {
+										...withSpecialist,
+										routeBy: input.route ? "user" : "rules",
+									};
 					saveTask(ctx.project, routed);
 					const task = input.useHistory
 						? withHistory(ctx.project, routed, [])

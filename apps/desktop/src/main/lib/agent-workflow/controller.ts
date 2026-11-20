@@ -7,6 +7,7 @@ import {
 import { checksPassed, loadProjectChecks } from "./checks";
 import {
 	branchChange,
+	captureIdentity,
 	codeState,
 	currentBranch,
 	taskChanges,
@@ -22,6 +23,7 @@ import {
 	resolveSpecialist,
 	type Specialist,
 } from "./specialists";
+import { parseSplit, SPLIT_ROUTING } from "./split";
 import { parseVerdict, stagePrompt } from "./stage-prompts";
 import type {
 	PermissionMode,
@@ -33,6 +35,7 @@ import type {
 import {
 	activeRun,
 	type CheckResult,
+	createTask,
 	getTask,
 	type ModelStage,
 	type RunKind,
@@ -67,7 +70,7 @@ import type { RoleName, WorkflowSettings } from "./workflow-settings";
 const IMPLEMENTATION_KINDS: RunKind[] = ["quick", "implement", "build", "fix"];
 
 export const STAGE_ROLE: Record<
-	Exclude<ModelStage, "custom" | "triage">,
+	Exclude<ModelStage, "custom" | "triage" | "split">,
 	RoleName
 > = {
 	quick: "quick",
@@ -335,6 +338,28 @@ export function decideNext(
 					reason: `The ${kind} run failed: ${(last.error ?? "unknown error").slice(0, 300)}`,
 				};
 		}
+	}
+
+	// A team request: the Coordinator splits it; its subtasks do the work
+	// (the controller runs them, see syncRequest).
+	if (task.isRequest) {
+		if (task.subtaskSlugs?.length) return { type: "none" };
+		const splitRun = lastIndex(
+			t,
+			(run) => run.kind === "split" && run.status === "succeeded",
+		);
+		if (splitRun >= 0) {
+			return {
+				type: "block",
+				reason:
+					"The Coordinator's split could not be read. Resume to try again, or describe the request as separate tasks.",
+			};
+		}
+		return {
+			type: "run",
+			kind: "split",
+			reason: "split the request across the team's specialists",
+		};
 	}
 
 	// "Chosen by AI": one short triage run picks the pathway first.
@@ -698,6 +723,26 @@ export function stageRouting(
 	kind: ModelStage,
 	customRoleId?: string,
 ) {
+	if (kind === "split") {
+		const resolvedRole = resolveRole(
+			"reviewer",
+			settings,
+			undefined,
+			undefined,
+			undefined,
+		);
+		return {
+			customRole: undefined,
+			resolvedRole: { ...resolvedRole, label: "Coordinator", instructions: [] },
+			routing: {
+				role: "Coordinator",
+				model: SPLIT_ROUTING.model,
+				effort: SPLIT_ROUTING.effort,
+				maxTurns: SPLIT_ROUTING.maxTurns,
+				modelSource: "global" as const,
+			},
+		};
+	}
 	if (kind === "triage") {
 		const resolvedRole = resolveRole(
 			"reviewer",
@@ -734,7 +779,7 @@ export function stageRouting(
 			: "implementer"
 		: kind === "plan" && task.route === "exceptional"
 			? "architect"
-			: STAGE_ROLE[kind as Exclude<ModelStage, "custom" | "triage">];
+			: STAGE_ROLE[kind as Exclude<ModelStage, "custom" | "triage" | "split">];
 	let resolvedRole =
 		specialists.primary?.roles[role] ??
 		resolveRole(role, settings, undefined, undefined, task.roleOverrides);
@@ -1022,6 +1067,10 @@ export class TaskController {
 
 	private changed(project: ProjectWorkflow, slug: string): void {
 		this.deps.onChange?.(project, slug);
+		const task = getTask(project, slug);
+		if (task?.parentSlug && task.state !== "running" && task.state !== "idle") {
+			this.kickRequest(project, task.parentSlug);
+		}
 	}
 
 	private load(project: ProjectWorkflow, slug: string): TaskRecord {
@@ -1105,6 +1154,9 @@ export class TaskController {
 			task.pauseRequested = false;
 			task.state = "idle";
 			task.stateReason = undefined;
+			if (task.isRequest && task.subtaskSlugs?.length) {
+				return this.syncRequest(project, task, { resumeChild: true });
+			}
 			if (task.mode === "manual") {
 				saveTask(project, task);
 				return task;
@@ -1117,6 +1169,12 @@ export class TaskController {
 	pause(project: ProjectWorkflow, slug: string): Promise<TaskRecord> {
 		return withTaskLock(project, slug, () => {
 			const task = this.load(project, slug);
+			// A team request pauses the subtask that is running.
+			for (const child of task.subtaskSlugs ?? []) {
+				if (getTask(project, child)?.state === "running") {
+					void this.pause(project, child);
+				}
+			}
 			task.pauseRequested = true;
 			if (!activeRun(task)) {
 				task.state = "paused";
@@ -1145,7 +1203,14 @@ export class TaskController {
 		await Promise.all(liveRuns.map(([, live]) => live.cancel()));
 		// Only this task's runs; other tasks keep running.
 		await this.idle(project, slug);
-		return this.load(project, slug);
+		const cancelled = this.load(project, slug);
+		for (const child of cancelled.subtaskSlugs ?? []) {
+			const sub = getTask(project, child);
+			if (sub && sub.state !== "done" && sub.state !== "cancelled") {
+				await this.cancel(project, child);
+			}
+		}
+		return cancelled;
 	}
 
 	setMode(
@@ -1344,6 +1409,9 @@ export class TaskController {
 			this.changed(project, task.slug);
 			return task;
 		}
+		if (task.isRequest && task.subtaskSlugs?.length) {
+			return this.syncRequest(project, task);
+		}
 		const busy = this.folderBusy(project, task);
 		if (busy) {
 			task.state = "paused";
@@ -1445,6 +1513,7 @@ export class TaskController {
 		const readOnly =
 			kind === "review" ||
 			kind === "triage" ||
+			kind === "split" ||
 			(kind === "custom" && customRole?.access === "read-only");
 		const configured =
 			options.modelOverride?.trim() ||
@@ -1491,7 +1560,7 @@ export class TaskController {
 						: undefined,
 				customRole,
 				triage:
-					kind === "triage"
+					kind === "triage" || kind === "split"
 						? {
 								specialists: listSpecialists(project).map((s) => ({
 									name: s.name,
@@ -1513,7 +1582,7 @@ export class TaskController {
 				: "") +
 			reconcileNote(task, kind) +
 			rerouteNote(task, kind) +
-			(kind === "triage"
+			(kind === "triage" || kind === "split"
 				? ""
 				: specialtyNote(
 						specialists,
@@ -1715,6 +1784,9 @@ export class TaskController {
 			if (run.kind === "triage") {
 				this.applyTriageResult(project, task, run);
 			}
+			if (run.kind === "split" && run.status === "succeeded") {
+				this.createSubtasks(project, task, run);
+			}
 
 			if (task.mode === "manual" || !continueAfter) {
 				task.state = run.status === "succeeded" ? "idle" : "blocked";
@@ -1735,6 +1807,148 @@ export class TaskController {
 			}
 			return this.advance(project, task);
 		});
+	}
+
+	/**
+	 * Turn the Coordinator's split into ordinary tasks: one per subtask, each
+	 * with its specialist, route and models, in the order they will run.
+	 */
+	private createSubtasks(
+		project: ProjectWorkflow,
+		request: TaskRecord,
+		run: TaskRun,
+	): void {
+		const plan = parseSplit(run.summary);
+		if (!plan) return;
+		const specialists = listSpecialists(project);
+		const slugs: string[] = [];
+		for (const sub of plan.subtasks) {
+			const wanted = sub.specialist?.toLowerCase();
+			const owner = wanted
+				? specialists.find(
+						(s) =>
+							s.name.toLowerCase() === wanted ||
+							s.specialty.toLowerCase() === wanted,
+					)
+				: undefined;
+			const created = createTask(project, {
+				description: `${sub.title}\n\n${sub.description}\n\n(Part of the team request "${request.title}".)`,
+				route: sub.route,
+				mode: "auto",
+				identity: request.identity,
+				limits: request.limits,
+			});
+			const child: TaskRecord = {
+				...created,
+				title: sub.title,
+				parentSlug: request.slug,
+				history: request.history,
+				routeBy: "ai",
+				routeReasons: ["assigned by the Coordinator"],
+				roleOverrides: Object.fromEntries(
+					Object.entries(sub.models).map(([role, model]) => [role, { model }]),
+				),
+				specialistId: owner?.id,
+				specialistReason: owner
+					? "assigned by the Coordinator"
+					: sub.specialist
+						? `the Coordinator named "${sub.specialist}", which is not a specialist here: default workflow`
+						: "default workflow (assigned by the Coordinator)",
+				triage: {
+					applied: true,
+					route: sub.route,
+					models: sub.models,
+					specialist: owner?.name,
+					reason: "assigned by the Coordinator",
+				},
+			};
+			saveTask(project, child);
+			slugs.push(child.slug);
+		}
+		request.subtaskSlugs = slugs;
+		request.splitReason = plan.reason;
+	}
+
+	/** Look at a team request's subtasks and move it forward. */
+	private kickRequest(project: ProjectWorkflow, slug: string): void {
+		this.track(
+			project,
+			slug,
+			withTaskLock(project, slug, () => {
+				const request = getTask(project, slug);
+				if (request) this.syncRequest(project, request);
+			}).catch((error) =>
+				console.warn("[workflow] Updating a team request failed:", error),
+			),
+		);
+	}
+
+	/**
+	 * A team request runs its subtasks one after another. It shows the
+	 * running subtask, waits with the reason when one needs the user, skips
+	 * cancelled ones, and is done when every subtask is.
+	 */
+	private syncRequest(
+		project: ProjectWorkflow,
+		request: TaskRecord,
+		options: { resumeChild?: boolean } = {},
+	): TaskRecord {
+		if (request.state === "done" || request.state === "cancelled") {
+			return request;
+		}
+		const children = (request.subtaskSlugs ?? [])
+			.map((s) => getTask(project, s))
+			.filter((t): t is TaskRecord => !!t);
+		const running = children.find((c) => c.state === "running");
+		const next = children.find(
+			(c) => c.state !== "done" && c.state !== "cancelled",
+		);
+		const done = children.filter((c) => c.state === "done").length;
+		if (running) {
+			request.state = "running";
+			request.stateReason = `Subtask ${children.indexOf(running) + 1} of ${children.length}: ${running.title}`;
+		} else if (!next) {
+			const skipped = children.length - done;
+			request.state = "done";
+			request.stateReason = `Verified: all ${done} subtask(s) are done${skipped ? `; ${skipped} cancelled` : ""}.`;
+		} else if (next.state === "idle") {
+			// Each subtask's changes are its own: measure them from now.
+			next.identity = captureIdentity(
+				next.identity.workspaceId,
+				next.identity.worktreePath,
+			);
+			saveTask(project, next);
+			request.state = "running";
+			request.stateReason = `Subtask ${children.indexOf(next) + 1} of ${children.length}: ${next.title}`;
+			this.track(
+				project,
+				next.slug,
+				this.start(project, next.slug).catch((error) =>
+					console.warn("[workflow] Starting a subtask failed:", error),
+				),
+			);
+		} else if (
+			options.resumeChild &&
+			(next.state === "paused" ||
+				next.state === "blocked" ||
+				next.state === "failed")
+		) {
+			request.state = "running";
+			request.stateReason = `Resuming subtask ${children.indexOf(next) + 1}: ${next.title}`;
+			this.track(
+				project,
+				next.slug,
+				this.resume(project, next.slug).catch((error) =>
+					console.warn("[workflow] Resuming a subtask failed:", error),
+				),
+			);
+		} else {
+			request.state = "paused";
+			request.stateReason = `Subtask "${next.title}" ${next.state === "needs-input" ? "needs your answer" : `stopped: ${next.stateReason ?? next.state}`}. Open it below.`;
+		}
+		saveTask(project, request);
+		this.changed(project, request.slug);
+		return request;
 	}
 
 	/**
