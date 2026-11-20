@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useTabsStore } from "renderer/stores/tabs/store";
 import { useTabsWithPresets } from "renderer/stores/tabs/useTabsWithPresets";
@@ -17,6 +17,19 @@ export function useTeamChatTab(workspaceId: string | undefined) {
 	const { openPreset } = useTabsWithPresets();
 	const tabs = useTabsStore((s) => s.tabs);
 	const setActiveTab = useTabsStore((s) => s.setActiveTab);
+	// Saved tabs load after start-up: decide only once they have, or a tab
+	// that survived the restart would be started a second time.
+	const [hydrated, setHydrated] = useState(() =>
+		useTabsStore.persist.hasHydrated(),
+	);
+	useEffect(() => {
+		if (hydrated) return;
+		if (useTabsStore.persist.hasHydrated()) {
+			setHydrated(true);
+			return;
+		}
+		return useTabsStore.persist.onFinishHydration(() => setHydrated(true));
+	}, [hydrated]);
 	const { data: launch } = electronTrpc.workflow.teamChatLaunch.useQuery(
 		{ workspaceId: workspaceId ?? "" },
 		{ enabled: !!workspaceId, staleTime: Number.POSITIVE_INFINITY },
@@ -25,7 +38,11 @@ export function useTeamChatTab(workspaceId: string | undefined) {
 	const existing =
 		workspaceId && launch?.enabled
 			? tabs.find(
-					(t) => t.workspaceId === workspaceId && t.name === launch.tabName,
+					// A preset's name is kept as the tab's title (`name` becomes the
+					// terminal's own title, e.g. "claude").
+					(t) =>
+						t.workspaceId === workspaceId &&
+						(t.userTitle ?? t.name) === launch.tabName,
 				)
 			: undefined;
 
@@ -45,11 +62,11 @@ export function useTeamChatTab(workspaceId: string | undefined) {
 	}, [workspaceId, launch, openPreset]);
 
 	useEffect(() => {
-		if (!workspaceId || !launch?.enabled) return;
+		if (!hydrated || !workspaceId || !launch?.enabled) return;
 		if (startedThisRun.has(workspaceId)) return;
 		startedThisRun.add(workspaceId);
 		if (!existing) start();
-	}, [workspaceId, launch, existing, start]);
+	}, [hydrated, workspaceId, launch, existing, start]);
 
 	const open = useCallback(() => {
 		if (!workspaceId) return;

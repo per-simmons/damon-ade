@@ -25,12 +25,12 @@ export function SpecialistCard({
 	}>;
 	return (
 		<div
-			className="space-y-1.5 rounded-md border p-3 text-xs"
+			className="space-y-2.5 rounded-lg border bg-card p-3 text-xs shadow-xs"
 			data-specialist={specialist.name}
 		>
 			<div className="flex items-start justify-between gap-2">
 				<div>
-					<p className="text-sm font-medium">{specialist.name}</p>
+					<p className="text-sm font-semibold">{specialist.name}</p>
 					<p className="text-muted-foreground">
 						{specialist.specialty}
 						{effective.templateName
@@ -52,16 +52,35 @@ export function SpecialistCard({
 					</Button>
 				</div>
 			</div>
-			<p className="text-muted-foreground">
-				Roles:{" "}
+			<div className="flex flex-wrap gap-1" data-specialist-roles>
 				{[
-					...roles.map((r) => `${r.label} (${r.model})`),
-					...effective.customRoles.map(
-						(r) =>
-							`${r.name} (${r.model ?? (r.access === "read-only" ? effective.roles.reviewer.model : effective.roles.implementer.model)})`,
-					),
-				].join(" · ")}
-			</p>
+					...roles.map((r) => ({
+						name: r.label,
+						model: r.model,
+						added: false,
+					})),
+					...effective.customRoles.map((r) => ({
+						name: r.name,
+						model:
+							r.model ??
+							(r.access === "read-only"
+								? effective.roles.reviewer.model
+								: effective.roles.implementer.model),
+						added: true,
+					})),
+				].map((role) => (
+					<span
+						key={role.name}
+						className={
+							role.added
+								? "rounded bg-primary/10 px-1.5 py-0.5 text-[11px] text-primary"
+								: "rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground"
+						}
+					>
+						{role.name} · {role.model}
+					</span>
+				))}
+			</div>
 			{effective.problems.map((problem) => (
 				<p key={problem} className="text-amber-600">
 					{problem}

@@ -10,6 +10,7 @@ import {
 import { Switch } from "@superset/ui/switch";
 import { Textarea } from "@superset/ui/textarea";
 import { useState } from "react";
+import { LuListTodo, LuPlay, LuUsers } from "react-icons/lu";
 import { AUTOMATIC, BY_AI, ROUTE_LABELS } from "../../constants";
 import type {
 	ChecksView,
@@ -67,10 +68,15 @@ export function TasksPanelView({
 	const usage = data?.usage;
 
 	return (
-		<div className="space-y-6 px-4 pb-6" data-panel="tasks">
-			<section className="space-y-3">
+		<div className="space-y-5 px-4 pb-6" data-panel="tasks">
+			<section className="space-y-3 rounded-lg border bg-card p-3 shadow-xs">
+				<div className="flex items-center gap-2">
+					<LuListTodo className="size-4 text-muted-foreground" aria-hidden />
+					<p className="text-sm font-semibold">New task</p>
+				</div>
 				<Textarea
 					aria-label="Task description"
+					className="resize-none"
 					placeholder={
 						split
 							? "What should the team do? The Coordinator splits it across your specialists."
@@ -82,21 +88,15 @@ export function TasksPanelView({
 				/>
 				{split && (
 					<p className="text-xs text-muted-foreground" data-team-request>
-						Team request: a Coordinator run (Sonnet, medium effort, read-only)
-						reads the request and the code, splits it into up to 6 subtasks and
-						gives each to the best specialist with its own pathway and models.
-						Each specialist's agent works in its own folder and branch;
-						independent subtasks run at the same time, and a subtask starts with
-						the work it builds on merged into its agent's branch. Each gets its
-						own checks and review.
+						A Coordinator (Sonnet, read-only) splits it into up to 6 subtasks
+						for your specialists' agents. Independent ones run at the same time;
+						each gets its own checks and review.
 					</p>
 				)}
 				{!split && route === BY_AI && mode === "auto" && (
 					<p className="text-xs text-muted-foreground" data-route-ai>
-						Route: chosen by AI. When the task starts, a short read-only Sonnet
-						run (low effort, a few cents) looks at the request and the code and
-						picks the pathway and the model for each role; then ADE runs it.
-						Fable joins only if the work gets stuck.
+						A short read-only Sonnet run (a few cents) picks the pathway and the
+						model for each role when the task starts.
 					</p>
 				)}
 				{preview &&
@@ -107,7 +107,7 @@ export function TasksPanelView({
 							on {preview.model}. {preview.reasons.join("; ")}
 						</p>
 					)}
-				<div className="flex flex-wrap items-end gap-3">
+				<div className="flex flex-wrap items-end gap-x-4 gap-y-2 border-t pt-3">
 					<div className="space-y-1" hidden={split}>
 						<Label className="text-xs">Route</Label>
 						<Select
@@ -116,7 +116,10 @@ export function TasksPanelView({
 								setRoute(value as Route | typeof AUTOMATIC | typeof BY_AI)
 							}
 						>
-							<SelectTrigger className="w-[190px]" aria-label="Route">
+							<SelectTrigger
+								className="h-8 w-[180px] text-xs"
+								aria-label="Route"
+							>
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
@@ -156,7 +159,10 @@ export function TasksPanelView({
 						<div className="space-y-1">
 							<Label className="text-xs">Specialist</Label>
 							<Select value={specialist} onValueChange={setSpecialist}>
-								<SelectTrigger className="w-[190px]" aria-label="Specialist">
+								<SelectTrigger
+									className="h-8 w-[180px] text-xs"
+									aria-label="Specialist"
+								>
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -184,6 +190,7 @@ export function TasksPanelView({
 						</div>
 					)}
 					<Button
+						className="ml-auto"
 						disabled={actions.busy || !description.trim()}
 						onClick={() =>
 							actions.onCreate({
@@ -198,6 +205,11 @@ export function TasksPanelView({
 							})
 						}
 					>
+						{split ? (
+							<LuUsers className="size-4" aria-hidden />
+						) : (
+							<LuPlay className="size-4" aria-hidden />
+						)}
 						{split
 							? "Send to the team"
 							: mode === "auto"
@@ -207,16 +219,14 @@ export function TasksPanelView({
 				</div>
 				<p className="text-xs text-muted-foreground">
 					{mode === "auto"
-						? "Auto: ADE runs every stage, the checks and an independent review, and corrects within your limits. It stops only to ask you something or when a limit is reached."
-						: "Manual: ADE creates the task; you run each step yourself."}
+						? "Auto runs every stage, the checks and an independent review, and stops only to ask you something or at a limit."
+						: "Manual: you run each step yourself."}
+					{historyAvailable > 0
+						? useHistory
+							? ` Uses relevant excerpts from ${historyAvailable} linked conversation(s), with no model call.`
+							: " No project history."
+						: ""}
 				</p>
-				{historyAvailable > 0 && (
-					<p className="text-xs text-muted-foreground">
-						{useHistory
-							? `ADE searches the ${historyAvailable} conversation(s) linked to this project (History) and gives the task only the relevant excerpts, as historical context. No model is used for this.`
-							: "This task gets no project history."}
-					</p>
-				)}
 				{data?.runtime === "codex" && (
 					<p className="text-xs text-amber-600">
 						This is a Codex workspace. ADE runs task stages with Claude Code;
@@ -239,10 +249,21 @@ export function TasksPanelView({
 			/>
 
 			<section className="space-y-3">
+				<div className="flex items-center justify-between">
+					<p className="text-sm font-semibold">Tasks</p>
+					{tasks.length > 0 && (
+						<span className="text-xs text-muted-foreground">
+							{tasks.filter((t) => !t.parentSlug).length} total
+						</span>
+					)}
+				</div>
 				{tasks.length === 0 && (
-					<p className="text-sm text-muted-foreground">
-						No tasks in this project yet.
-					</p>
+					<div className="rounded-lg border border-dashed px-4 py-8 text-center">
+						<p className="text-sm font-medium">No tasks yet</p>
+						<p className="mt-1 text-xs text-muted-foreground">
+							Describe one above, or plan a bigger piece of work in Team chat.
+						</p>
+					</div>
 				)}
 				{tasks
 					// Subtasks show inside their team request.
@@ -260,7 +281,7 @@ export function TasksPanelView({
 			</section>
 
 			{data && usage && (
-				<div className="space-y-1 break-all text-xs text-muted-foreground">
+				<div className="space-y-1 break-all rounded-lg bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
 					<p>
 						Task runs in this project: {usd(usage.tasks.usd)}
 						{usage.tasks.worstCaseUsd > usage.tasks.usd + 0.0005

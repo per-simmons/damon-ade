@@ -173,7 +173,12 @@ function WorkspacePage() {
 			runtime: workspace?.runtime ?? null,
 			worktreePath: workspace?.worktreePath ?? null,
 		});
-	}, [spawnAgentSession, workspaceId, workspace?.runtime, workspace?.worktreePath]);
+	}, [
+		spawnAgentSession,
+		workspaceId,
+		workspace?.runtime,
+		workspace?.worktreePath,
+	]);
 
 	// Wait for the persisted tabs store to hydrate before deciding whether an
 	// agent has any existing session — otherwise we'd race persistence and
@@ -199,8 +204,18 @@ function WorkspacePage() {
 		if (tabs.length > 0) return;
 		if (autoSpawnedRef.current.has(workspaceId)) return;
 		autoSpawnedRef.current.add(workspaceId);
+		// A team's own workspace starts its Team chat (the Coordinator's
+		// Claude Code session, see ModelBar's useTeamChatTab) instead.
+		if (workspace.type === "branch") return;
 		spawnSession();
-	}, [tabsHydrated, workspace, showInitView, tabs.length, workspaceId, spawnSession]);
+	}, [
+		tabsHydrated,
+		workspace,
+		showInitView,
+		tabs.length,
+		workspaceId,
+		spawnSession,
+	]);
 
 	const { presets } = usePresets();
 

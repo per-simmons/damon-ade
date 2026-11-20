@@ -7,6 +7,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@superset/ui/tooltip";
 import { useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
+	LuClipboardList,
+	LuHistory,
+	LuListTodo,
+	LuMessagesSquare,
+	LuUserCog,
+} from "react-icons/lu";
+import {
 	getPresetIcon,
 	useIsDarkTheme,
 } from "renderer/assets/app-icons/preset-icons";
@@ -137,16 +144,18 @@ export function ModelBar() {
 				})}
 			</div>
 
-			<div className="ml-auto flex items-center">
+			<div className="ml-auto flex items-center gap-0.5">
 				{ready && <GitHubSync workspaceId={workspaceId} />}
+				<div className="mx-1 h-4 w-px bg-border" aria-hidden />
 				<Tooltip>
 					<TooltipTrigger asChild>
 						<button
 							type="button"
 							disabled={!ready}
 							onClick={() => setSpecialistsOpen(true)}
-							className="flex h-7 items-center rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+							className="flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
 						>
+							<LuUserCog className="size-3.5" aria-hidden />
 							Specialists
 						</button>
 					</TooltipTrigger>
@@ -161,8 +170,9 @@ export function ModelBar() {
 							type="button"
 							disabled={!ready}
 							onClick={() => setHistoryOpen(true)}
-							className="flex h-7 items-center rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+							className="flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
 						>
+							<LuHistory className="size-3.5" aria-hidden />
 							History
 						</button>
 					</TooltipTrigger>
@@ -177,8 +187,9 @@ export function ModelBar() {
 							type="button"
 							disabled={!ready}
 							onClick={() => setTasksOpen(true)}
-							className="flex h-7 items-center rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+							className="flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
 						>
+							<LuListTodo className="size-3.5" aria-hidden />
 							Tasks
 						</button>
 					</TooltipTrigger>
@@ -193,8 +204,9 @@ export function ModelBar() {
 							type="button"
 							disabled={!ready}
 							onClick={() => setChatOpen(true)}
-							className="flex h-7 items-center rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+							className="flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
 						>
+							<LuClipboardList className="size-3.5" aria-hidden />
 							Team plans
 						</button>
 					</TooltipTrigger>
@@ -208,8 +220,9 @@ export function ModelBar() {
 							<button
 								type="button"
 								onClick={teamChat.open}
-								className="flex h-7 items-center rounded-md bg-primary/10 px-2 text-xs font-medium text-foreground transition-colors hover:bg-primary/20"
+								className="ml-1 flex h-7 items-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground shadow-xs transition-colors hover:bg-primary/90"
 							>
+								<LuMessagesSquare className="size-3.5" aria-hidden />
 								Team chat
 							</button>
 						</TooltipTrigger>

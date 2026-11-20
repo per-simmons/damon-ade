@@ -192,27 +192,39 @@ export function SpecialistsSheet({
 								New specialist
 							</Button>
 							{agents.length > 0 && (
-								<div
-									className="space-y-1 rounded-md border p-3 text-xs"
-									data-agents-overview
-								>
-									<p className="text-sm font-medium">
+								<div className="space-y-2" data-agents-overview>
+									<p className="text-sm font-semibold">
 										Agents and their specialties
 									</p>
-									{agents.map((agent) => (
-										<p key={agent.workspaceId} data-agent={agent.name}>
-											<span className="font-medium">
-												{agent.name}
-												{agent.current ? " (this agent)" : ""}
-											</span>
-											:{" "}
-											<span className="text-muted-foreground">
-												{agent.specialties.length
-													? agent.specialties.map((s) => s.name).join(", ")
-													: "no specialty yet"}
-											</span>
-										</p>
-									))}
+									<div className="grid grid-cols-2 gap-2">
+										{agents.map((agent) => (
+											<div
+												key={agent.workspaceId}
+												className="flex items-start gap-2 rounded-lg border bg-card p-2.5 text-xs shadow-xs"
+												data-agent={agent.name}
+											>
+												<span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">
+													{agent.name
+														.split(/\s+/)
+														.map((w) => w[0])
+														.join("")
+														.slice(0, 2)
+														.toUpperCase()}
+												</span>
+												<span className="min-w-0">
+													<span className="block truncate font-medium">
+														{agent.name}
+														{agent.current ? " (this agent)" : ""}
+													</span>
+													<span className="block truncate text-muted-foreground">
+														{agent.specialties.length
+															? agent.specialties.map((s) => s.name).join(", ")
+															: "no specialty yet"}
+													</span>
+												</span>
+											</div>
+										))}
+									</div>
 								</div>
 							)}
 							{list.specialists.length === 0 && (

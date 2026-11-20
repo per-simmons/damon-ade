@@ -16,6 +16,7 @@ import {
 import { toast } from "@superset/ui/sonner";
 import { Textarea } from "@superset/ui/textarea";
 import { useEffect, useRef, useState } from "react";
+import { LuBot, LuMessagesSquare, LuSendHorizontal } from "react-icons/lu";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { PlanCard } from "./components/PlanCard";
 import { SubtaskProgress } from "./components/SubtaskProgress";
@@ -189,12 +190,19 @@ export function TeamChatSheet({
 				>
 					{error && <p className="text-xs text-destructive">{error.message}</p>}
 					{!chat && (
-						<p className="text-sm text-muted-foreground">
-							Say what you want built, as you would to a lead engineer. The
-							Coordinator asks if something matters and is unclear, then
-							proposes who does what. Reply to change the plan; press Go (or
-							type "go") to start it.
-						</p>
+						<div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
+							<span className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+								<LuMessagesSquare className="size-5" aria-hidden />
+							</span>
+							<p className="text-sm font-medium">
+								Plan work with the Coordinator
+							</p>
+							<p className="text-xs text-muted-foreground">
+								Say what you want built, as you would to a lead engineer. It
+								asks what matters, proposes who does what, and starts when you
+								press Go. You can also use the Team chat tab (Claude Code).
+							</p>
+						</div>
 					)}
 					{messages.map((m, index) => (
 						<div
@@ -207,12 +215,13 @@ export function TeamChatSheet({
 							<div
 								className={
 									m.role === "user"
-										? "max-w-[85%] whitespace-pre-wrap rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground"
-										: "max-w-[92%] space-y-2 rounded-lg bg-muted px-3 py-2 text-sm"
+										? "max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-foreground shadow-xs"
+										: "max-w-[92%] space-y-2 rounded-2xl rounded-bl-sm bg-muted px-3 py-2 text-sm"
 								}
 							>
 								{m.role === "coordinator" && (
-									<p className="text-xs font-medium text-muted-foreground">
+									<p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+										<LuBot className="size-3.5" aria-hidden />
 										Coordinator
 									</p>
 								)}
@@ -279,6 +288,7 @@ export function TeamChatSheet({
 							disabled={busy || replying || started || !draft.trim()}
 							onClick={send}
 						>
+							<LuSendHorizontal className="size-3.5" aria-hidden />
 							Send
 						</Button>
 					</div>
