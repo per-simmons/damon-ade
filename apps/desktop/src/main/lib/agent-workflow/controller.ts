@@ -13,6 +13,15 @@ import {
 } from "./identity";
 import { cheaperFallback, resolveRunModel } from "./models";
 import { type ProjectWorkflow, portablePath } from "./project-workflow";
+import {
+	applicableCustomRoles,
+	type CustomRole,
+	listSpecialists,
+	type ResolvedSpecialist,
+	resolveRole,
+	resolveSpecialist,
+	type Specialist,
+} from "./specialists";
 import { parseVerdict, stagePrompt } from "./stage-prompts";
 import type {
 	PermissionMode,
@@ -56,7 +65,7 @@ import type { RoleName, WorkflowSettings } from "./workflow-settings";
 
 const IMPLEMENTATION_KINDS: RunKind[] = ["quick", "implement", "build", "fix"];
 
-export const STAGE_ROLE: Record<ModelStage, RoleName> = {
+export const STAGE_ROLE: Record<Exclude<ModelStage, "custom">, RoleName> = {
 	quick: "quick",
 	implement: "implementer",
 	plan: "planner",
@@ -76,7 +85,14 @@ const READ_ONLY_GIT = [
 export type Decision =
 	| { type: "wait" }
 	| { type: "none" }
-	| { type: "run"; kind: ModelStage; fallbackFrom?: string; reason: string }
+	| {
+			type: "run";
+			kind: ModelStage;
+			fallbackFrom?: string;
+			/** For kind "custom": which custom role. */
+			customRoleId?: string;
+			reason: string;
+	  }
 	| { type: "checks"; reason: string }
 	| { type: "done"; reason: string }
 	| { type: "pause"; reason: string }
@@ -163,7 +179,8 @@ function needsImplementer(run: TaskRun): boolean {
 /** A succeeded run that implemented (part of) the task. */
 function isImplementation(run: TaskRun): boolean {
 	return (
-		IMPLEMENTATION_KINDS.includes(run.kind) &&
+		(IMPLEMENTATION_KINDS.includes(run.kind) ||
+			(run.kind === "custom" && run.customAccess === "edit")) &&
 		run.status === "succeeded" &&
 		!needsImplementer(run)
 	);
@@ -193,9 +210,22 @@ const sameCommands = (a: string[] | undefined, b: string[]) =>
 	!!a && a.length === b.length && a.every((command, i) => command === b[i]);
 
 /** What ADE observed about the worktree just before deciding. */
+/** A custom role the manager may schedule for this task. */
+export interface CustomRoleRef {
+	id: string;
+	name: string;
+	access: "read-only" | "edit";
+}
+
 export interface DecisionContext {
 	/** identity.ts codeState of the task's worktree now (undefined: not git). */
 	codeState?: string;
+	/**
+	 * The specialist's custom roles that apply to this task (trigger and
+	 * keywords already matched): before the first implementation, and after
+	 * implementation and passing checks (before the review).
+	 */
+	customRoles?: { before: CustomRoleRef[]; after: CustomRoleRef[] };
 }
 
 /**
@@ -255,6 +285,7 @@ export function decideNext(
 					return {
 						type: "run",
 						kind,
+						customRoleId: last.customRoleId,
 						fallbackFrom: last.model,
 						reason: `${last.model} is unavailable; trying the cheaper ${fallback} once`,
 					};
@@ -348,6 +379,23 @@ export function decideNext(
 	}
 
 	if (lastImpl < 0) {
+		// The specialist's roles that run before implementation, once each.
+		for (const role of context.customRoles?.before ?? []) {
+			const ran = t.runs.some(
+				(run) =>
+					run.kind === "custom" &&
+					run.customRoleId === role.id &&
+					run.status === "succeeded",
+			);
+			if (!ran) {
+				return {
+					type: "run",
+					kind: "custom",
+					customRoleId: role.id,
+					reason: `${role.name} before implementation`,
+				};
+			}
+		}
 		const first: ModelStage =
 			task.route === "quick"
 				? "quick"
@@ -449,6 +497,47 @@ export function decideNext(
 		}
 	}
 
+	// The specialist's read-only roles after implementation and checks.
+	for (const role of context.customRoles?.after ?? []) {
+		const last = lastIndex(
+			t,
+			(run) =>
+				run.kind === "custom" &&
+				run.customRoleId === role.id &&
+				run.status === "succeeded",
+		);
+		if (last < lastImpl || !fresh(t.runs[last])) {
+			const rounds = t.runs.filter(
+				(run) => run.kind === "custom" && run.customRoleId === role.id,
+			).length;
+			if (rounds >= limits.maxReviewRounds) {
+				return {
+					type: "block",
+					reason: `${role.name} has not passed after ${limits.maxReviewRounds} round(s).`,
+				};
+			}
+			return {
+				type: "run",
+				kind: "custom",
+				customRoleId: role.id,
+				reason: `${role.name} after implementation`,
+			};
+		}
+		const verdict = t.runs[last].verdict;
+		if (verdict === undefined) {
+			return {
+				type: "block",
+				reason: `${role.name} finished without a verdict.`,
+			};
+		}
+		if (verdict === "FAIL") {
+			return correctOrBlock(
+				`${role.name} still fails`,
+				`${role.name} found problems`,
+			);
+		}
+	}
+
 	// Independent review after the last change, of this code.
 	const lastReview = lastIndex(
 		t,
@@ -507,7 +596,172 @@ export function correctionFeedback(task: TaskRecord): string {
 			`The independent review failed:\n${(lastReview.summary ?? "").slice(-3000)}`,
 		);
 	}
+	const latestCustom = new Map<string, TaskRun>();
+	for (const run of task.runs) {
+		if (run.kind === "custom" && run.customRoleId) {
+			latestCustom.set(run.customRoleId, run);
+		}
+	}
+	for (const run of latestCustom.values()) {
+		if (run.verdict === "FAIL") {
+			parts.push(
+				`${run.role ?? "A specialist role"} found problems:\n${(run.summary ?? "").slice(-3000)}`,
+			);
+		}
+	}
 	return parts.join("\n\n") || "(no failure details recorded)";
+}
+
+export interface TaskSpecialists {
+	primary?: ResolvedSpecialist;
+	supporting: ResolvedSpecialist[];
+}
+
+/** The task's specialists, resolved with the task's own role overrides. */
+export function taskSpecialists(
+	homeDir: string,
+	project: ProjectWorkflow,
+	task: TaskRecord,
+	settings: Pick<WorkflowSettings, "roles">,
+): TaskSpecialists {
+	const all = listSpecialists(project);
+	const byId = (id: string | undefined) => all.find((s) => s.id === id);
+	const primary = byId(task.specialistId);
+	return {
+		primary: primary
+			? resolveSpecialist(primary, settings, homeDir, task.roleOverrides)
+			: undefined,
+		supporting: (task.supportingSpecialistIds ?? [])
+			.map(byId)
+			.filter((s): s is Specialist => !!s)
+			.map((s) => resolveSpecialist(s, settings, homeDir)),
+	};
+}
+
+/** The custom roles the manager schedules for this task. */
+export function customRoleContext(
+	specialists: TaskSpecialists,
+	task: TaskRecord,
+): DecisionContext["customRoles"] {
+	// A quick change stays quick: no extra roles.
+	if (task.route === "quick" || !specialists.primary) {
+		return { before: [], after: [] };
+	}
+	const text = `${task.title}\n${task.description}`;
+	const ref = (r: CustomRole): CustomRoleRef => ({
+		id: r.id,
+		name: r.name,
+		access: r.access,
+	});
+	return {
+		before: applicableCustomRoles(
+			specialists.primary,
+			text,
+			"before-implementation",
+		).map(ref),
+		after: applicableCustomRoles(
+			specialists.primary,
+			text,
+			"after-implementation",
+		)
+			.filter((r) => r.access === "read-only")
+			.map(ref),
+	};
+}
+
+/**
+ * The role, model, effort and turn limit a stage runs with: the task's
+ * specialist (template, specialist and task layers over the global
+ * defaults), or the global defaults with the task's overrides. The runner
+ * and the Tasks panel both use this, so the model shown is the one run.
+ */
+export function stageRouting(
+	specialists: TaskSpecialists,
+	task: TaskRecord,
+	settings: Pick<WorkflowSettings, "roles">,
+	kind: ModelStage,
+	customRoleId?: string,
+) {
+	const customRole =
+		kind === "custom"
+			? specialists.primary?.customRoles.find((r) => r.id === customRoleId)
+			: undefined;
+	if (kind === "custom" && !customRole) {
+		throw new Error(
+			"That role is not part of this task's specialist any more. Choose another step.",
+		);
+	}
+	// Custom roles inherit from the base role closest to their access.
+	const role: RoleName = customRole
+		? customRole.access === "read-only"
+			? "reviewer"
+			: "implementer"
+		: kind === "plan" && task.route === "exceptional"
+			? "architect"
+			: STAGE_ROLE[kind as Exclude<ModelStage, "custom">];
+	const resolvedRole =
+		specialists.primary?.roles[role] ??
+		resolveRole(role, settings, undefined, undefined, task.roleOverrides);
+	return {
+		customRole,
+		resolvedRole,
+		routing: {
+			role: customRole?.name ?? resolvedRole.label,
+			model: customRole?.model ?? resolvedRole.model,
+			effort: customRole?.effort ?? resolvedRole.effort,
+			maxTurns: customRole?.maxTurns ?? resolvedRole.maxTurns,
+			modelSource: customRole?.model
+				? ("specialist" as const)
+				: resolvedRole.source.model,
+		},
+	};
+}
+
+/** The specialty guidance a stage gets (empty without a specialist). */
+function specialtyNote(
+	specialists: TaskSpecialists,
+	task: TaskRecord,
+	kind: ModelStage,
+	roleInstructions: string[],
+): string {
+	const parts: string[] = [];
+	const primary = specialists.primary;
+	if (primary?.instructions && kind !== "custom") {
+		parts.push(
+			`## Specialty: ${primary.specialist.specialty} (${primary.specialist.name})\n${primary.instructions}`,
+		);
+	}
+	for (const s of specialists.supporting) {
+		if (s.instructions && kind !== "quick" && kind !== "custom") {
+			parts.push(
+				`## Also relevant: ${s.specialist.specialty} (${s.specialist.name})\nThis task also touches this specialty. You are the only one editing; apply this guidance where it applies.\n${s.instructions}`,
+			);
+		}
+	}
+	if (roleInstructions.length) {
+		parts.push(
+			`## Additional instructions for this role\n${roleInstructions.join("\n\n")}`,
+		);
+	}
+	// What the specialist's roles found before implementation.
+	if (IMPLEMENTATION_KINDS.includes(kind)) {
+		const notes = evidenceView(task)
+			.runs.filter(
+				(run) =>
+					run.kind === "custom" &&
+					run.status === "succeeded" &&
+					run.customAccess === "read-only" &&
+					!!run.summary,
+			)
+			.slice(-3)
+			.map((run) => `### ${run.role}\n${(run.summary ?? "").slice(-2000)}`);
+		if (notes.length) {
+			parts.push(
+				`## Findings from the specialist's roles\n${notes.join("\n\n")}`,
+			);
+		}
+	}
+	return parts.length ? `\n\n${parts.join("\n\n")}\n` : "";
 }
 
 /**
@@ -964,6 +1218,8 @@ export class TaskController {
 				return files.openEscalations.length > 0
 					? undefined
 					: "There is no open escalation report";
+			case "custom":
+				return undefined;
 			default:
 				return undefined;
 		}
@@ -975,8 +1231,12 @@ export class TaskController {
 		slug: string,
 		kind: RunKind,
 		modelOverride?: string,
+		customRoleId?: string,
 	): Promise<TaskRecord> {
 		return withTaskLock(project, slug, () => {
+			if (kind === "custom" && !customRoleId) {
+				throw new Error("Choose which specialist role to run");
+			}
 			const task = this.load(project, slug);
 			const blocker = TaskController.manualBlocker(
 				task,
@@ -1004,6 +1264,7 @@ export class TaskController {
 			if (kind === "checks") return this.launchChecks(project, task, false);
 			return this.launchModel(project, task, kind, {
 				modelOverride,
+				customRoleId,
 				continueAfter: false,
 			});
 		});
@@ -1034,7 +1295,13 @@ export class TaskController {
 			readTaskFiles(project, task.slug),
 			this.approvedChecks(project),
 			settings,
-			{ codeState: this.codeStateOf(task.identity.worktreePath) },
+			{
+				codeState: this.codeStateOf(task.identity.worktreePath),
+				customRoles: customRoleContext(
+					taskSpecialists(this.deps.homeDir, project, task, settings),
+					task,
+				),
+			},
 		);
 		switch (decision.type) {
 			case "wait":
@@ -1052,6 +1319,7 @@ export class TaskController {
 			case "run":
 				return this.launchModel(project, task, decision.kind, {
 					fallbackFrom: decision.fallbackFrom,
+					customRoleId: decision.customRoleId,
 					continueAfter: true,
 				});
 			case "checks":
@@ -1092,15 +1360,27 @@ export class TaskController {
 		options: {
 			modelOverride?: string;
 			fallbackFrom?: string;
+			customRoleId?: string;
 			continueAfter: boolean;
 		},
 	): TaskRecord {
 		const settings = this.deps.loadSettings();
-		const role =
-			kind === "plan" && task.route === "exceptional"
-				? "architect"
-				: STAGE_ROLE[kind];
-		const routing = settings.roles[role];
+		const specialists = taskSpecialists(
+			this.deps.homeDir,
+			project,
+			task,
+			settings,
+		);
+		const { customRole, resolvedRole, routing } = stageRouting(
+			specialists,
+			task,
+			settings,
+			kind,
+			options.customRoleId,
+		);
+		const readOnly =
+			kind === "review" ||
+			(kind === "custom" && customRole?.access === "read-only");
 		const configured =
 			options.modelOverride?.trim() ||
 			(options.fallbackFrom
@@ -1120,16 +1400,15 @@ export class TaskController {
 				: "acceptEdits";
 		const allowedTools = [
 			...(mayRunChecks ? checks.commands.map((c) => `Bash(${c}:*)`) : []),
-			...(kind === "review" || kind === "plan" || kind === "escalate"
+			...(readOnly || kind === "plan" || kind === "escalate"
 				? READ_ONLY_GIT
 				: []),
 		];
-		const disallowedTools =
-			kind === "review"
-				? ["Write", "Edit", "MultiEdit", "NotebookEdit"]
-				: kind === "plan"
-					? ["Edit", "MultiEdit", "NotebookEdit"]
-					: [];
+		const disallowedTools = readOnly
+			? ["Write", "Edit", "MultiEdit", "NotebookEdit"]
+			: kind === "plan"
+				? ["Edit", "MultiEdit", "NotebookEdit"]
+				: [];
 
 		const files = readTaskFiles(project, task.slug);
 		const prompt =
@@ -1141,7 +1420,11 @@ export class TaskController {
 				mayRunChecks,
 				feedback:
 					kind === "fix" ? correctionFeedback(evidenceView(task)) : undefined,
-				changes: kind === "review" ? taskChanges(task.identity) : undefined,
+				changes:
+					kind === "review" || kind === "custom"
+						? taskChanges(task.identity)
+						: undefined,
+				customRole,
 				escalationReport:
 					kind === "escalate" && files.openEscalations[0]
 						? `${portablePath(project.tasksDir)}/${task.slug}/escalations/${files.openEscalations[0]}`
@@ -1152,6 +1435,12 @@ export class TaskController {
 				: "") +
 			reconcileNote(task, kind) +
 			rerouteNote(task, kind) +
+			specialtyNote(
+				specialists,
+				task,
+				kind,
+				customRole ? [] : resolvedRole.instructions,
+			) +
 			historyNote(project, task, kind);
 
 		const spend = taskSpend(task);
@@ -1174,6 +1463,10 @@ export class TaskController {
 			sessionId: this.deps.newId(),
 			fallbackFrom: options.fallbackFrom,
 			costState: "pending",
+			role: customRole?.name ?? resolvedRole.label,
+			specialist: specialists.primary?.specialist.name,
+			customRoleId: customRole?.id,
+			customAccess: customRole?.access,
 		};
 		task.runs.push(run);
 		task.state = "running";
@@ -1330,7 +1623,11 @@ export class TaskController {
 				run.error = result.error;
 			} else {
 				run.status = "succeeded";
-				if (run.kind === "review") run.verdict = parseVerdict(result.text);
+				if (
+					run.kind === "review" ||
+					(run.kind === "custom" && run.customAccess === "read-only")
+				)
+					run.verdict = parseVerdict(result.text);
 			}
 
 			if (task.mode === "manual" || !continueAfter) {

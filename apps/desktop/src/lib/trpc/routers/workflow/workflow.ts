@@ -7,15 +7,18 @@ import {
 	activeRun,
 	buildResumeCommand,
 	captureIdentity,
+	chooseSpecialists,
 	codeState,
 	createTask,
 	currentBranch,
+	customRoleContext,
 	decideNext,
 	defaultWorkflowSettings,
 	EFFORT_LEVELS,
 	ensureProjectWorkflow,
 	getTask,
 	identityMismatch,
+	listSpecialists,
 	listTaskRecords,
 	loadProjectChecks,
 	loadWorkflowSettings,
@@ -25,15 +28,18 @@ import {
 	RUN_KINDS,
 	readTaskFiles,
 	refreshAllProjectWorkflows,
+	resolveSpecialist,
 	saveProjectChecks,
 	saveTask,
 	saveWorkflowSettings,
 	stageModel,
+	stageRouting,
 	suggestChecks,
 	TaskController,
 	type TaskIdentity,
 	type TaskRecord,
 	taskDir,
+	taskSpecialists,
 	taskSpend,
 	validateWorkflowSettings,
 } from "main/lib/agent-workflow";
@@ -209,6 +215,69 @@ ${task.description}`,
 	return updated;
 }
 
+const roleOverrideSchema = z.object({
+	model: z.string().max(100).optional(),
+	effort: z.enum(EFFORT_LEVELS as [string, ...string[]]).optional(),
+	maxTurns: z.number().int().min(1).max(500).optional(),
+	instructions: z.string().max(10_000).optional(),
+});
+const roleOverridesSchema = z.object(
+	Object.fromEntries(
+		ROLE_NAMES.map((role) => [role, roleOverrideSchema.optional()]),
+	) as Record<
+		(typeof ROLE_NAMES)[number],
+		z.ZodOptional<typeof roleOverrideSchema>
+	>,
+);
+
+/**
+ * The task's specialist: the user's choice, or Auto's keyword match against
+ * the team's specialists (no model call). No specialists: default workflow.
+ */
+function assignSpecialist(
+	homeDir: string,
+	project: ProjectWorkflow,
+	task: TaskRecord,
+	choice: string,
+	roleOverrides: Record<string, unknown> | undefined,
+): TaskRecord {
+	const settings = loadWorkflowSettings(homeDir);
+	const specialists = listSpecialists(project).map((s) =>
+		resolveSpecialist(s, settings, homeDir),
+	);
+	let updated: TaskRecord = {
+		...task,
+		roleOverrides: roleOverrides as TaskRecord["roleOverrides"],
+	};
+	if (choice === "none") {
+		updated = {
+			...updated,
+			specialistReason: "default workflow (chosen by you)",
+		};
+	} else if (choice === "auto") {
+		const picked = chooseSpecialists(
+			`${task.title}\n${task.description}`,
+			specialists,
+		);
+		updated = {
+			...updated,
+			specialistId: picked.primary?.specialist.id,
+			supportingSpecialistIds: picked.supporting.map((s) => s.specialist.id),
+			specialistReason: picked.reason,
+		};
+	} else {
+		const chosen = specialists.find((s) => s.specialist.id === choice);
+		if (!chosen) throw new Error("That specialist is not part of this team");
+		updated = {
+			...updated,
+			specialistId: chosen.specialist.id,
+			specialistReason: "chosen by you",
+		};
+	}
+	saveTask(project, updated);
+	return updated;
+}
+
 interface Probes {
 	/** The workspace's branch now. */
 	branchNow: string | undefined;
@@ -218,6 +287,7 @@ interface Probes {
 
 /** What the panel shows for one task. */
 function describeTask(
+	homeDir: string,
 	project: ProjectWorkflow,
 	task: TaskRecord,
 	ctx: WorkspaceContext,
@@ -233,6 +303,7 @@ function describeTask(
 		ctx.worktreePath,
 		probes.branchNow,
 	);
+	const specialists = taskSpecialists(homeDir, project, task, settings);
 	const next =
 		task.state === "done" ||
 		task.state === "cancelled" ||
@@ -241,7 +312,22 @@ function describeTask(
 			? undefined
 			: decideNext(task, files, checks, settings, {
 					codeState: probes.codeStateOf(task.identity.worktreePath),
+					customRoles: customRoleContext(specialists, task),
 				});
+	let nextRouting: ReturnType<typeof stageRouting>["routing"] | null = null;
+	if (next?.type === "run") {
+		try {
+			nextRouting = stageRouting(
+				specialists,
+				task,
+				settings,
+				next.kind,
+				next.customRoleId,
+			).routing;
+		} catch {
+			nextRouting = null;
+		}
+	}
 	const manualBlockers = Object.fromEntries(
 		RUN_KINDS.map((kind) => [
 			kind,
@@ -285,10 +371,31 @@ function describeTask(
 		spend,
 		next: next ?? null,
 		manualBlockers,
-		nextModel:
-			next?.type === "run" ? stageModel(next.kind, task, settings) : null,
+		/** The model the next stage will run on (the runner uses the same). */
+		nextModel: nextRouting?.model ?? null,
+		nextRole: nextRouting?.role ?? null,
+		nextModelSource: nextRouting?.modelSource ?? null,
+		specialist: specialists.primary
+			? {
+					id: specialists.primary.specialist.id,
+					name: specialists.primary.specialist.name,
+					specialty: specialists.primary.specialist.specialty,
+				}
+			: null,
+		supportingSpecialists: specialists.supporting.map((s) => s.specialist.name),
+		specialistReason: task.specialistReason ?? null,
+		/** Specialist roles this task can run (Manual). */
+		customRoles: (specialists.primary?.customRoles ?? []).map((r) => ({
+			id: r.id,
+			name: r.name,
+			trigger: r.trigger,
+			access: r.access,
+		})),
+		roleOverrides: task.roleOverrides ?? {},
 		runs: task.runs.map((run, index) => ({
 			id: run.id,
+			role: run.role ?? null,
+			specialist: run.specialist ?? null,
 			/** Before the task's last move: history, not evidence. */
 			history: index < (task.evidenceStart ?? 0),
 			kind: run.kind,
@@ -437,7 +544,15 @@ export const createWorkflowRouter = (
 					},
 				};
 				const tasks = listTaskRecords(project).map((task) =>
-					describeTask(project, task, ctx, settings, approved, probes),
+					describeTask(
+						deps.homeDir(),
+						project,
+						task,
+						ctx,
+						settings,
+						approved,
+						probes,
+					),
 				);
 
 				// Task runs: Claude Code's reported cost (each run once, child
@@ -572,6 +687,10 @@ export const createWorkflowRouter = (
 					mode: z.enum(["auto", "manual"]).default("auto"),
 					/** Give the task excerpts of the project's imported history. */
 					useHistory: z.boolean().default(true),
+					/** "auto": ADE picks from the team's specialists; "none": default workflow. */
+					specialist: z.string().default("auto"),
+					/** Model settings for this task only. */
+					roleOverrides: roleOverridesSchema.optional(),
 				}),
 			)
 			.mutation(({ input }) =>
@@ -590,9 +709,16 @@ export const createWorkflowRouter = (
 							maxEscalations: execution.maxEscalations,
 						},
 					});
+					const withSpecialist = assignSpecialist(
+						deps.homeDir(),
+						ctx.project,
+						created,
+						input.specialist,
+						input.roleOverrides,
+					);
 					const task = input.useHistory
-						? withHistory(ctx.project, created, [])
-						: created;
+						? withHistory(ctx.project, withSpecialist, [])
+						: withSpecialist;
 					const started =
 						input.mode === "auto"
 							? await deps.controller().start(ctx.project, task.slug)
@@ -656,6 +782,41 @@ export const createWorkflowRouter = (
 				return { cleared: true };
 			}),
 		),
+
+		/** Manual: choose the task's specialist (not while a run is going). */
+		setTaskSpecialist: publicProcedure
+			.input(taskInput.extend({ specialist: z.string() }))
+			.mutation(({ input }) =>
+				guarded(() => {
+					const { ctx, task } = historyTask(input.workspaceId, input.slug);
+					const updated = assignSpecialist(
+						deps.homeDir(),
+						ctx.project,
+						{
+							...task,
+							specialistId: undefined,
+							supportingSpecialistIds: [],
+						},
+						input.specialist,
+						task.roleOverrides,
+					);
+					return { specialistId: updated.specialistId ?? null };
+				}),
+			),
+
+		/** This task's own role settings (they never change saved settings). */
+		setTaskRoleOverrides: publicProcedure
+			.input(taskInput.extend({ roleOverrides: roleOverridesSchema }))
+			.mutation(({ input }) =>
+				guarded(() => {
+					const { ctx, task } = historyTask(input.workspaceId, input.slug);
+					saveTask(ctx.project, {
+						...task,
+						roleOverrides: input.roleOverrides as TaskRecord["roleOverrides"],
+					});
+					return { ok: true };
+				}),
+			),
 
 		start: publicProcedure.input(taskInput).mutation(({ input }) =>
 			guarded(async () => {
@@ -738,6 +899,7 @@ export const createWorkflowRouter = (
 				taskInput.extend({
 					kind: z.enum(RUN_KINDS),
 					model: z.string().max(100).optional(),
+					customRoleId: z.string().max(100).optional(),
 				}),
 			)
 			.mutation(({ input }) =>
@@ -745,7 +907,13 @@ export const createWorkflowRouter = (
 					const { ctx } = taskFor(input.workspaceId, input.slug);
 					const task = await deps
 						.controller()
-						.runStep(ctx.project, input.slug, input.kind, input.model);
+						.runStep(
+							ctx.project,
+							input.slug,
+							input.kind,
+							input.model,
+							input.customRoleId,
+						);
 					return { state: task.state, stateReason: task.stateReason ?? null };
 				}),
 			),

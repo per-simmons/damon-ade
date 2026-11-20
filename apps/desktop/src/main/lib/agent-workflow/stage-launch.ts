@@ -23,6 +23,7 @@ export function stageModel(
 	if (stage === "plan" && task.route === "exceptional") {
 		return settings.roles.architect.model;
 	}
+	if (stage === "custom") return settings.roles.reviewer.model;
 	return settings.roles[STAGE_ROLE[stage]].model;
 }
 

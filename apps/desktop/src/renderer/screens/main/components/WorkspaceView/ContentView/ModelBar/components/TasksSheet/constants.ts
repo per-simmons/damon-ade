@@ -15,6 +15,7 @@ export const RUN_LABELS: Record<RunKind, string> = {
 	fix: "Fix",
 	review: "Review",
 	escalate: "Escalate",
+	custom: "Specialist role",
 	checks: "Run checks",
 };
 

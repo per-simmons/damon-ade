@@ -33,6 +33,14 @@ export interface StagePromptInput {
 	changes?: TaskChanges;
 	/** For escalations: the report to resolve. */
 	escalationReport?: string;
+	/** For a custom role: what it is and what it must return. */
+	customRole?: {
+		name: string;
+		description: string;
+		instructions: string;
+		access: "read-only" | "edit";
+		expectedOutput: string;
+	};
 }
 
 function roleBody(name: string, tasksDir: string, slug: string): string {
@@ -155,6 +163,41 @@ ${changed}${preexisting}
 Use \`git diff\` on those files. ${input.mayRunChecks && input.checks.length ? "You may run the project's checks." : "ADE has already run the project's checks."}
 
 End your reply with exactly one line: \`VERDICT: PASS\` or \`VERDICT: FAIL\`. Any FAIL criterion means FAIL.`;
+		}
+
+		case "custom": {
+			const role = input.customRole;
+			if (!role) throw new Error("A custom role run needs its role");
+			const sofar = input.changes;
+			const fileList = sofar?.files.map((f) => `- ${f}`).join("\n") ?? "";
+			const changed =
+				sofar?.tracked && sofar.files.length
+					? `\n\n## This task's changes so far\n${fileList}\nUse \`git diff\` on those files.`
+					: "";
+			const access =
+				role.access === "read-only"
+					? "You may read the code and run read-only commands. Do not edit any file."
+					: `You may edit files. Record what you changed in ${dir}/progress.md.`;
+			const verdict =
+				role.access === "read-only"
+					? "\n\nEnd your reply with exactly one line: `VERDICT: PASS` or `VERDICT: FAIL`."
+					: "";
+			return `${header}
+
+You are the ${role.name} for this task.${role.description ? ` ${role.description}` : ""}
+
+## The task
+${task.description}
+
+## Your instructions
+${role.instructions}
+
+${access}${changed}
+
+## Return
+${role.expectedOutput}${verdict}
+
+${STOP}`;
 		}
 
 		case "escalate":

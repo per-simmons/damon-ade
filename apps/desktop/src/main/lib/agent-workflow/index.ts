@@ -21,13 +21,17 @@ export {
 	type ApprovedChecks,
 	type ControllerDeps,
 	correctionFeedback,
+	customRoleContext,
 	type Decision,
 	type DecisionContext,
 	decideNext,
 	evidenceView,
 	STAGE_ROLE,
+	stageRouting,
 	TaskController,
+	type TaskSpecialists,
 	type TaskSpend,
+	taskSpecialists,
 	taskSpend,
 } from "./controller";
 export {
@@ -57,6 +61,25 @@ export {
 	renderAgentsJson,
 	workflowProjectsDir,
 } from "./project-workflow";
+export {
+	allTemplates,
+	baseRoleLabel,
+	baseRolePrompt,
+	CUSTOM_ROLE_TRIGGERS,
+	type CustomRole,
+	chooseSpecialists,
+	listPersonalTemplates,
+	listSpecialists,
+	type RoleOverride,
+	removePersonalTemplate,
+	removeSpecialist,
+	resolveSpecialist,
+	type Specialist,
+	type SpecialistTemplate,
+	savePersonalTemplate,
+	saveSpecialist,
+	type TaskRoleOverrides,
+} from "./specialists";
 export { buildResumeCommand, STAGE_ROLES, stageModel } from "./stage-launch";
 export { parseVerdict, stagePrompt } from "./stage-prompts";
 export {

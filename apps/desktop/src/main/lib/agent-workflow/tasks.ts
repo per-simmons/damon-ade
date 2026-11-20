@@ -14,6 +14,7 @@ import {
 	type TaskRoute,
 } from "shared/utils/task-routing";
 import type { ProjectWorkflow } from "./project-workflow";
+import type { TaskRoleOverrides } from "./specialists";
 
 /**
  * Tasks of one project, stored in its workflow folder (project-workflow.ts).
@@ -32,6 +33,8 @@ export const MODEL_STAGES = [
 	"fix",
 	"review",
 	"escalate",
+	/** A specialist's custom role (see specialists.ts). */
+	"custom",
 ] as const;
 export type ModelStage = (typeof MODEL_STAGES)[number];
 
@@ -121,6 +124,13 @@ export interface TaskRun {
 		| "error"
 		| "interrupted";
 	error?: string;
+	/** The workflow role that ran (e.g. "Reviewer", or a custom role's name). */
+	role?: string;
+	/** The specialist whose configuration the run used. */
+	specialist?: string;
+	/** For a custom-role run: which role, and whether it could edit files. */
+	customRoleId?: string;
+	customAccess?: "read-only" | "edit";
 	/** Reviewer verdict, parsed from the review run's final text. */
 	verdict?: "PASS" | "FAIL";
 	/** Checks run by ADE (kind "checks"). */
@@ -192,6 +202,14 @@ export interface TaskRecord {
 	 * task folder). Absent when the task was created without history.
 	 */
 	history?: TaskHistory;
+	/** The specialist whose instructions and role settings the task uses. */
+	specialistId?: string;
+	/** Other specialists whose guidance the task also gets (one writer). */
+	supportingSpecialistIds?: string[];
+	/** Why Auto chose them, or "chosen by you". */
+	specialistReason?: string;
+	/** Role settings for this task only (they override the specialist's). */
+	roleOverrides?: TaskRoleOverrides;
 }
 
 const MAX_DESCRIPTION_LENGTH = 20_000;

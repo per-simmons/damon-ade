@@ -23,6 +23,7 @@ import { createRepoUpdateRouter } from "./repo-update";
 import { createResourceMetricsRouter } from "./resource-metrics";
 import { createRingtoneRouter } from "./ringtone";
 import { createSettingsRouter } from "./settings";
+import { createSpecialistsRouter } from "./specialists";
 import { createSyncRouter } from "./sync";
 import { createTerminalRouter } from "./terminal";
 import { createUiStateRouter } from "./ui-state";
@@ -57,6 +58,7 @@ export const createAppRouter = (getWindow: () => BrowserWindow | null) => {
 		ringtone: createRingtoneRouter(getWindow),
 		workflow: createWorkflowRouter(),
 		repoUpdate: createRepoUpdateRouter(),
+		specialists: createSpecialistsRouter(),
 		projectHistory: createProjectHistoryRouter(
 			createDefaultProjectHistoryDeps(getWindow),
 		),

@@ -1,0 +1,417 @@
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+/**
+ * Specialists, roles and templates from the application boundary: the
+ * specialists router (the editor) and the workflow router (Tasks) with the
+ * real TaskController and runner against real git repositories. Only the
+ * model is fake; guards fail the test if a real claude would run.
+ */
+
+const TEST_HOME = mkdtempSync(join(tmpdir(), "ade-spec-home-"));
+process.env.ADE_HOME_DIR = TEST_HOME;
+const bashPath = Bun.which("bash");
+const bash = bashPath && !/System32/i.test(bashPath) ? bashPath : null;
+const git = Bun.which("git");
+
+let root: string;
+let fake: import("main/lib/agent-workflow/testing/fake-claude").FakeClaude;
+let restoreNetwork: () => void;
+let controller: import("main/lib/agent-workflow/controller").TaskController;
+let tasks: ReturnType<
+	ReturnType<
+		typeof import("../workflow/workflow").createWorkflowRouter
+	>["createCaller"]
+>;
+let specialists: ReturnType<
+	ReturnType<
+		typeof import("./specialists").createSpecialistsRouter
+	>["createCaller"]
+>;
+let settingsModule: typeof import("main/lib/agent-workflow/workflow-settings");
+const workspaces = new Map<string, { root: string; worktree: string }>();
+
+const flag = (args: string[], name: string) => args[args.indexOf(name) + 1];
+const CHECK = `"${process.execPath.replace(/\\/g, "/")}" check.js`;
+
+function sh(cwd: string, ...args: string[]) {
+	const r = spawnSync(git as string, args, { cwd, encoding: "utf8" });
+	if (r.status !== 0) throw new Error(r.stderr);
+	return r.stdout.trim();
+}
+
+function makeRepo(name: string): string {
+	const dir = join(root, name);
+	mkdirSync(join(dir, "src"), { recursive: true });
+	writeFileSync(join(dir, "src", "api.js"), "export const route = 1;\n");
+	writeFileSync(join(dir, "check.js"), 'console.log("ok");\n');
+	sh(dir, "init", "-q");
+	sh(dir, "config", "user.email", "t@example.com");
+	sh(dir, "config", "user.name", "T");
+	sh(dir, "add", "-A");
+	sh(dir, "commit", "-qm", "init");
+	return dir;
+}
+
+beforeAll(async () => {
+	root = mkdtempSync(join(tmpdir(), "ade-spec-"));
+	const project = await import("main/lib/agent-workflow/project-workflow");
+	const controllerModule = await import("main/lib/agent-workflow/controller");
+	const runner = await import("main/lib/agent-workflow/stage-runner");
+	const checks = await import("main/lib/agent-workflow/checks");
+	const identity = await import("main/lib/agent-workflow/identity");
+	settingsModule = await import("main/lib/agent-workflow/workflow-settings");
+	const fakeModule = await import(
+		"main/lib/agent-workflow/testing/fake-claude"
+	);
+	const treeKill = await import("main/lib/tree-kill");
+	const workflowRouter = await import("../workflow/workflow");
+	const specialistsRouter = await import("./specialists");
+
+	settingsModule.saveWorkflowSettings(
+		TEST_HOME,
+		settingsModule.defaultWorkflowSettings(),
+	);
+	fake = fakeModule.createFakeClaude(root);
+	restoreNetwork = fakeModule.blockNetwork();
+	const spawnFn = fakeModule.guardedSpawn(fake, bash ? [bash] : []);
+	const killTree = async (pid: number) => {
+		await treeKill.treeKillWithEscalation({ pid, escalationTimeoutMs: 1000 });
+	};
+	controller = new controllerModule.TaskController({
+		homeDir: TEST_HOME,
+		loadSettings: () => settingsModule.loadWorkflowSettings(TEST_HOME),
+		resolveClaude: () => fake.command,
+		startRun: (spec, onProgress) =>
+			runner.startStageRun(spec, { spawnFn, killTree, onProgress }),
+		runChecks: ({ cwd, commands, signal }) =>
+			checks.runChecks({
+				cwd,
+				commands,
+				signal,
+				shell: [bash as string, "-c"],
+				spawnFn,
+				killTree,
+			}),
+		newId: randomUUID,
+		now: () => new Date(),
+		env: { ...process.env, ...fake.env },
+		progressSaveIntervalMs: 0,
+	});
+	const resolveWorkspace = (workspaceId: string) => {
+		const ws = workspaces.get(workspaceId);
+		if (!ws) throw new Error(`unknown workspace ${workspaceId}`);
+		return {
+			workspaceId,
+			project: project.ensureProjectWorkflow(TEST_HOME, ws.root),
+			worktreePath: ws.worktree,
+			runtime: "claude" as const,
+		};
+	};
+	tasks = workflowRouter
+		.createWorkflowRouter({
+			homeDir: () => TEST_HOME,
+			resolveWorkspace,
+			controller: () => controller,
+			captureIdentity: identity.captureIdentity,
+			events: new EventEmitter(),
+		})
+		.createCaller({});
+	specialists = specialistsRouter
+		.createSpecialistsRouter({ resolveWorkspace, homeDir: () => TEST_HOME })
+		.createCaller({});
+});
+
+afterAll(async () => {
+	await controller?.shutdown();
+	restoreNetwork?.();
+	rmSync(root, { recursive: true, force: true });
+	rmSync(TEST_HOME, { recursive: true, force: true });
+});
+
+describe.if(bash !== null && git !== null)("specialists and roles", () => {
+	it("works with no specialist: the default workflow", async () => {
+		const repo = makeRepo("plain");
+		workspaces.set("ws-plain", { root: repo, worktree: repo });
+		await tasks.setChecks({ workspaceId: "ws-plain", commands: [] });
+		fake.setSteps([
+			{ name: "quick", write: { "README.md": "# Fixed\n" }, cost: 0.01 },
+			{ name: "review", text: "VERDICT: PASS", cost: 0.01 },
+		]);
+		const created = await tasks.createTask({
+			workspaceId: "ws-plain",
+			description: "Fix typo in README",
+		});
+		await controller.idle();
+		const task = (
+			await tasks.getProjectTasks({ workspaceId: "ws-plain" })
+		).tasks.find((t) => t.slug === created.slug);
+		expect(task?.specialist).toBeNull();
+		expect(task?.specialistReason).toContain("no specialists in this team");
+		expect(task?.state).toBe("done");
+		expect(fake.calls().at(-2)?.stdin).not.toContain("## Specialty:");
+	}, 30_000);
+
+	it("templates, overrides and inheritance resolve predictably", async () => {
+		const repo = makeRepo("shop");
+		workspaces.set("ws-shop", { root: repo, worktree: repo });
+		const templates = await specialists.templates();
+		expect(templates.map((t) => t.id)).toEqual(
+			expect.arrayContaining([
+				"ui",
+				"ux",
+				"backend",
+				"database",
+				"security",
+				"gamedev",
+			]),
+		);
+		const backend = templates.find((t) => t.id === "backend");
+		expect(backend?.instructions).toContain("authorization");
+		expect(backend?.customRoles.map((r) => r.name)).toEqual([
+			"API Contract Reviewer",
+		]);
+
+		await specialists.save({
+			workspaceId: "ws-shop",
+			specialist: {
+				name: "Backend",
+				specialty: "Backend",
+				templateId: "backend",
+				// Every base role's model can change; the reviewer differs here.
+				roles: { reviewer: { model: "opus" }, implementer: { maxTurns: 12 } },
+			},
+		});
+		const list = await specialists.list({ workspaceId: "ws-shop" });
+		const spec = list.specialists[0];
+		expect(spec.effective.instructionsSource).toBe("template");
+		expect(spec.effective.roles.reviewer).toMatchObject({
+			model: "opus",
+			source: { model: "specialist" },
+		});
+		expect(spec.effective.roles.implementer).toMatchObject({
+			model: "sonnet",
+			maxTurns: 12,
+			source: { model: "global", maxTurns: "specialist" },
+		});
+		expect(spec.effective.roles.planner.instructions[0]).toContain(
+			"authorization checks",
+		);
+
+		// Changing a global default leaves explicit customizations alone.
+		const s = settingsModule.loadWorkflowSettings(TEST_HOME);
+		s.roles.reviewer.model = "haiku";
+		s.roles.implementer.model = "opus";
+		settingsModule.saveWorkflowSettings(TEST_HOME, s);
+		const after = (await specialists.list({ workspaceId: "ws-shop" }))
+			.specialists[0];
+		expect(after.effective.roles.reviewer.model).toBe("opus");
+		expect(after.effective.roles.implementer.model).toBe("opus");
+		settingsModule.saveWorkflowSettings(
+			TEST_HOME,
+			settingsModule.defaultWorkflowSettings(),
+		);
+
+		// Invalid combinations are refused before anything runs.
+		await expect(
+			specialists.save({
+				workspaceId: "ws-shop",
+				specialist: {
+					name: "Bad",
+					roles: { planner: { model: "gpt-5-codex" } },
+				},
+			}),
+		).rejects.toThrow("not a Claude Code model");
+		await expect(
+			specialists.save({
+				workspaceId: "ws-shop",
+				specialist: {
+					name: "Bad",
+					customRoles: [
+						{
+							name: "Reviewer",
+							instructions: "x",
+							access: "read-only",
+							trigger: "on-request",
+						},
+					],
+				},
+			}),
+		).rejects.toThrow("base role");
+
+		// Personal templates persist in ADE's home, separate from built-ins.
+		const mine = await specialists.saveTemplate({
+			name: "My API team",
+			specialty: "API",
+			instructions: "Prefer tRPC procedures.",
+			roles: { reviewer: { model: "sonnet" } },
+		});
+		expect(mine.builtIn).toBe(false);
+		const again = await specialists.templates();
+		expect(again.find((t) => t.id === mine.id)?.instructions).toBe(
+			"Prefer tRPC procedures.",
+		);
+		await expect(specialists.removeTemplate({ id: "backend" })).rejects.toThrow(
+			"Only your own templates",
+		);
+	});
+
+	it("Auto routes to the specialist, runs its custom role, corrects on FAIL, and the runner uses the resolved models", async () => {
+		await tasks.setChecks({ workspaceId: "ws-shop", commands: [CHECK] });
+		fake.setSteps([
+			{
+				name: "implement",
+				write: {
+					"src/api.js": "export const route = 2;\n",
+					"{task}/progress.md": "Status: implemented\n",
+				},
+				cost: 0.05,
+			},
+			{
+				name: "contract-1",
+				text: "Breaks clients.\nVERDICT: FAIL",
+				cost: 0.01,
+			},
+			{
+				name: "fix",
+				write: { "src/api.js": "export const route = 3;\n" },
+				cost: 0.02,
+			},
+			{
+				name: "contract-2",
+				text: "Compatible now.\nVERDICT: PASS",
+				cost: 0.01,
+			},
+			{ name: "review", text: "Looks good.\nVERDICT: PASS", cost: 0.02 },
+		]);
+		const before = fake.calls().length;
+		const created = await tasks.createTask({
+			workspaceId: "ws-shop",
+			description: "Add a validation step to the orders API endpoint",
+			route: "implement",
+		});
+		await controller.idle();
+		const data = await tasks.getProjectTasks({ workspaceId: "ws-shop" });
+		const task = data.tasks.find((t) => t.slug === created.slug);
+		expect(task?.specialist?.name).toBe("Backend");
+		expect(task?.specialistReason).toContain("matches Backend");
+		expect(task?.state).toBe("done");
+		expect(task?.runs.map((r) => [r.kind, r.role, r.specialist])).toEqual([
+			["implement", "Implementer", "Backend"],
+			["checks", null, null],
+			["custom", "API Contract Reviewer", "Backend"],
+			["fix", "Implementer", "Backend"],
+			["checks", null, null],
+			["custom", "API Contract Reviewer", "Backend"],
+			["review", "Reviewer", "Backend"],
+		]);
+		const calls = fake.calls().slice(before);
+		// The specialty and role instructions reach the prompts.
+		expect(calls[0].stdin).toContain("## Specialty: Backend (Backend)");
+		expect(calls[0].stdin).toContain("Enforce authorization");
+		expect(calls[1].stdin).toContain("You are the API Contract Reviewer");
+		expect(calls[1].args).toContain("--disallowedTools");
+		expect(calls[2].stdin).toContain("API Contract Reviewer found problems");
+		// The runner gets the resolved models and limits.
+		expect(flag(calls[0].args, "--model")).toBe("claude-sonnet-5-5");
+		expect(flag(calls[0].args, "--max-turns")).toBe("12");
+		expect(flag(calls[4].args, "--model")).toBe("claude-opus-5-5");
+		expect(calls[4].stdin).toContain("check in particular: input validation");
+		for (const call of calls) {
+			expect(call.args).not.toContain("--dangerously-skip-permissions");
+		}
+	}, 60_000);
+
+	it("skips optional roles when the task does not need them, and honours task and stage overrides", async () => {
+		fake.setSteps([
+			{
+				name: "implement",
+				write: {
+					"src/api.js": "export const route = 4;\n",
+					"{task}/progress.md": "Status: implemented\n",
+				},
+				cost: 0.05,
+			},
+			{ name: "review", text: "VERDICT: PASS", cost: 0.02 },
+		]);
+		const before = fake.calls().length;
+		const created = await tasks.createTask({
+			workspaceId: "ws-shop",
+			description: "Refactor the backend service logging",
+			route: "implement",
+			roleOverrides: { implementer: { model: "haiku" } },
+		});
+		await controller.idle();
+		const task = (
+			await tasks.getProjectTasks({ workspaceId: "ws-shop" })
+		).tasks.find((t) => t.slug === created.slug);
+		expect(task?.state).toBe("done");
+		// No API words: the contract reviewer did not run.
+		expect(task?.runs.map((r) => r.kind)).toEqual([
+			"implement",
+			"checks",
+			"review",
+		]);
+		expect(flag(fake.calls()[before].args, "--model")).toBe("claude-haiku-5-5");
+		// The specialist's saved settings did not change.
+		const spec = (await specialists.list({ workspaceId: "ws-shop" }))
+			.specialists[0];
+		expect(spec.effective.roles.implementer.model).toBe("sonnet");
+	}, 60_000);
+
+	it("Manual runs a chosen custom role, and the next model shown is the one that runs", async () => {
+		const created = await tasks.createTask({
+			workspaceId: "ws-shop",
+			description: "Change the orders endpoint response",
+			mode: "manual",
+			route: "implement",
+		});
+		let task = (
+			await tasks.getProjectTasks({ workspaceId: "ws-shop" })
+		).tasks.find((t) => t.slug === created.slug);
+		expect(task?.customRoles.map((r) => r.name)).toEqual([
+			"API Contract Reviewer",
+		]);
+		expect(task?.nextRole).toBe("Implementer");
+		expect(task?.nextModel).toBe("sonnet");
+		await expect(
+			tasks.runStep({
+				workspaceId: "ws-shop",
+				slug: created.slug,
+				kind: "custom",
+			}),
+		).rejects.toThrow("Choose which specialist role");
+		fake.setSteps([{ name: "contract", text: "VERDICT: PASS", cost: 0.01 }]);
+		await tasks.runStep({
+			workspaceId: "ws-shop",
+			slug: created.slug,
+			kind: "custom",
+			customRoleId: task?.customRoles[0].id,
+		});
+		await controller.idle();
+		task = (await tasks.getProjectTasks({ workspaceId: "ws-shop" })).tasks.find(
+			(t) => t.slug === created.slug,
+		);
+		expect(task?.runs.map((r) => [r.kind, r.role, r.verdict])).toEqual([
+			["custom", "API Contract Reviewer", "PASS"],
+		]);
+		// Run history keeps the role's name after the role is removed.
+		await specialists.save({
+			workspaceId: "ws-shop",
+			specialist: {
+				...(await specialists.list({ workspaceId: "ws-shop" })).specialists[0],
+				disabledTemplateRoles: ["backend-api-contract-reviewer"],
+			},
+		});
+		task = (await tasks.getProjectTasks({ workspaceId: "ws-shop" })).tasks.find(
+			(t) => t.slug === created.slug,
+		);
+		expect(task?.customRoles).toEqual([]);
+		expect(task?.runs[0].role).toBe("API Contract Reviewer");
+	}, 60_000);
+});
