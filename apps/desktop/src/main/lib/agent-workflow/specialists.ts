@@ -113,6 +113,8 @@ export interface Specialist {
 	 * again adds nothing, and a removed role stays removed.
 	 */
 	appliedTemplates?: string[];
+	/** The agent (workspace id) that does this specialist's subtasks. */
+	agentWorkspaceId?: string;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -517,6 +519,8 @@ export interface SpecialistInput {
 	customRoles?: CustomRole[];
 	disabledTemplateRoles?: string[];
 	appliedTemplates?: string[];
+	/** The agent that does its subtasks; null clears, undefined keeps. */
+	agentWorkspaceId?: string | null;
 }
 
 /** Drop empty strings so an unset field inherits instead of overriding. */
@@ -645,6 +649,10 @@ export function saveSpecialist(
 		customRoles,
 		disabledTemplateRoles: [],
 		appliedTemplates: applied.appliedTemplates,
+		agentWorkspaceId:
+			input.agentWorkspaceId === undefined
+				? existing?.agentWorkspaceId
+				: input.agentWorkspaceId || undefined,
 		createdAt: existing?.createdAt ?? now.toISOString(),
 		updatedAt: now.toISOString(),
 	};

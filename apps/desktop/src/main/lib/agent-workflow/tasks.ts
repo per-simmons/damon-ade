@@ -154,6 +154,13 @@ export interface TaskRun {
 }
 
 /** Where the task runs, and the state of the tree when it was created. */
+/** An agent of the team: its own worktree of the team's repository. */
+export interface TeamAgent {
+	workspaceId: string;
+	name: string;
+	worktreePath: string;
+}
+
 export interface TaskIdentity {
 	workspaceId: string;
 	worktreePath: string;
@@ -229,6 +236,14 @@ export interface TaskRecord {
 	splitReason?: string;
 	/** For a subtask: the team request it belongs to. */
 	parentSlug?: string;
+	/** For a team request: the team's agents when it was sent. */
+	teamAgents?: TeamAgent[];
+	/** For a subtask: the subtasks whose work it builds on. */
+	dependsOn?: string[];
+	/** For a subtask: the agent that does it (its specialist's agent). */
+	agentName?: string;
+	/** For a subtask: the commit of its work, once another agent needed it. */
+	resultCommit?: string;
 }
 
 const MAX_DESCRIPTION_LENGTH = 20_000;

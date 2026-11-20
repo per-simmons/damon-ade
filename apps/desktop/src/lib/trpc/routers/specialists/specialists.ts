@@ -15,6 +15,7 @@ import {
 	savePersonalTemplate,
 	saveSpecialist,
 } from "main/lib/agent-workflow";
+import type { TeamAgent } from "main/lib/agent-workflow/tasks";
 import { MODEL_PRICES } from "main/lib/usage-metrics/pricing";
 import { z } from "zod";
 import { publicProcedure, router } from "../..";
@@ -32,6 +33,8 @@ import {
 export interface SpecialistsRouterDeps {
 	resolveWorkspace: (workspaceId: string) => WorkspaceContext;
 	homeDir: () => string;
+	/** The agents of the workspace's team. */
+	listAgents?: (workspaceId: string) => TeamAgent[];
 }
 
 const roleOverride = z.object({
@@ -73,6 +76,8 @@ const specialistInput = z.object({
 	customRoles: z.array(customRole).max(30).default([]),
 	disabledTemplateRoles: z.array(z.string()).default([]),
 	appliedTemplates: z.array(z.string()).optional(),
+	/** The agent that does this specialist's subtasks; null clears it. */
+	agentWorkspaceId: z.string().max(100).nullable().optional(),
 });
 
 function guarded<T>(fn: () => T): T {
@@ -116,6 +121,7 @@ export const createSpecialistsRouter = (
 	deps: SpecialistsRouterDeps = {
 		resolveWorkspace: defaultWorkflowRouterDeps.resolveWorkspace,
 		homeDir: defaultWorkflowRouterDeps.homeDir,
+		listAgents: defaultWorkflowRouterDeps.listAgents,
 	},
 ) =>
 	router({
@@ -163,6 +169,24 @@ export const createSpecialistsRouter = (
 		),
 
 		models: publicProcedure.query(() => modelCatalog()),
+
+		/** The team's agents, each with the specialties it does. */
+		agents: publicProcedure
+			.input(z.object({ workspaceId: z.string() }))
+			.query(({ input }) =>
+				guarded(() => {
+					const ctx = deps.resolveWorkspace(input.workspaceId);
+					const specialists = listSpecialists(ctx.project);
+					return (deps.listAgents?.(input.workspaceId) ?? []).map((agent) => ({
+						workspaceId: agent.workspaceId,
+						name: agent.name,
+						current: agent.workspaceId === input.workspaceId,
+						specialties: specialists
+							.filter((s) => s.agentWorkspaceId === agent.workspaceId)
+							.map((s) => ({ id: s.id, name: s.name, specialty: s.specialty })),
+					}));
+				}),
+			),
 
 		save: publicProcedure
 			.input(z.object({ workspaceId: z.string(), specialist: specialistInput }))

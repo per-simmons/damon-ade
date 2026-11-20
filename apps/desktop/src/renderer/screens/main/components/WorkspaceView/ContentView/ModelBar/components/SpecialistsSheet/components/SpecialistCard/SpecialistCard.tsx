@@ -3,6 +3,8 @@ import type { SpecialistView } from "../../types";
 
 interface SpecialistCardProps {
 	specialist: SpecialistView;
+	/** The agent that does its subtasks, if any. */
+	agentName?: string;
 	busy: boolean;
 	onEdit: () => void;
 	onRemove: () => void;
@@ -11,6 +13,7 @@ interface SpecialistCardProps {
 /** A specialist at a glance: specialty, template, role models, extra roles. */
 export function SpecialistCard({
 	specialist,
+	agentName,
 	busy,
 	onEdit,
 	onRemove,
@@ -33,6 +36,11 @@ export function SpecialistCard({
 						{effective.templateName
 							? ` · template: ${effective.templateName}`
 							: ""}
+					</p>
+					<p className="text-muted-foreground" data-specialist-agent>
+						{agentName
+							? `Agent: ${agentName}`
+							: "No agent: runs where the task is"}
 					</p>
 				</div>
 				<div className="flex gap-1">

@@ -49,6 +49,7 @@ import {
 	type TaskChangeEvent,
 	workflowEvents,
 } from "main/lib/agent-workflow/service";
+import type { TeamAgent } from "main/lib/agent-workflow/tasks";
 import { getSupersetHomeDir } from "main/lib/app-environment";
 import { localDb } from "main/lib/local-db";
 import {
@@ -128,6 +129,8 @@ export interface WorkflowRouterDeps {
 	controller: () => TaskController;
 	captureIdentity: (workspaceId: string, worktreePath: string) => TaskIdentity;
 	events: NodeJS.EventEmitter;
+	/** The agents of the workspace's team (default: from ADE's database). */
+	listAgents?: (workspaceId: string) => TeamAgent[];
 	/** Worktree probes (default: git). */
 	branchOf?: (worktree: string) => string | undefined;
 	codeStateOf?: (worktree: string) => string | undefined;
@@ -168,12 +171,35 @@ function resolveWorkspaceFromDb(workspaceId: string): WorkspaceContext {
 	};
 }
 
+/** The agents (workspaces) of a workspace's team, with their folders. */
+export function listTeamAgentsFromDb(workspaceId: string): TeamAgent[] {
+	const workspace = localDb
+		.select()
+		.from(workspaces)
+		.where(eq(workspaces.id, workspaceId))
+		.get();
+	if (!workspace) return [];
+	return localDb
+		.select()
+		.from(workspaces)
+		.where(eq(workspaces.projectId, workspace.projectId))
+		.all()
+		.filter((w) => !w.deletingAt)
+		.flatMap((w) => {
+			const worktreePath = getWorkspacePath(w);
+			return worktreePath
+				? [{ workspaceId: w.id, name: w.name, worktreePath }]
+				: [];
+		});
+}
+
 export const defaultWorkflowRouterDeps: WorkflowRouterDeps = {
 	homeDir: getSupersetHomeDir,
 	resolveWorkspace: resolveWorkspaceFromDb,
 	controller: getTaskController,
 	captureIdentity,
 	events: workflowEvents,
+	listAgents: listTeamAgentsFromDb,
 };
 
 function badRequest(error: unknown): TRPCError {
@@ -241,6 +267,7 @@ function assignSpecialist(
 	task: TaskRecord,
 	choice: string,
 	roleOverrides: Record<string, unknown> | undefined,
+	workspaceId?: string,
 ): TaskRecord {
 	const settings = loadWorkflowSettings(homeDir);
 	const specialists = listSpecialists(project).map((s) =>
@@ -256,15 +283,22 @@ function assignSpecialist(
 			specialistReason: "default workflow (chosen by you)",
 		};
 	} else if (choice === "auto") {
+		// A task on an agent with its own specialties uses one of them.
+		const own = specialists.filter(
+			(s) => workspaceId && s.specialist.agentWorkspaceId === workspaceId,
+		);
 		const picked = chooseSpecialists(
 			`${task.title}\n${task.description}`,
-			specialists,
+			own.length ? own : specialists,
 		);
+		const primary = picked.primary ?? own[0];
 		updated = {
 			...updated,
-			specialistId: picked.primary?.specialist.id,
+			specialistId: primary?.specialist.id,
 			supportingSpecialistIds: picked.supporting.map((s) => s.specialist.id),
-			specialistReason: picked.reason,
+			specialistReason: own.length
+				? `this agent's specialty${picked.primary ? ` (${picked.reason})` : ""}`
+				: picked.reason,
 		};
 	} else {
 		const chosen = specialists.find((s) => s.specialist.id === choice);
@@ -405,6 +439,10 @@ function describeTask(
 		subtaskSlugs: task.subtaskSlugs ?? [],
 		splitReason: task.splitReason ?? null,
 		parentSlug: task.parentSlug ?? null,
+		dependsOn: task.dependsOn ?? [],
+		/** For a subtask: the agent doing it (null: where the request was sent). */
+		agentName: task.agentName ?? null,
+		resultCommit: task.resultCommit ?? null,
 		runs: task.runs.map((run, index) => ({
 			id: run.id,
 			role: run.role ?? null,
@@ -733,12 +771,14 @@ export const createWorkflowRouter = (
 						created,
 						input.specialist,
 						input.roleOverrides,
+						input.workspaceId,
 					);
 					const routed: TaskRecord =
 						input.split && input.mode === "auto"
 							? {
 									...created,
 									isRequest: true,
+									teamAgents: deps.listAgents?.(input.workspaceId) ?? [],
 									routeBy: "ai",
 									routeReasons: ["a team request: the Coordinator splits it"],
 									specialistReason:

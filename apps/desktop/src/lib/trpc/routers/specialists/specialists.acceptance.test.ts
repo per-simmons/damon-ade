@@ -35,6 +35,11 @@ let specialists: ReturnType<
 >;
 let settingsModule: typeof import("main/lib/agent-workflow/workflow-settings");
 const workspaces = new Map<string, { root: string; worktree: string }>();
+/** The team's agents, as ADE's database would list them. */
+const agentsByWorkspace = new Map<
+	string,
+	Array<{ workspaceId: string; name: string; worktreePath: string }>
+>();
 
 const flag = (args: string[], name: string) => args[args.indexOf(name) + 1];
 const CHECK = `"${process.execPath.replace(/\\/g, "/")}" check.js`;
@@ -119,11 +124,16 @@ beforeAll(async () => {
 			resolveWorkspace,
 			controller: () => controller,
 			captureIdentity: identity.captureIdentity,
+			listAgents: (id) => agentsByWorkspace.get(id) ?? [],
 			events: new EventEmitter(),
 		})
 		.createCaller({});
 	specialists = specialistsRouter
-		.createSpecialistsRouter({ resolveWorkspace, homeDir: () => TEST_HOME })
+		.createSpecialistsRouter({
+			resolveWorkspace,
+			homeDir: () => TEST_HOME,
+			listAgents: (id) => agentsByWorkspace.get(id) ?? [],
+		})
 		.createCaller({});
 });
 
@@ -815,6 +825,213 @@ describe.if(bash !== null && git !== null)("specialists and roles", () => {
 			expect(all.find((t) => t.slug === slug)?.state).toBe("cancelled");
 		}
 	}, 90_000);
+
+	it("agents with their own specialties: independent subtasks run in parallel, and dependent work is merged into the next agent's branch", async () => {
+		const repo = makeRepo("agents");
+		const backPath = join(root, "agents-backend");
+		const frontPath = join(root, "agents-frontend");
+		sh(repo, "worktree", "add", "-q", "-b", "agent/backend", backPath);
+		sh(repo, "worktree", "add", "-q", "-b", "agent/frontend", frontPath);
+		const mainHead = sh(repo, "rev-parse", "HEAD");
+		const agents = [
+			{ workspaceId: "ws-lead", name: "Lead", worktreePath: repo },
+			{ workspaceId: "ws-ana", name: "Ana", worktreePath: backPath },
+			{ workspaceId: "ws-bo", name: "Bo", worktreePath: frontPath },
+		];
+		for (const agent of agents) {
+			workspaces.set(agent.workspaceId, {
+				root: repo,
+				worktree: agent.worktreePath,
+			});
+			agentsByWorkspace.set(agent.workspaceId, agents);
+		}
+		await tasks.setChecks({ workspaceId: "ws-lead", commands: [] });
+		const backend = await specialists.save({
+			workspaceId: "ws-ana",
+			specialist: {
+				name: "Backend",
+				specialty: "APIs and email",
+				agentWorkspaceId: "ws-ana",
+			},
+		});
+		await specialists.save({
+			workspaceId: "ws-bo",
+			specialist: {
+				name: "Frontend",
+				specialty: "Screens",
+				agentWorkspaceId: "ws-bo",
+			},
+		});
+		// Saving without the field keeps the agent.
+		await specialists.save({
+			workspaceId: "ws-ana",
+			specialist: {
+				id: backend.id,
+				name: "Backend",
+				specialty: "APIs and email",
+			},
+		});
+		const overview = await specialists.agents({ workspaceId: "ws-ana" });
+		expect(
+			overview.map((a) => [
+				a.name,
+				a.current,
+				a.specialties.map((s) => s.name),
+			]),
+		).toEqual([
+			["Lead", false, []],
+			["Ana", true, ["Backend"]],
+			["Bo", false, ["Frontend"]],
+		]);
+
+		fake.setSteps([
+			{
+				name: "split",
+				text: '```json\n{"subtasks": [{"title": "Email API", "description": "Add the mail API.", "specialist": "Backend", "route": "quick", "dependsOn": []}, {"title": "Settings screen", "description": "Add a settings screen.", "specialist": "Frontend", "route": "quick", "dependsOn": []}, {"title": "Email button", "description": "Add a button that calls the mail API.", "specialist": "Frontend", "route": "quick", "dependsOn": [1]}], "reason": "the API and the settings screen are independent; the button needs the API"}\n```',
+				cost: 0.01,
+			},
+			// The two independent subtasks run at the same time, so either may
+			// take either step: they write different files.
+			{
+				name: "work-1",
+				write: { "src/one.js": "export const one = 1;\n" },
+				cost: 0.01,
+			},
+			{
+				name: "work-2",
+				write: { "src/two.js": "export const two = 2;\n" },
+				cost: 0.01,
+			},
+			{ name: "review-1", text: "VERDICT: PASS", cost: 0.01 },
+			{ name: "review-2", text: "VERDICT: PASS", cost: 0.01 },
+			{
+				name: "button",
+				write: { "src/button.js": "export const button = 1;\n" },
+				cost: 0.01,
+			},
+			{ name: "button-review", text: "VERDICT: PASS", cost: 0.01 },
+		]);
+		const before = fake.calls().length;
+		const created = await tasks.createTask({
+			workspaceId: "ws-lead",
+			description: "Add the ability to email my teacher, and a settings screen",
+			split: true,
+		});
+		await controller.idle();
+		const all = (await tasks.getProjectTasks({ workspaceId: "ws-lead" })).tasks;
+		const request = all.find((t) => t.slug === created.slug);
+		const [api, settings, button] = (request?.subtaskSlugs ?? []).map((slug) =>
+			all.find((t) => t.slug === slug),
+		);
+		expect(
+			[api, settings, button].map((t) => [t?.title, t?.agentName, t?.state]),
+		).toEqual([
+			["Email API", "Ana", "done"],
+			["Settings screen", "Bo", "done"],
+			["Email button", "Bo", "done"],
+		]);
+		expect(api?.dependsOn).toEqual([]);
+		expect(button?.dependsOn).toEqual([api?.slug as string]);
+		expect(request?.state).toBe("done");
+		expect(request?.stateReason).toContain(
+			"The work is in Bo (agent/frontend)",
+		);
+
+		const calls = fake.calls().slice(before);
+		// The Coordinator knew which agent does each specialty.
+		expect(calls[0].stdin).toContain(
+			'"Backend" (APIs and email), done by the agent "Ana"',
+		);
+		// Independent subtasks ran at the same time, each in its agent's folder.
+		const norm = (p: string) => p.replace(/\\/g, "/").toLowerCase();
+		expect(
+			calls
+				.slice(1, 3)
+				.map((c) => c.step)
+				.sort(),
+		).toEqual(["work-1", "work-2"]);
+		expect(
+			calls
+				.slice(1, 3)
+				.map((c) => norm(c.cwd))
+				.sort(),
+		).toEqual([norm(backPath), norm(frontPath)].sort());
+		expect(
+			calls
+				.slice(3, 5)
+				.map((c) => c.step)
+				.sort(),
+		).toEqual(["review-1", "review-2"]);
+		// The button started after the API: the API was committed on Ana's
+		// branch and merged into Bo's; the button's own change is only its file.
+		expect(norm(calls[5].cwd)).toBe(norm(frontPath));
+		expect(api?.resultCommit).toBeTruthy();
+		expect(sh(backPath, "log", "-1", "--format=%s")).toBe("Email API");
+		expect(sh(frontPath, "log", "--format=%s").split(/\r?\n/)).toContain(
+			"Email API",
+		);
+		const apiFile = sh(backPath, "show", "--name-only", "--format=", "HEAD");
+		expect(sh(frontPath, "ls-files")).toContain(apiFile);
+		expect(calls[6].stdin).toContain(
+			"## This task's changes\n- src/button.js\n\n",
+		);
+		// The team's main branch was not touched.
+		expect(sh(repo, "rev-parse", "HEAD")).toBe(mainHead);
+		expect(sh(repo, "status", "--porcelain")).toBe("");
+
+		// An agent's own tasks use its specialty by default.
+		const own = await tasks.createTask({
+			workspaceId: "ws-ana",
+			description: "Tidy up the readme",
+			mode: "manual",
+		});
+		const ownTask = (
+			await tasks.getProjectTasks({ workspaceId: "ws-ana" })
+		).tasks.find((t) => t.slug === own.slug);
+		expect(ownTask?.specialist?.name).toBe("Backend");
+		expect(ownTask?.specialistReason).toContain("this agent's specialty");
+	}, 120_000);
+
+	it("a merge conflict between agents pauses the request with the reason", async () => {
+		const repo = join(root, "agents");
+		const frontPath = join(root, "agents-frontend");
+		fake.setSteps([
+			{
+				name: "split",
+				text: '```json\n{"subtasks": [{"title": "Change the API", "description": "Change it.", "specialist": "Backend", "route": "quick", "dependsOn": []}, {"title": "Use the API", "description": "Use it.", "specialist": "Frontend", "route": "quick", "dependsOn": [1]}], "reason": "button needs the API"}\n```',
+				cost: 0.01,
+			},
+			{
+				name: "api",
+				write: { "src/api.js": "export const route = 'backend';\n" },
+				cost: 0.01,
+			},
+			{ name: "api-review", text: "VERDICT: PASS", cost: 0.01 },
+		]);
+		// Bo's branch already changed the same line, committed.
+		writeFileSync(
+			join(frontPath, "src", "api.js"),
+			"export const route = 'frontend';\n",
+		);
+		sh(frontPath, "commit", "-qam", "Bo's own change");
+		const created = await tasks.createTask({
+			workspaceId: "ws-lead",
+			description: "Change the API and use it",
+			split: true,
+		});
+		await controller.idle();
+		const all = (await tasks.getProjectTasks({ workspaceId: "ws-lead" })).tasks;
+		const request = all.find((t) => t.slug === created.slug);
+		const use = all.find((t) => t.slug === request?.subtaskSlugs[1]);
+		expect(use?.state).toBe("paused");
+		expect(use?.stateReason).toContain("merge conflict in src/api.js");
+		expect(request?.state).toBe("paused");
+		expect(request?.stateReason).toContain('Subtask "Use the API"');
+		// The failed merge was undone: Bo's folder is clean and unchanged.
+		expect(sh(frontPath, "status", "--porcelain")).not.toContain("UU");
+		expect(sh(repo, "status", "--porcelain")).toBe("");
+		await tasks.cancel({ workspaceId: "ws-lead", slug: created.slug });
+	}, 120_000);
 
 	it("an older specialist keeps a template role it switched off when it moves to one list", async () => {
 		const project = (

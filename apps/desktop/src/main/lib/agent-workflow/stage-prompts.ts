@@ -35,7 +35,7 @@ export interface StagePromptInput {
 	escalationReport?: string;
 	/** For the pathway choice: the team's specialists and the budget left. */
 	triage?: {
-		specialists: Array<{ name: string; specialty: string }>;
+		specialists: Array<{ name: string; specialty: string; agent?: string }>;
 		remainingUsd: number;
 	};
 	/** For a custom role: what it is and what it must return. */
@@ -180,12 +180,13 @@ You are the Coordinator. Split this request into a few self-contained subtasks, 
 ${task.description}
 
 ## The team's specialists
-${specialists.length ? specialists.map((s) => `- "${s.name}" (${s.specialty})`).join("\n") : "- none (every subtask uses the default workflow; split only if it helps)"}
+${specialists.length ? specialists.map((s) => `- "${s.name}" (${s.specialty})${s.agent ? `, done by the agent "${s.agent}"` : ""}`).join("\n") : "- none (every subtask uses the default workflow; split only if it helps)"}
 
 ## How to split
 - Look briefly at the code the request touches (search first; read only what you need).
 - Make between 1 and 6 subtasks. One subtask is fine when the request is small or belongs to one specialty; do not split for its own sake.
-- Order them so each one's dependencies come first (for example the API before the screen that calls it). They run one after another in this order, in the same folder.
+- Order them so each one's dependencies come first (for example the API before the screen that calls it).
+- Give each subtask "dependsOn": the numbers (counting from 1) of the earlier subtasks whose work it needs, or [] if it needs none. Each specialist's agent works in its own copy of the repository; independent subtasks run at the same time, and a subtask starts with the work of the ones it depends on merged in.
 - Give each a short title and a description another engineer could do alone: what to change, the interfaces it must use or provide, and how to know it is done.
 - Assign each to the best specialist by name, or "none".
 - Choose each subtask's route ("quick", "implement", "plan", "exceptional") and models per role, as cheaply as is reliable: haiku only for trivial low-risk work, sonnet for normal work, opus for planning or reviewing difficult or risky work, fable only for exceptional architecture. Risky work (authentication, permissions, secrets, payments, data migrations, sending messages to people) is never "quick".
@@ -193,7 +194,7 @@ ${specialists.length ? specialists.map((s) => `- "${s.name}" (${s.specialty})`).
 ## Return
 Do not edit any file. End your reply with one JSON block exactly like this:
 \`\`\`json
-{"subtasks": [{"title": "Email API", "description": "...", "specialist": "Backend", "route": "plan", "models": {"planner": "opus", "implementer": "sonnet", "reviewer": "sonnet"}}], "reason": "one sentence"}
+{"subtasks": [{"title": "Email API", "description": "...", "specialist": "Backend", "route": "plan", "models": {"planner": "opus", "implementer": "sonnet", "reviewer": "sonnet"}, "dependsOn": []}, {"title": "Email button", "description": "...", "specialist": "Frontend", "route": "implement", "models": {"implementer": "sonnet", "reviewer": "sonnet"}, "dependsOn": [1]}], "reason": "one sentence"}
 \`\`\``;
 		}
 

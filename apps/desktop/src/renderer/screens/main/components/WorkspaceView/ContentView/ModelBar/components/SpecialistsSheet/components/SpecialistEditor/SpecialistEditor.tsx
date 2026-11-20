@@ -12,6 +12,7 @@ import {
 import { Textarea } from "@superset/ui/textarea";
 import { useState } from "react";
 import type {
+	AgentView,
 	CustomRoleDraft,
 	ModelCatalog,
 	RoleDraft,
@@ -91,6 +92,8 @@ interface SpecialistEditorProps {
 	list: SpecialistList;
 	templates: TemplateView[];
 	models: ModelCatalog;
+	/** The team's agents; the specialist can belong to one. */
+	agents?: AgentView[];
 	busy: boolean;
 	onSave: (draft: SpecialistDraft) => void;
 	onSaveTemplate: (draft: SpecialistDraft) => void;
@@ -109,6 +112,7 @@ export function SpecialistEditor({
 	list,
 	templates,
 	models,
+	agents = [],
 	busy,
 	onSave,
 	onSaveTemplate,
@@ -211,6 +215,37 @@ export function SpecialistEditor({
 					/>
 				</div>
 			</div>
+
+			{agents.length > 0 && (
+				<div className="space-y-1">
+					<Label>Agent</Label>
+					<Select
+						value={draft.agentWorkspaceId ?? NONE}
+						onValueChange={(v) =>
+							set({ agentWorkspaceId: v === NONE ? null : v })
+						}
+					>
+						<SelectTrigger className="h-8" aria-label="Agent">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value={NONE}>
+								No agent (runs where the task is)
+							</SelectItem>
+							{agents.map((a) => (
+								<SelectItem key={a.workspaceId} value={a.workspaceId}>
+									{a.name}
+									{a.current ? " (this agent)" : ""}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+					<p className="text-xs text-muted-foreground">
+						In a team request, this agent does the specialist's subtasks in its
+						own folder and branch. Its own tasks use this specialty by default.
+					</p>
+				</div>
+			)}
 
 			<div className="space-y-2 rounded border p-2">
 				<Label>Template (optional)</Label>

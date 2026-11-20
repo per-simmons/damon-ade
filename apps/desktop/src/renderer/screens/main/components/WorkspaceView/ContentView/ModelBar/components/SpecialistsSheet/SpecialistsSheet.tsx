@@ -19,7 +19,9 @@ interface SpecialistsSheetProps {
 	onOpenChange: (open: boolean) => void;
 }
 
-const emptyDraft = (): SpecialistDraft => ({
+// A new specialist belongs to the agent the sheet was opened from.
+const emptyDraft = (agentWorkspaceId: string): SpecialistDraft => ({
+	agentWorkspaceId,
 	name: "",
 	specialty: "",
 	templateUses: { instructions: true, models: true },
@@ -45,6 +47,7 @@ function toDraft(s: SpecialistView): SpecialistDraft {
 		})) as SpecialistDraft["customRoles"],
 		disabledTemplateRoles: s.disabledTemplateRoles,
 		appliedTemplates: s.appliedTemplates,
+		agentWorkspaceId: s.agentWorkspaceId ?? null,
 	};
 }
 
@@ -86,6 +89,12 @@ export function SpecialistsSheet({
 	const { data: models } = electronTrpc.specialists.models.useQuery(undefined, {
 		enabled: open,
 	});
+	const { data: agents = [] } = electronTrpc.specialists.agents.useQuery(
+		{ workspaceId },
+		{ enabled: open },
+	);
+	const agentName = (id?: string | null) =>
+		agents.find((a) => a.workspaceId === id)?.name;
 	const refresh = () => {
 		void utils.specialists.invalidate();
 		void utils.workflow.getProjectTasks.invalidate({ workspaceId });
@@ -157,7 +166,9 @@ export function SpecialistsSheet({
 					</SheetTitle>
 					<SheetDescription>
 						Optional. Specialists give tasks a specialty's instructions and
-						their own role models. All of them work in this team's repository.
+						their own role models. Give each one to an agent: in a team request,
+						that agent does its subtasks on its own branch of this team's
+						repository.
 					</SheetDescription>
 				</SheetHeader>
 				<div className="space-y-4 px-4 pb-6" data-panel="specialists">
@@ -168,6 +179,7 @@ export function SpecialistsSheet({
 							list={list}
 							templates={templates}
 							models={models}
+							agents={agents}
 							busy={busy}
 							onSave={submit}
 							onSaveTemplate={submitTemplate}
@@ -176,9 +188,33 @@ export function SpecialistsSheet({
 					)}
 					{list && !editing && (
 						<>
-							<Button onClick={() => setEditing(emptyDraft())}>
+							<Button onClick={() => setEditing(emptyDraft(workspaceId))}>
 								New specialist
 							</Button>
+							{agents.length > 0 && (
+								<div
+									className="space-y-1 rounded-md border p-3 text-xs"
+									data-agents-overview
+								>
+									<p className="text-sm font-medium">
+										Agents and their specialties
+									</p>
+									{agents.map((agent) => (
+										<p key={agent.workspaceId} data-agent={agent.name}>
+											<span className="font-medium">
+												{agent.name}
+												{agent.current ? " (this agent)" : ""}
+											</span>
+											:{" "}
+											<span className="text-muted-foreground">
+												{agent.specialties.length
+													? agent.specialties.map((s) => s.name).join(", ")
+													: "no specialty yet"}
+											</span>
+										</p>
+									))}
+								</div>
+							)}
 							{list.specialists.length === 0 && (
 								<p className="text-xs text-muted-foreground">
 									No specialists yet. Tasks use the default workflow with the
@@ -189,6 +225,7 @@ export function SpecialistsSheet({
 								<SpecialistCard
 									key={s.id}
 									specialist={s}
+									agentName={agentName(s.agentWorkspaceId)}
 									busy={busy}
 									onEdit={() => setEditing(toDraft(s))}
 									onRemove={() => remove.mutate({ workspaceId, id: s.id })}

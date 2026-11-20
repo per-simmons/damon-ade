@@ -28,8 +28,10 @@ import { TaskHistory } from "./components/TaskHistory";
 interface TaskCardProps {
 	task: TaskView;
 	actions: TaskActions;
-	/** A team request's subtasks, in the order they run. */
+	/** A team request's subtasks, in the order they were planned. */
 	subtasks?: TaskView[];
+	/** For a subtask: the titles of the subtasks it builds on. */
+	buildsOn?: string[];
 }
 
 /**
@@ -38,7 +40,12 @@ interface TaskCardProps {
  * question. In Manual mode (or while an Auto task is paused or blocked) each
  * step has its own button, disabled with the reason when it cannot run.
  */
-export function TaskCard({ task, actions, subtasks = [] }: TaskCardProps) {
+export function TaskCard({
+	task,
+	actions,
+	subtasks = [],
+	buildsOn = [],
+}: TaskCardProps) {
 	const [answer, setAnswer] = useState("");
 	const [model, setModel] = useState<string>(BY_ROLE);
 	const [budget, setBudget] = useState(String(task.limits.budgetUsd));
@@ -76,8 +83,10 @@ export function TaskCard({ task, actions, subtasks = [] }: TaskCardProps) {
 						{task.title}
 					</p>
 					<p className="text-xs text-muted-foreground">
-						{ROUTE_LABELS[task.route as Route]} ·{" "}
-						{task.identity.branch ?? task.identity.worktreePath}
+						{task.isRequest
+							? "Team request"
+							: ROUTE_LABELS[task.route as Route]}{" "}
+						· {task.identity.branch ?? task.identity.worktreePath}
 					</p>
 				</div>
 				<div className="flex shrink-0 flex-col items-end gap-1">
@@ -96,13 +105,21 @@ export function TaskCard({ task, actions, subtasks = [] }: TaskCardProps) {
 			{task.isRequest && (
 				<p className="text-xs text-muted-foreground" data-task-request>
 					{task.subtaskSlugs.length
-						? `Team request: the Coordinator split it into ${task.subtaskSlugs.length} subtask(s), run one after another${task.splitReason ? ` · ${task.splitReason}` : ""}`
+						? `Team request: the Coordinator split it into ${task.subtaskSlugs.length} subtask(s); each runs as soon as the work it builds on is done${task.splitReason ? ` · ${task.splitReason}` : ""}`
 						: "Team request: the Coordinator (Sonnet, read-only) splits it into subtasks and assigns each to a specialist."}
 				</p>
 			)}
 			{task.parentSlug && (
 				<p className="text-xs text-muted-foreground" data-task-parent>
-					Subtask of a team request
+					{task.agentName
+						? `Agent: ${task.agentName} (its own folder and branch${task.identity.branch ? `, ${task.identity.branch}` : ""})`
+						: "Runs where the request was sent"}
+					{buildsOn.length
+						? ` · builds on ${buildsOn.map((t) => `"${t}"`).join(", ")}`
+						: " · independent: can run alongside the others"}
+					{task.resultCommit
+						? ` · committed as ${task.resultCommit.slice(0, 7)} for the next agent`
+						: ""}
 				</p>
 			)}
 			{task.routeBy === "ai" && !task.isRequest && (
@@ -154,7 +171,7 @@ export function TaskCard({ task, actions, subtasks = [] }: TaskCardProps) {
 				disabled={running || elsewhere || finished}
 			/>
 
-			{elsewhere && (
+			{elsewhere && !task.parentSlug && (
 				<div className="space-y-2 rounded border border-amber-500/40 p-2">
 					<p className="text-xs">{task.mismatch}</p>
 					<Button
@@ -367,7 +384,13 @@ export function TaskCard({ task, actions, subtasks = [] }: TaskCardProps) {
 							<p className="text-xs font-medium text-muted-foreground">
 								Subtask {index + 1} of {subtasks.length}
 							</p>
-							<TaskCard task={subtask} actions={actions} />
+							<TaskCard
+								task={subtask}
+								actions={actions}
+								buildsOn={subtask.dependsOn
+									.map((slug) => subtasks.find((s) => s.slug === slug)?.title)
+									.filter((t): t is string => !!t)}
+							/>
 						</div>
 					))}
 				</div>

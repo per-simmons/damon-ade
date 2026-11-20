@@ -40,6 +40,8 @@ export interface Subtask {
 	specialist?: string;
 	route: TaskRoute;
 	models: Partial<Record<RoleName, Model>>;
+	/** Earlier subtasks (indexes in this plan) whose work this one needs. */
+	dependsOn: number[];
 }
 
 export interface SplitPlan {
@@ -70,7 +72,11 @@ export function parseSplit(reply: string | undefined): SplitPlan | undefined {
 		}
 		if (!Array.isArray(data.subtasks)) continue;
 		const subtasks: Subtask[] = [];
-		for (const item of data.subtasks.slice(0, MAX_SUBTASKS)) {
+		// The Coordinator numbers subtasks from 1 in its own list; skipped
+		// entries must not shift what the others depend on.
+		const indexOf = new Map<number, number>();
+		const items = data.subtasks.slice(0, MAX_SUBTASKS);
+		for (const [position, item] of items.entries()) {
 			if (!item || typeof item !== "object") continue;
 			const entry = item as Record<string, unknown>;
 			const title = text(entry.title, 120);
@@ -88,7 +94,21 @@ export function parseSplit(reply: string | undefined): SplitPlan | undefined {
 				if (role && MODELS.includes(model)) models[role] = model;
 			}
 			const specialist = text(entry.specialist, 80);
+			// Without dependsOn a subtask builds on the one before it.
+			const dependsOn = Array.isArray(entry.dependsOn)
+				? [
+						...new Set(
+							entry.dependsOn
+								.map((n) => indexOf.get(Number(n) - 1))
+								.filter((i): i is number => i !== undefined),
+						),
+					]
+				: subtasks.length > 0
+					? [subtasks.length - 1]
+					: [];
+			indexOf.set(position, subtasks.length);
 			subtasks.push({
+				dependsOn,
 				title,
 				description,
 				specialist:

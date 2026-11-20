@@ -48,6 +48,7 @@ import {
 	type TaskRun,
 	withTaskLock,
 } from "./tasks";
+import { commitFiles, mergeCommit } from "./team-git";
 import { applyTriage, parseTriage, TRIAGE_ROUTING } from "./triage";
 import type { RoleName, WorkflowSettings } from "./workflow-settings";
 
@@ -1565,6 +1566,9 @@ export class TaskController {
 								specialists: listSpecialists(project).map((s) => ({
 									name: s.name,
 									specialty: s.specialty,
+									agent: task.teamAgents?.find(
+										(a) => a.workspaceId === s.agentWorkspaceId,
+									)?.name,
 								})),
 								remainingUsd: Math.max(
 									task.limits.budgetUsd - taskSpend(task).worstCaseUsd,
@@ -1811,7 +1815,10 @@ export class TaskController {
 
 	/**
 	 * Turn the Coordinator's split into ordinary tasks: one per subtask, each
-	 * with its specialist, route and models, in the order they will run.
+	 * with its specialist, route and models. A specialist that belongs to an
+	 * agent does its subtask in that agent's folder (its own worktree of the
+	 * team's repository); otherwise the subtask runs where the request was
+	 * sent.
 	 */
 	private createSubtasks(
 		project: ProjectWorkflow,
@@ -1831,17 +1838,26 @@ export class TaskController {
 							s.specialty.toLowerCase() === wanted,
 					)
 				: undefined;
+			const agent = owner?.agentWorkspaceId
+				? request.teamAgents?.find(
+						(a) => a.workspaceId === owner.agentWorkspaceId,
+					)
+				: undefined;
 			const created = createTask(project, {
 				description: `${sub.title}\n\n${sub.description}\n\n(Part of the team request "${request.title}".)`,
 				route: sub.route,
 				mode: "auto",
-				identity: request.identity,
+				identity: agent
+					? captureIdentity(agent.workspaceId, agent.worktreePath)
+					: request.identity,
 				limits: request.limits,
 			});
 			const child: TaskRecord = {
 				...created,
 				title: sub.title,
 				parentSlug: request.slug,
+				dependsOn: sub.dependsOn.map((index) => slugs[index]),
+				agentName: agent?.name,
 				history: request.history,
 				routeBy: "ai",
 				routeReasons: ["assigned by the Coordinator"],
@@ -1884,9 +1900,52 @@ export class TaskController {
 	}
 
 	/**
-	 * A team request runs its subtasks one after another. It shows the
-	 * running subtask, waits with the reason when one needs the user, skips
-	 * cancelled ones, and is done when every subtask is.
+	 * Before a subtask starts, bring in the work of the subtasks it depends
+	 * on that ran in another agent's folder: commit that subtask's own files
+	 * on its agent's branch (once), then merge the commit into this agent's
+	 * branch. Work in the same folder is already there. Returns why it could
+	 * not, if it could not.
+	 */
+	private bringInDependencies(
+		project: ProjectWorkflow,
+		subtask: TaskRecord,
+		dependencies: TaskRecord[],
+	): string | undefined {
+		const here = folderKey(subtask.identity.worktreePath);
+		for (const dependency of dependencies) {
+			if (dependency.state !== "done") continue;
+			if (folderKey(dependency.identity.worktreePath) === here) continue;
+			if (!dependency.resultCommit) {
+				const files = changedFilesOf(dependency);
+				if (files.length === 0) continue;
+				const committed = commitFiles(
+					dependency.identity.worktreePath,
+					files,
+					`${dependency.title}\n\nADE team request subtask, verified by its review.`,
+				);
+				if ("error" in committed) {
+					return `Could not commit "${dependency.title}" in ${dependency.agentName ? `${dependency.agentName}'s folder` : dependency.identity.worktreePath} for "${subtask.title}" to build on: ${committed.error}`;
+				}
+				dependency.resultCommit = committed.commit;
+				saveTask(project, dependency);
+			}
+			const problem = mergeCommit(
+				subtask.identity.worktreePath,
+				dependency.resultCommit,
+				`Bring in "${dependency.title}" (ADE team request)`,
+			);
+			if (problem) {
+				return `Could not bring "${dependency.title}" into ${subtask.agentName ? `${subtask.agentName}'s branch` : subtask.identity.worktreePath}: ${problem}. Merge it yourself, then resume.`;
+			}
+		}
+		return undefined;
+	}
+
+	/**
+	 * A team request runs its subtasks as soon as the subtasks they depend
+	 * on are done: independent ones at the same time, in different agents'
+	 * folders (one at a time per folder). It waits with the reason when a
+	 * subtask needs the user, and is done when every subtask is.
 	 */
 	private syncRequest(
 		project: ProjectWorkflow,
@@ -1899,56 +1958,112 @@ export class TaskController {
 		const children = (request.subtaskSlugs ?? [])
 			.map((s) => getTask(project, s))
 			.filter((t): t is TaskRecord => !!t);
-		const running = children.find((c) => c.state === "running");
-		const next = children.find(
-			(c) => c.state !== "done" && c.state !== "cancelled",
-		);
-		const done = children.filter((c) => c.state === "done").length;
-		if (running) {
+		const settled = (c: TaskRecord) =>
+			c.state === "done" || c.state === "cancelled";
+		const stoppedStates = ["paused", "blocked", "failed", "needs-input"];
+		let stopped = children.filter((c) => stoppedStates.includes(c.state));
+		const active = children.filter((c) => c.state === "running");
+
+		if (options.resumeChild) {
+			for (const child of stopped) {
+				child.state = "running";
+				child.stateReason = "Resuming.";
+				saveTask(project, child);
+				active.push(child);
+				this.track(
+					project,
+					child.slug,
+					this.resume(project, child.slug).catch((error) =>
+						this.subtaskFailedToStart(project, child.slug, error),
+					),
+				);
+			}
+			stopped = [];
+		}
+
+		const busy = new Set(active.map((c) => folderKey(c.identity.worktreePath)));
+		for (const child of children) {
+			if (child.state !== "idle") continue;
+			const dependencies = (child.dependsOn ?? [])
+				.map((slug) => children.find((c) => c.slug === slug))
+				.filter((c): c is TaskRecord => !!c);
+			if (!dependencies.every(settled)) continue;
+			const folder = folderKey(child.identity.worktreePath);
+			if (busy.has(folder)) continue;
+			const problem = this.bringInDependencies(project, child, dependencies);
+			if (problem) {
+				child.state = "paused";
+				child.stateReason = problem;
+				saveTask(project, child);
+				stopped.push(child);
+				continue;
+			}
+			// Its own changes are measured from here, after the merge.
+			child.identity = captureIdentity(
+				child.identity.workspaceId,
+				child.identity.worktreePath,
+			);
+			// Marked running now, so a second look does not start it again.
+			child.state = "running";
+			child.stateReason = "Starting.";
+			saveTask(project, child);
+			busy.add(folder);
+			active.push(child);
+			this.track(
+				project,
+				child.slug,
+				this.start(project, child.slug).catch((error) =>
+					this.subtaskFailedToStart(project, child.slug, error),
+				),
+			);
+		}
+
+		const done = children.filter((c) => c.state === "done");
+		const where = (c: TaskRecord) =>
+			c.agentName
+				? `${c.agentName}${c.identity.branch ? ` (${c.identity.branch})` : ""}`
+				: (c.identity.branch ?? c.identity.worktreePath);
+		if (active.length > 0) {
 			request.state = "running";
-			request.stateReason = `Subtask ${children.indexOf(running) + 1} of ${children.length}: ${running.title}`;
-		} else if (!next) {
-			const skipped = children.length - done;
+			request.stateReason = `Running: ${active.map((c) => `"${c.title}" in ${where(c)}`).join("; ")} · ${done.length} of ${children.length} done`;
+		} else if (children.every(settled)) {
+			const cancelled = children.length - done.length;
+			// Where the finished work ends up: subtasks no other one builds on.
+			const ends = done.filter(
+				(c) =>
+					!done.some(
+						(other) =>
+							other.dependsOn?.includes(c.slug) &&
+							folderKey(other.identity.worktreePath) !==
+								folderKey(c.identity.worktreePath),
+					),
+			);
+			const places = [...new Set(ends.map(where))];
 			request.state = "done";
-			request.stateReason = `Verified: all ${done} subtask(s) are done${skipped ? `; ${skipped} cancelled` : ""}.`;
-		} else if (next.state === "idle") {
-			// Each subtask's changes are its own: measure them from now.
-			next.identity = captureIdentity(
-				next.identity.workspaceId,
-				next.identity.worktreePath,
-			);
-			saveTask(project, next);
-			request.state = "running";
-			request.stateReason = `Subtask ${children.indexOf(next) + 1} of ${children.length}: ${next.title}`;
-			this.track(
-				project,
-				next.slug,
-				this.start(project, next.slug).catch((error) =>
-					console.warn("[workflow] Starting a subtask failed:", error),
-				),
-			);
-		} else if (
-			options.resumeChild &&
-			(next.state === "paused" ||
-				next.state === "blocked" ||
-				next.state === "failed")
-		) {
-			request.state = "running";
-			request.stateReason = `Resuming subtask ${children.indexOf(next) + 1}: ${next.title}`;
-			this.track(
-				project,
-				next.slug,
-				this.resume(project, next.slug).catch((error) =>
-					console.warn("[workflow] Resuming a subtask failed:", error),
-				),
-			);
+			request.stateReason = `Verified: all ${done.length} subtask(s) are done${cancelled ? `; ${cancelled} cancelled` : ""}.${places.length ? ` The work is in ${places.join(" and ")}.` : ""}`;
 		} else {
+			const first = stopped[0];
 			request.state = "paused";
-			request.stateReason = `Subtask "${next.title}" ${next.state === "needs-input" ? "needs your answer" : `stopped: ${next.stateReason ?? next.state}`}. Open it below.`;
+			request.stateReason = first
+				? `Subtask "${first.title}" ${first.state === "needs-input" ? "needs your answer" : `stopped: ${first.stateReason ?? first.state}`}. Open it below; Resume continues the request.`
+				: "Waiting for a subtask it depends on.";
 		}
 		saveTask(project, request);
 		this.changed(project, request.slug);
 		return request;
+	}
+
+	private subtaskFailedToStart(
+		project: ProjectWorkflow,
+		slug: string,
+		error: unknown,
+	): void {
+		const task = getTask(project, slug);
+		if (!task || task.state !== "running" || activeRun(task)) return;
+		task.state = "paused";
+		task.stateReason = `Could not start: ${error instanceof Error ? error.message : String(error)}`;
+		saveTask(project, task);
+		this.changed(project, slug);
 	}
 
 	/**

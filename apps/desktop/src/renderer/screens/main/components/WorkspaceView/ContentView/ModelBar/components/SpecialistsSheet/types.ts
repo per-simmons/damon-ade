@@ -5,6 +5,7 @@ export type SpecialistView = SpecialistList["specialists"][number];
 export type TemplateView =
 	ElectronRouterOutputs["specialists"]["templates"][number];
 export type ModelCatalog = ElectronRouterOutputs["specialists"]["models"];
+export type AgentView = ElectronRouterOutputs["specialists"]["agents"][number];
 export type RoleName = SpecialistList["baseRoles"][number]["role"];
 export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -44,6 +45,8 @@ export interface SpecialistDraft {
 	disabledTemplateRoles: string[];
 	/** Templates whose roles are already in the list. */
 	appliedTemplates?: string[];
+	/** The agent that does this specialist's subtasks (null: none). */
+	agentWorkspaceId?: string | null;
 }
 
 export const SOURCE_LABELS: Record<string, string> = {

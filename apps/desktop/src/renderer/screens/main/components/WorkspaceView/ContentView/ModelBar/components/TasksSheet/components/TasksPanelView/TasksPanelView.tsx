@@ -83,10 +83,12 @@ export function TasksPanelView({
 				{split && (
 					<p className="text-xs text-muted-foreground" data-team-request>
 						Team request: a Coordinator run (Sonnet, medium effort, read-only)
-						reads the request and the code, splits it into up to 6 subtasks in
-						the order they depend on each other, and gives each to the best
-						specialist with its own pathway and models. ADE then runs them one
-						after another, each with its checks and review.
+						reads the request and the code, splits it into up to 6 subtasks and
+						gives each to the best specialist with its own pathway and models.
+						Each specialist's agent works in its own folder and branch;
+						independent subtasks run at the same time, and a subtask starts with
+						the work it builds on merged into its agent's branch. Each gets its
+						own checks and review.
 					</p>
 				)}
 				{!split && route === BY_AI && mode === "auto" && (
