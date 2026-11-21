@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import { agentMessages } from "@superset/local-db";
 import { BrowserWindow } from "electron";
 import express from "express";
@@ -10,9 +11,37 @@ import type {
 	AgentMessageEvent,
 } from "shared/notification-types";
 import { getAgentEntry } from "../agent-config/registry";
-import { localDb } from "../local-db";
+import {
+	getInvokePromptDir,
+	parseAgentInvokeRequest,
+	resolveClaudeExecutable,
+	runHeadlessClaude,
+	shellKindFor,
+	writeInvokePromptFile,
+} from "../agent-invoke";
+import {
+	type HeadlessFinished,
+	startHeadlessInvoke,
+} from "../agent-invoke/headless-invoke";
+import { findRealBinary } from "../agent-setup/utils";
+import {
+	ensureProjectWorkflow,
+	portablePath,
+	projectKeyFor,
+} from "../agent-workflow/project-workflow";
+import { loadWorkflowSettings } from "../agent-workflow/workflow-settings";
+import { getSupersetHomeDir } from "../app-environment";
 import { appState } from "../app-state";
-import { HOOK_PROTOCOL_VERSION } from "../terminal/env";
+import { localDb } from "../local-db";
+import { getDefaultShell, HOOK_PROTOCOL_VERSION } from "../terminal/env";
+import {
+	appendHeadlessRun,
+	decodeHookString,
+	getMetricsDir,
+	scheduleSessionRecording,
+	transcriptPathFor,
+} from "../usage-metrics";
+import { checkLocalRequest, type LocalTokenKind } from "./local-auth";
 import { mapEventType } from "./map-event-type";
 
 // Re-export types for backwards compatibility
@@ -40,15 +69,29 @@ const app = express();
 // Parse JSON request bodies
 app.use(express.json());
 
-// CORS
+// Local callers only: no CORS headers (browsers cannot send JSON POSTs here),
+// a Host check against DNS rebinding, and no browser Origin. Mutating routes
+// also need a token (local-auth.ts).
 app.use((req, res, next) => {
-	res.setHeader("Access-Control-Allow-Origin", "*");
-	res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-	if (req.method === "OPTIONS") {
-		return res.status(200).end();
+	const check = checkLocalRequest(req, getSupersetHomeDir(), []);
+	if (!check.ok) {
+		return res
+			.status(check.status)
+			.json({ success: false, error: check.error });
 	}
 	next();
 });
+
+function requireToken(
+	req: express.Request,
+	res: express.Response,
+	accept: LocalTokenKind[],
+): boolean {
+	const check = checkLocalRequest(req, getSupersetHomeDir(), accept);
+	if (check.ok) return true;
+	res.status(check.status).json({ success: false, error: check.error });
+	return false;
+}
 
 /**
  * Resolves paneId from tabId or workspaceId using synced tabs state.
@@ -99,6 +142,57 @@ function resolvePaneId(
 	return undefined;
 }
 
+/** The project workflow for a headless run in `cwd`, or none if it fails. */
+function headlessWorkflowFor(
+	cwd: string,
+): { tasksDir: string; agentsJson: string } | undefined {
+	try {
+		const workflow = ensureProjectWorkflow(getSupersetHomeDir(), cwd);
+		return {
+			tasksDir: portablePath(workflow.tasksDir),
+			agentsJson: readFileSync(workflow.agentsFile, "utf8"),
+		};
+	} catch (error) {
+		console.warn("[notifications] No workflow for headless run:", error);
+		return undefined;
+	}
+}
+
+/** Log a finished headless run and record its usage from the transcript. */
+function recordHeadlessRun(finished: HeadlessFinished): void {
+	const { result } = finished;
+	const report = result.report;
+	appendHeadlessRun(getMetricsDir(), {
+		at: new Date().toISOString(),
+		agent: finished.agent,
+		cwd: finished.cwd,
+		model: finished.model,
+		maxBudgetUsd: finished.maxBudgetUsd,
+		maxTurns: finished.maxTurns,
+		exitCode: result.exitCode,
+		timedOut: result.timedOut,
+		durationMs: result.durationMs,
+		sessionId: report?.sessionId,
+		reportedCostUsd: report?.totalCostUsd,
+		numTurns: report?.numTurns,
+		isError: report?.isError,
+		subtype: report?.subtype,
+		error:
+			result.parseError ??
+			(result.exitCode === 0 ? undefined : result.stderrTail),
+	});
+	console.log(
+		`[notifications] headless run for ${finished.agent} finished: exit ${result.exitCode}, ${report?.subtype ?? "no result"}, reported $${report?.totalCostUsd?.toFixed(4) ?? "?"}`,
+	);
+	// Headless runs bypass ADE's terminal hooks, so record usage directly.
+	if (report?.sessionId) {
+		scheduleSessionRecording({
+			transcriptPath: transcriptPathFor(finished.cwd, report.sessionId),
+			projectKey: projectKeyFor(finished.cwd),
+		});
+	}
+}
+
 // Agent lifecycle hook
 app.get("/hook/complete", (req, res) => {
 	const {
@@ -106,6 +200,8 @@ app.get("/hook/complete", (req, res) => {
 		tabId,
 		workspaceId,
 		sessionId,
+		transcriptPath,
+		projectKey,
 		eventType,
 		env: clientEnv,
 		version,
@@ -167,6 +263,27 @@ app.get("/hook/complete", (req, res) => {
 
 	notificationsEmitter.emit(NOTIFICATION_EVENTS.AGENT_LIFECYCLE, event);
 
+	// Claude Code sends its transcript path; record the session's token usage
+	// from it once the turn has stopped (debounced, off the request path).
+	// Only from ADE's own hook (it carries the terminal's hook token), and only
+	// a Claude transcript file.
+	const hookAuthorized = checkLocalRequest(req, getSupersetHomeDir(), [
+		"hook",
+	]).ok;
+	if (
+		mappedEventType === "Stop" &&
+		hookAuthorized &&
+		typeof transcriptPath === "string" &&
+		decodeHookString(transcriptPath).endsWith(".jsonl")
+	) {
+		scheduleSessionRecording({
+			transcriptPath: decodeHookString(transcriptPath),
+			workspaceId: typeof workspaceId === "string" ? workspaceId : undefined,
+			projectKey:
+				typeof projectKey === "string" && projectKey ? projectKey : undefined,
+		});
+	}
+
 	res.json({ success: true, paneId: resolvedPaneId, tabId });
 });
 
@@ -176,47 +293,69 @@ app.get("/hook/complete", (req, res) => {
  * runtime, identity+skills+MCP read from the agent's folder) and open/focus that
  * agent's chat-mastra tab in ADE so the user watches it work.
  *
- *   POST /agent/invoke  { agent, prompt, model? }
+ *   POST /agent/invoke
+ *   { agent, prompt, tab?, claudeSessionId?, fresh?, model?,
+ *     mode?: "terminal" | "headless", maxBudgetUsd? }
+ *
+ * mode "headless" runs `claude -p` in the background with a hard spending and
+ * turn cap (Settings > Models & Cost) and answers 202 straight away.
+ *
+ * Validation, the prompt file and the shell choice live in main/lib/agent-invoke.
  */
 app.post("/agent/invoke", async (req, res) => {
-	const { agent, prompt, tab, claudeSessionId, fresh } = (req.body ?? {}) as {
-		agent?: string;
-		prompt?: string;
-		tab?: string;
-		claudeSessionId?: string;
-		fresh?: boolean;
-	};
-
-	if (!agent || !prompt) {
+	if (!requireToken(req, res, ["invoke"])) return;
+	const parsed = parseAgentInvokeRequest(req.body, getAgentEntry);
+	if (!parsed.ok) {
 		return res
-			.status(400)
-			.json({ success: false, error: "agent and prompt are required" });
+			.status(parsed.status)
+			.json({ success: false, error: parsed.error });
+	}
+	const request = parsed.request;
+	if (request.ignoredRegistryModel) {
+		console.warn(
+			`[notifications] /agent/invoke: ignoring registry model for ${request.agent}; it is not a plain model name`,
+		);
 	}
 
-	const entry = getAgentEntry(agent);
-	if (!entry) {
-		return res
-			.status(404)
-			.json({ success: false, error: `Unknown agent: ${agent}` });
+	if (request.mode === "headless") {
+		const started = startHeadlessInvoke(request, {
+			limits: () => loadWorkflowSettings(getSupersetHomeDir()).budgets,
+			findExecutable: () => resolveClaudeExecutable(findRealBinary("claude")),
+			// Same workflow roles as the agent's terminal sessions.
+			run: (params) =>
+				runHeadlessClaude({
+					...params,
+					workflow: headlessWorkflowFor(request.entry.cwd),
+				}),
+			onFinished: recordHeadlessRun,
+		});
+		return res.status(started.status).json(started.body);
 	}
 
 	try {
+		// The prompt goes to a private file, never onto the command line.
+		const promptFile = writeInvokePromptFile(
+			getInvokePromptDir(getSupersetHomeDir()),
+			request.prompt,
+		);
+
 		// Tell the renderer to open a terminal in the agent's folder and run
 		// `claude` with the prompt. The agent works live in the terminal on Pat's
 		// subscription; claude's own hooks fire Start/Stop (dot + review toast)
 		// and its terminal title auto-names the tab.
 		const invokeEvent: AgentInvokeEvent = {
-			agentName: agent,
-			sessionId: entry.sessionId,
-			workspaceId: entry.workspaceId,
-			prompt,
-			cwd: entry.cwd,
-			tabTitle: typeof tab === "string" && tab.trim() ? tab.trim() : undefined,
-			claudeSessionId:
-				typeof claudeSessionId === "string" && claudeSessionId.trim()
-					? claudeSessionId.trim()
-					: undefined,
-			fresh: fresh !== false,
+			agentName: request.agent,
+			sessionId: request.entry.sessionId,
+			workspaceId: request.entry.workspaceId,
+			prompt: request.prompt,
+			promptFile,
+			shell: shellKindFor(getDefaultShell()),
+			cwd: request.entry.cwd,
+			tabTitle: request.tabTitle,
+			claudeSessionId: request.claudeSessionId,
+			fresh: request.fresh,
+			model: request.model,
+			permissionMode: request.permissionMode,
 		};
 		notificationsEmitter.emit(NOTIFICATION_EVENTS.AGENT_INVOKE, invokeEvent);
 
@@ -225,7 +364,11 @@ app.post("/agent/invoke", async (req, res) => {
 		// claude's hooks light the rail dot + fire the review toast, and the user
 		// clicks in when they're ready.
 
-		res.json({ success: true, agent, sessionId: entry.sessionId });
+		res.json({
+			success: true,
+			agent: request.agent,
+			sessionId: request.entry.sessionId,
+		});
 	} catch (error) {
 		console.error("[notifications] /agent/invoke failed:", error);
 		res.status(500).json({ success: false, error: String(error) });
@@ -241,13 +384,8 @@ app.post("/agent/invoke", async (req, res) => {
  *   POST /agent/message  { agent, content, conversation?, role?, metadata? }
  */
 app.post("/agent/message", (req, res) => {
-	const {
-		agent,
-		content,
-		conversation,
-		role,
-		metadata,
-	} = (req.body ?? {}) as {
+	if (!requireToken(req, res, ["invoke", "hook"])) return;
+	const { agent, content, conversation, role, metadata } = (req.body ?? {}) as {
 		agent?: string;
 		content?: string;
 		conversation?: string;
@@ -298,6 +436,42 @@ app.post("/agent/message", (req, res) => {
 		console.error("[notifications] /agent/message failed:", error);
 		res.status(500).json({ success: false, error: String(error) });
 	}
+});
+
+/**
+ * The Team chat's MCP server (lib/trpc/routers/workflow/team-mcp.ts): the
+ * Coordinator Claude Code session reads the team and starts agreed plans.
+ * JSON responses only; there is no server-to-client stream.
+ */
+let teamMcp:
+	| ((workspaceId: string, body: unknown) => Promise<unknown>)
+	| undefined;
+app.post("/team-mcp/:workspaceId", async (req, res) => {
+	if (!requireToken(req, res, ["team"])) return;
+	try {
+		if (!teamMcp) {
+			const { createTeamMcpHandler } = await import(
+				"lib/trpc/routers/workflow/team-mcp"
+			);
+			teamMcp = createTeamMcpHandler();
+		}
+		const reply = await teamMcp(req.params.workspaceId, req.body);
+		if (reply === undefined) return res.status(202).end();
+		res.json(reply);
+	} catch (error) {
+		console.error("[team-mcp] failed:", error);
+		res.status(500).json({
+			jsonrpc: "2.0",
+			id: null,
+			error: { code: -32603, message: String(error) },
+		});
+	}
+});
+app.get("/team-mcp/:workspaceId", (_req, res) => {
+	res.status(405).set("Allow", "POST").end();
+});
+app.delete("/team-mcp/:workspaceId", (_req, res) => {
+	res.status(405).set("Allow", "POST").end();
 });
 
 // Health check

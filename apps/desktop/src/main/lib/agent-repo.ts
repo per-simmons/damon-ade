@@ -8,11 +8,16 @@ import {
 } from "./agent-home";
 
 /**
- * How an agent's repo is populated at creation time.
- * - init:  a fresh empty git repo (`git init` + empty initial commit)
- * - clone: clone a remote URL or a local path into the worktree
+ * How an agent's working folder is populated at creation time.
+ * - team:  a git worktree of the team's repository on the agent's own branch
+ *          (one team = one repository; agents never get repositories of
+ *          their own)
+ * - init:  a fresh empty git repo (`git init` + empty initial commit); only
+ *          for agents of teams created before teams had a repository
+ * - clone: clone a remote URL or a local path into the worktree (legacy)
  */
 export type AgentRepoSource =
+	| { type: "team"; repoPath: string; branch: string; startPoint: string }
 	| { type: "init" }
 	| { type: "clone"; url: string };
 
@@ -64,7 +69,43 @@ export async function setupAgentRepo({
 	}
 
 	let branch: string;
-	if (source.type === "clone") {
+	if (source.type === "team") {
+		// A worktree of the team's repository: the agent works on its own
+		// branch in its own folder, so it never edits the team's checkout or
+		// another agent's files. Nothing is cloned or created elsewhere.
+		const repo = simpleGit(source.repoPath);
+		// Forget registrations of worktree folders that no longer exist.
+		await repo.raw(["worktree", "prune"]).catch(() => undefined);
+		// A retry after a partial attempt reuses the branch it created.
+		const branchExists = await repo
+			.raw(["rev-parse", "--verify", "--quiet", `refs/heads/${source.branch}`])
+			.then((out) => out.trim().length > 0)
+			.catch(() => false);
+		// Start from the team's base branch if it exists locally, else from the
+		// repository's current HEAD.
+		const startPoint = await repo
+			.raw([
+				"rev-parse",
+				"--verify",
+				"--quiet",
+				`${source.startPoint}^{commit}`,
+			])
+			.then((out) => (out.trim() ? source.startPoint : "HEAD"))
+			.catch(() => "HEAD");
+		await repo.raw(
+			branchExists
+				? ["worktree", "add", worktreePath, source.branch]
+				: [
+						"worktree",
+						"add",
+						"-b",
+						source.branch,
+						worktreePath,
+						`${startPoint}^{commit}`,
+					],
+		);
+		branch = source.branch;
+	} else if (source.type === "clone") {
 		await simpleGit().clone(source.url, worktreePath);
 		branch =
 			(await simpleGit(worktreePath)
@@ -86,9 +127,8 @@ export async function setupAgentRepo({
 		await git.addConfig("user.email", "agent@ade.local", false, "local");
 		await git.raw(["commit", "--allow-empty", "-m", "Initial commit"]);
 		branch =
-			(await git
-				.revparse(["--abbrev-ref", "HEAD"])
-				.catch(() => "main")) || "main";
+			(await git.revparse(["--abbrev-ref", "HEAD"]).catch(() => "main")) ||
+			"main";
 		branch = branch.trim();
 	}
 

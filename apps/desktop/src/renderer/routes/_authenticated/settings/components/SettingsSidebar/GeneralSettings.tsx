@@ -3,6 +3,7 @@ import { Link, useMatchRoute } from "@tanstack/react-router";
 import {
 	HiOutlineBell,
 	HiOutlineCommandLine,
+	HiOutlineCpuChip,
 	HiOutlineKey,
 	HiOutlinePaintBrush,
 	HiOutlinePuzzlePiece,
@@ -24,6 +25,7 @@ type SettingsRoute =
 	| "/settings/ringtones"
 	| "/settings/keyboard"
 	| "/settings/behavior"
+	| "/settings/models"
 	| "/settings/terminal"
 	| "/settings/integrations"
 	| "/settings/api-keys"
@@ -65,6 +67,12 @@ const GENERAL_SECTIONS: {
 		section: "behavior",
 		label: "Features",
 		icon: <HiOutlineSparkles className="h-4 w-4" />,
+	},
+	{
+		id: "/settings/models",
+		section: "models",
+		label: "Models & Cost",
+		icon: <HiOutlineCpuChip className="h-4 w-4" />,
 	},
 	{
 		id: "/settings/terminal",

@@ -7,6 +7,7 @@ import defaultShell from "default-shell";
 import { env } from "shared/env.shared";
 import { getAgentCodexHome } from "../agent-home";
 import { getShellEnv } from "../agent-setup/shell-wrappers";
+import { getWindowsDefaultShell } from "./windows-shell";
 
 const MACOS_SYSTEM_CERT_FILE = "/etc/ssl/cert.pem";
 let cachedUtf8Locale: string | null = null;
@@ -41,6 +42,11 @@ export const FALLBACK_SHELL = os.platform() === "win32" ? "cmd.exe" : "/bin/sh";
 export const SHELL_CRASH_THRESHOLD_MS = 1000;
 
 export function getDefaultShell(): string {
+	// default-shell answers COMSPEC (cmd.exe) on Windows; sessions need Git Bash.
+	if (os.platform() === "win32") {
+		return getWindowsDefaultShell();
+	}
+
 	if (defaultShell) {
 		return defaultShell;
 	}
@@ -279,11 +285,6 @@ const ALLOWED_ENV_VARS = new Set([
 	// for codex agents; it must survive the terminal-host's buildSafeEnv re-filter
 	// to reach the spawned CLI's environment.
 	"CODEX_HOME",
-
-	// Provider API key that buildTerminalEnv injects from the encrypted key store
-	// (see provider-keys.ts). Like CODEX_HOME, it must survive the terminal-host's
-	// buildSafeEnv re-filter to reach the OpenRouter-routed CLI (kimi/minimax/glm).
-	"OPENROUTER_API_KEY",
 ]);
 
 /**
@@ -372,21 +373,6 @@ export function removeAppEnvVars(
 }
 
 /**
- * Resolver for the stored OpenRouter API key, injected by the main process at
- * startup (see terminal/index.ts). env.ts is also loaded by the terminal-host
- * subprocess (for buildSafeEnv), which must NOT pull in localDb/electron; keeping
- * the key store behind a setter keeps it out of env.ts's static import graph.
- * buildTerminalEnv only runs in the main process, where the resolver is set.
- */
-let openRouterKeyResolver: (() => string | null) | null = null;
-
-export function setOpenRouterKeyResolver(
-	resolver: (() => string | null) | null,
-): void {
-	openRouterKeyResolver = resolver;
-}
-
-/**
  * Share a single Codex login across every agent.
  *
  * Each codex agent gets an isolated CODEX_HOME, so it would otherwise start
@@ -410,6 +396,25 @@ function linkSharedCodexAuth(codexHome: string): void {
 	} catch {
 		// Auth sharing is a convenience; a failure here must not break the terminal.
 	}
+}
+
+export type WorkflowEnvResolver = (project: {
+	rootPath?: string;
+	workspacePath?: string;
+	workspaceId?: string;
+}) => Record<string, string> | null;
+
+/**
+ * Set by the main process (terminal/index.ts). env.ts is also loaded by the
+ * terminal-host subprocess for buildSafeEnv, so the workflow modules stay out
+ * of its static import graph.
+ */
+let workflowEnvResolver: WorkflowEnvResolver | null = null;
+
+export function setWorkflowEnvResolver(
+	resolver: WorkflowEnvResolver | null,
+): void {
+	workflowEnvResolver = resolver;
 }
 
 export function buildTerminalEnv(params: {
@@ -471,17 +476,19 @@ export function buildTerminalEnv(params: {
 
 	delete terminalEnv.GOOGLE_API_KEY;
 
-	// Inject the stored OpenRouter key so the OpenRouter-routed runtimes
-	// (kimi/minimax/glm) authenticate without depending on the user's shell rc.
-	// No key stored -> leave it unset so any shell rc fallback still applies.
-	if (openRouterKeyResolver) {
+	// The multi-model workflow for this terminal's project (any folder, ADE
+	// created or not): its key, its roles file and its task folder. ADE's
+	// claude wrapper turns these into --agents / --add-dir. SUPERSET_-prefixed,
+	// so they survive the terminal-host's buildSafeEnv re-filter.
+	if (workflowEnvResolver) {
 		try {
-			const openRouterKey = openRouterKeyResolver();
-			if (openRouterKey) {
-				terminalEnv.OPENROUTER_API_KEY = openRouterKey;
-			}
-		} catch {
-			// Never block terminal creation on key retrieval.
+			Object.assign(
+				terminalEnv,
+				workflowEnvResolver({ rootPath, workspacePath, workspaceId }) ?? {},
+			);
+		} catch (error) {
+			// Never block terminal creation on the workflow.
+			console.warn("[terminal-env] Workflow setup failed:", error);
 		}
 	}
 

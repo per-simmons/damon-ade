@@ -36,6 +36,20 @@ export async function getShellEnvironment(): Promise<Record<string, string>> {
 		return { ...cachedEnv };
 	}
 
+	// Windows apps inherit the full user PATH, so there is nothing to recover
+	// from a login shell (and Git Bash would answer with a POSIX-style PATH,
+	// /c/...:/usr/bin, that native programs cannot use).
+	if (process.platform === "win32") {
+		const env: Record<string, string> = {};
+		for (const [key, value] of Object.entries(process.env)) {
+			if (typeof value === "string") env[key] = value;
+		}
+		cachedEnv = env;
+		cacheTime = now;
+		isFallbackCache = false;
+		return { ...env };
+	}
+
 	const shell =
 		process.env.SHELL ||
 		(process.platform === "darwin" ? "/bin/zsh" : "/bin/bash");

@@ -21,7 +21,8 @@ import {
 	readdirSync,
 	readFileSync,
 	realpathSync,
-	rmSync,
+	rmdirSync,
+	unlinkSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -66,6 +67,19 @@ function findBunStoreFolderName(
 	return entries.find((entry) => entry.startsWith(modulePrefix)) ?? null;
 }
 
+/**
+ * Remove a symlink without touching its target. On Windows, Bun installs
+ * packages as directory junctions, which rmSync cannot remove (EFAULT).
+ */
+function removeLink(linkPath: string): void {
+	try {
+		unlinkSync(linkPath);
+	} catch (error) {
+		if (process.platform !== "win32") throw error;
+		rmdirSync(linkPath);
+	}
+}
+
 function copyModuleIfSymlink(
 	nodeModulesDir: string,
 	moduleName: string,
@@ -100,7 +114,7 @@ function copyModuleIfSymlink(
 		console.log(`    Real path: ${realPath}`);
 
 		// Remove the symlink
-		rmSync(modulePath);
+		removeLink(modulePath);
 
 		// Copy the actual files
 		cpSync(realPath, modulePath, { recursive: true });

@@ -19,6 +19,11 @@ import {
 import { getWorkspaceName } from "shared/env.shared";
 import { backfillAgentMemory } from "./lib/agent-memory-backfill";
 import { setupAgentHooks } from "./lib/agent-setup";
+import {
+	recoverWorkflowTasks,
+	shutdownWorkflowRuns,
+} from "./lib/agent-workflow/service";
+import { loadWorkflowSettings } from "./lib/agent-workflow/workflow-settings";
 import { SUPERSET_HOME_DIR } from "./lib/app-environment";
 import { initAppState } from "./lib/app-state";
 import { startAppStateWatcher } from "./lib/app-state/watcher";
@@ -36,6 +41,12 @@ import {
 	reconcileDaemonSessions,
 } from "./lib/terminal";
 import { disposeTray, initTray } from "./lib/tray";
+import {
+	createCostAlertListener,
+	getMetricsDir,
+	loadSessions,
+	onSessionRecorded,
+} from "./lib/usage-metrics";
 import { MainWindow } from "./windows/main";
 
 console.log("[main] Local database ready:", !!localDb);
@@ -90,6 +101,10 @@ function focusMainWindow(): void {
 		}
 		mainWindow.show();
 		mainWindow.focus();
+	} else {
+		// The window was closed but ADE kept running (tray): launching ADE
+		// again must bring a window back. Same path as the tray's "Open".
+		app.emit("activate");
 	}
 }
 
@@ -183,6 +198,12 @@ app.on("before-quit", async (event) => {
 
 	isQuitting = true;
 	disposeTray();
+	// Managed workflow runs are child processes: kill their trees (bounded).
+	try {
+		await shutdownWorkflowRuns();
+	} catch (error) {
+		console.error("[main] Stopping workflow runs failed:", error);
+	}
 	app.exit(0);
 });
 
@@ -262,7 +283,8 @@ if (!gotTheLock) {
 			// superset-icon://<namespace>/<id> — namespace is the URL host
 			// ("projects" for Category photos, "workspaces" for Agent avatars).
 			const url = new URL(request.url);
-			const namespace = url.hostname === "workspaces" ? "workspaces" : "projects";
+			const namespace =
+				url.hostname === "workspaces" ? "workspaces" : "projects";
 			const id = url.pathname.replace(/^\//, "");
 			const iconPath = getIconPath(namespace, id);
 			if (!iconPath) {
@@ -290,6 +312,14 @@ if (!gotTheLock) {
 		// Must happen before renderer restore runs
 		console.log("[main] boot: reconcileDaemonSessions…");
 		await reconcileDaemonSessions();
+
+		// Workflow tasks whose run was in progress when ADE stopped: mark the
+		// run interrupted and pause the task (no paid work is replayed).
+		try {
+			recoverWorkflowTasks();
+		} catch (error) {
+			console.error("[main] Workflow task recovery failed:", error);
+		}
 		prewarmTerminalRuntime();
 
 		try {
@@ -316,6 +346,21 @@ if (!gotTheLock) {
 				console.error("[main] Memory backfill failed:", error);
 			}
 		}, 0);
+
+		// Spending warnings (Settings > Models), checked each time a Claude
+		// session's usage is recorded from its transcript.
+		onSessionRecorded(
+			createCostAlertListener({
+				getBudgets: () => loadWorkflowSettings(SUPERSET_HOME_DIR).budgets,
+				loadAllSessions: () => loadSessions(getMetricsDir()),
+				notify: (alert) => {
+					console.log(`[usage-metrics] ${alert.title}: ${alert.body}`);
+					if (Notification.isSupported()) {
+						new Notification({ title: alert.title, body: alert.body }).show();
+					}
+				},
+			}),
+		);
 
 		// Process any deep links from cold start
 		const coldStartUrl = findDeepLinkInArgv(process.argv);

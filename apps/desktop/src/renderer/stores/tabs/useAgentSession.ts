@@ -1,8 +1,9 @@
+import type { AgentRuntime, TerminalPreset } from "@superset/local-db";
 import {
 	AGENT_LABELS,
 	AGENT_PRESET_COMMANDS,
+	toAgentType,
 } from "@superset/shared/agent-command";
-import type { AgentRuntime, TerminalPreset } from "@superset/local-db";
 import { useCallback } from "react";
 import { useTabsWithPresets } from "./useTabsWithPresets";
 
@@ -34,11 +35,13 @@ export function useAgentSession() {
 				return addTab(id, { initialCwd: cwd });
 			}
 
+			// Older agents may still store a dropped runtime; run those on Claude Code.
+			const agent = toAgentType(runtime);
 			const preset: TerminalPreset = {
-				id: `agent-${runtime}`,
-				name: AGENT_LABELS[runtime] ?? runtime,
+				id: `agent-${agent}`,
+				name: AGENT_LABELS[agent],
 				cwd: worktreePath ?? "",
-				commands: AGENT_PRESET_COMMANDS[runtime],
+				commands: AGENT_PRESET_COMMANDS[agent],
 				executionMode: "new-tab",
 			};
 

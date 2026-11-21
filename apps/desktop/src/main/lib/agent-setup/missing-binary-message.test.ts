@@ -18,12 +18,9 @@ describe("missing-binary message", () => {
 		expect(script).not.toContain('"claude not found');
 	});
 
-	it("covers codex and opencode too", () => {
+	it("covers codex too", () => {
 		expect(buildWrapperScript("codex", "true")).toContain(
 			BINARY_INSTALL.codex.command,
-		);
-		expect(buildWrapperScript("opencode", "true")).toContain(
-			BINARY_INSTALL.opencode.command,
 		);
 	});
 

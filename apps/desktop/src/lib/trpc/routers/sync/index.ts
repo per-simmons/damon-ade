@@ -9,11 +9,11 @@
  */
 
 import { observable } from "@trpc/server/observable";
-import { appStateWatcher } from "main/lib/app-state/watcher";
 import type {
 	AppStateSyncEnvelope,
 	TabsState,
 } from "main/lib/app-state/schemas";
+import { appStateWatcher } from "main/lib/app-state/watcher";
 import { publicProcedure, router } from "../..";
 
 export interface AppStateUpdatePayload {
@@ -31,7 +31,9 @@ export const createSyncRouter = () => {
 		 */
 		appStateUpdates: publicProcedure.subscription(() => {
 			return observable<AppStateUpdatePayload>((emit) => {
-				const onUpdate = (payload: { state: { tabsState: TabsState; sync?: AppStateSyncEnvelope } }) => {
+				const onUpdate = (payload: {
+					state: { tabsState: TabsState; sync?: AppStateSyncEnvelope };
+				}) => {
 					const sync = payload.state.sync;
 					if (!sync) return;
 					emit.next({

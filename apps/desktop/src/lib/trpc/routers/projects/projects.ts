@@ -8,17 +8,20 @@ import {
 	type SelectProject,
 	settings,
 	workspaces,
+	worktrees,
 } from "@superset/local-db";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, inArray, isNull, not } from "drizzle-orm";
 import type { BrowserWindow } from "electron";
 import { dialog } from "electron";
 import { track } from "main/lib/analytics";
+import { getSupersetHomeDir } from "main/lib/app-environment";
 import { localDb } from "main/lib/local-db";
 import {
 	deleteProjectIcon,
 	saveProjectIconFromDataUrl,
 } from "main/lib/project-icons";
+import { moveWorkflowRecord, relocateRepository } from "main/lib/team-relocate";
 import { getWorkspaceRuntimeRegistry } from "main/lib/workspace-runtime";
 import { PROJECT_COLOR_VALUES } from "shared/constants/project-colors";
 import simpleGit from "simple-git";
@@ -43,6 +46,12 @@ import {
 import { getDefaultProjectColor } from "./utils/colors";
 import { discoverAndSaveProjectIcon } from "./utils/favicon-discovery";
 import { fetchGitHubOwner, getGitHubAvatarUrl } from "./utils/github";
+import { getProjectsFolder, setProjectsFolder } from "./utils/projects-folder";
+import {
+	migrateTeam,
+	teamForRepository,
+	teamRepositoryStatus,
+} from "./utils/teams";
 
 type Project = SelectProject;
 
@@ -96,6 +105,20 @@ async function initGitRepo(path: string): Promise<{ defaultBranch: string }> {
 	return { defaultBranch };
 }
 
+/** The next sidebar position (projects with a tabOrder are listed). */
+function nextTabOrder(): number {
+	return (
+		localDb
+			.select()
+			.from(projects)
+			.all()
+			.reduce(
+				(max, p) => (p.tabOrder != null && p.tabOrder > max ? p.tabOrder : max),
+				-1,
+			) + 1
+	);
+}
+
 function upsertProject(mainRepoPath: string, defaultBranch: string): Project {
 	const name = basename(mainRepoPath);
 
@@ -106,14 +129,18 @@ function upsertProject(mainRepoPath: string, defaultBranch: string): Project {
 		.get();
 
 	if (existing) {
+		// Opening a project that was closed (hidden) shows it again.
+		const tabOrder = existing.tabOrder ?? nextTabOrder();
 		localDb
 			.update(projects)
-			.set({ lastOpenedAt: Date.now(), defaultBranch })
+			.set({ lastOpenedAt: Date.now(), defaultBranch, tabOrder })
 			.where(eq(projects.id, existing.id))
 			.run();
-		return { ...existing, lastOpenedAt: Date.now(), defaultBranch };
+		return { ...existing, lastOpenedAt: Date.now(), defaultBranch, tabOrder };
 	}
 
+	// A tabOrder puts the opened project in the sidebar; without one it was
+	// created but never listed.
 	const project = localDb
 		.insert(projects)
 		.values({
@@ -121,6 +148,7 @@ function upsertProject(mainRepoPath: string, defaultBranch: string): Project {
 			name,
 			color: getDefaultProjectColor(),
 			defaultBranch,
+			tabOrder: nextTabOrder(),
 		})
 		.returning()
 		.get();
@@ -740,6 +768,8 @@ export const createProjectsRouter = (getWindow: () => BrowserWindow | null) => {
 							name,
 							color: getDefaultProjectColor(),
 							defaultBranch,
+							// Without a tabOrder the team is never listed.
+							tabOrder: nextTabOrder(),
 						})
 						.returning()
 						.get();
@@ -767,6 +797,13 @@ export const createProjectsRouter = (getWindow: () => BrowserWindow | null) => {
 					};
 				}
 			}),
+
+		/** Where new projects are created unless the user picks another folder. */
+		getProjectsFolder: publicProcedure.query(() => getProjectsFolder()),
+
+		setProjectsFolder: publicProcedure
+			.input(z.object({ path: z.string().min(1).nullable() }))
+			.mutation(({ input }) => setProjectsFolder(input.path)),
 
 		createEmptyRepo: publicProcedure
 			.input(
@@ -1179,6 +1216,241 @@ export const createProjectsRouter = (getWindow: () => BrowserWindow | null) => {
 				return { iconUrl };
 			}),
 
+		/**
+		 * One team = one repository. New team from a local repository: the
+		 * team is named (default: the folder's name) and opens on its main
+		 * workspace, where Tasks work at once. A repository that already has a
+		 * team opens that team instead of making a second one.
+		 */
+		createTeam: publicProcedure
+			.input(
+				z.object({
+					path: z.string().min(1),
+					name: z.string().trim().max(80).optional(),
+					color: z.string().optional(),
+				}),
+			)
+			.mutation(async ({ input }) => {
+				if (!existsSync(input.path) || !statSync(input.path).isDirectory()) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "Choose an existing folder",
+					});
+				}
+				let repoRoot: string;
+				try {
+					repoRoot = await getGitRoot(input.path);
+				} catch (error) {
+					if (error instanceof NotGitRepoError) {
+						throw new TRPCError({
+							code: "BAD_REQUEST",
+							message:
+								"This folder is not a git repository. Choose a repository, or clone one from GitHub.",
+						});
+					}
+					throw error;
+				}
+				const existing = teamForRepository(repoRoot);
+				const project =
+					existing ?? upsertProject(repoRoot, await getDefaultBranch(repoRoot));
+				if (existing) {
+					// Opening it again shows it (if it was hidden) and refreshes it.
+					upsertProject(
+						existing.mainRepoPath,
+						await getDefaultBranch(existing.mainRepoPath),
+					);
+				} else {
+					const name = input.name?.trim();
+					if (name || input.color) {
+						localDb
+							.update(projects)
+							.set({
+								...(name ? { name } : {}),
+								...(input.color ? { color: input.color } : {}),
+							})
+							.where(eq(projects.id, project.id))
+							.run();
+					}
+				}
+				const fresh = localDb
+					.select()
+					.from(projects)
+					.where(eq(projects.id, project.id))
+					.get() as Project;
+				await ensureMainWorkspace(fresh);
+				const main = getBranchWorkspace(fresh.id);
+				track("project_opened", { project_id: fresh.id, method: "new_team" });
+				return {
+					project: fresh,
+					existed: !!existing,
+					workspaceId: main?.id ?? null,
+				};
+			}),
+
+		/** A team's repository, its agents, and whether they need migrating. */
+		teamRepository: publicProcedure
+			.input(z.object({ projectId: z.string() }))
+			.query(({ input }) => teamRepositoryStatus(input.projectId)),
+
+		/**
+		 * Give a team created before teams had a repository its repository.
+		 * Its agents keep their own folders until the user migrates them.
+		 */
+		/**
+		 * Change a team's folder: move its repository into another folder, or
+		 * point the team at where it was already moved. Agents come along
+		 * (their worktrees are re-linked), and so do the team's tasks and
+		 * specialists. Nothing is deleted.
+		 */
+		relocateTeam: publicProcedure
+			.input(
+				z.object({
+					projectId: z.string(),
+					target: z.string().min(1),
+					mode: z.enum(["move", "relink"]),
+				}),
+			)
+			.mutation(async ({ input }) => {
+				const project = localDb
+					.select()
+					.from(projects)
+					.where(eq(projects.id, input.projectId))
+					.get();
+				if (!project)
+					throw new TRPCError({ code: "NOT_FOUND", message: "Team not found" });
+				if (!project.mainRepoPath) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "This team has no repository yet. Choose one first.",
+					});
+				}
+				const agentWorktrees = localDb
+					.select()
+					.from(worktrees)
+					.where(eq(worktrees.projectId, project.id))
+					.all()
+					.map((w) => w.path);
+				let to: string;
+				try {
+					to = relocateRepository({
+						from: project.mainRepoPath,
+						target: input.target,
+						mode: input.mode,
+						agentWorktrees,
+					});
+				} catch (error) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: error instanceof Error ? error.message : String(error),
+					});
+				}
+				const other = teamForRepository(to);
+				if (other && other.id !== project.id) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: `Another team (${other.name}) already uses ${to}.`,
+					});
+				}
+				moveWorkflowRecord(getSupersetHomeDir(), project.mainRepoPath, to);
+				localDb
+					.update(projects)
+					.set({ mainRepoPath: to, lastOpenedAt: Date.now() })
+					.where(eq(projects.id, project.id))
+					.run();
+				const fresh = localDb
+					.select()
+					.from(projects)
+					.where(eq(projects.id, project.id))
+					.get() as Project;
+				await ensureMainWorkspace(fresh);
+				return { path: to, agentsRelinked: agentWorktrees.length };
+			}),
+
+		setTeamRepository: publicProcedure
+			.input(z.object({ projectId: z.string(), path: z.string().min(1) }))
+			.mutation(async ({ input }) => {
+				const project = localDb
+					.select()
+					.from(projects)
+					.where(eq(projects.id, input.projectId))
+					.get();
+				if (!project) throw new Error("Team not found");
+				if (project.mainRepoPath) {
+					throw new Error(
+						`This team already has a repository: ${project.mainRepoPath}`,
+					);
+				}
+				let repoRoot: string;
+				try {
+					repoRoot = await getGitRoot(input.path);
+				} catch (error) {
+					if (error instanceof NotGitRepoError) {
+						throw new Error("This folder is not a git repository");
+					}
+					throw error;
+				}
+				const other = teamForRepository(repoRoot);
+				if (other) {
+					throw new Error(
+						`Team "${other.name}" already uses this repository. Open that team instead.`,
+					);
+				}
+				localDb
+					.update(projects)
+					.set({
+						mainRepoPath: repoRoot,
+						defaultBranch: await getDefaultBranch(repoRoot),
+						lastOpenedAt: Date.now(),
+					})
+					.where(eq(projects.id, input.projectId))
+					.run();
+				const fresh = localDb
+					.select()
+					.from(projects)
+					.where(eq(projects.id, input.projectId))
+					.get() as Project;
+				await ensureMainWorkspace(fresh);
+				return {
+					status: teamRepositoryStatus(input.projectId),
+					workspaceId: getBranchWorkspace(fresh.id)?.id ?? null,
+				};
+			}),
+
+		/**
+		 * Migrate an old team: one chosen agent's repository becomes the team's
+		 * (optional), and every other repository gets a team of its own. Only
+		 * team membership changes; no files are moved or deleted.
+		 */
+		migrateTeam: publicProcedure
+			.input(
+				z.object({
+					projectId: z.string(),
+					teamRepoAgentId: z.string().nullable(),
+				}),
+			)
+			.mutation(async ({ input }) => {
+				const result = migrateTeam(input.projectId, input.teamRepoAgentId);
+				// Teams that now have a repository get its default branch.
+				for (const id of [
+					input.projectId,
+					...result.createdTeams.map((t) => t.id),
+				]) {
+					const team = localDb
+						.select()
+						.from(projects)
+						.where(eq(projects.id, id))
+						.get();
+					if (team?.mainRepoPath && !team.defaultBranch) {
+						localDb
+							.update(projects)
+							.set({ defaultBranch: await getDefaultBranch(team.mainRepoPath) })
+							.where(eq(projects.id, id))
+							.run();
+					}
+				}
+				return result;
+			}),
+
 		// ADE: create a Category (a grouping-only project with no shared repo).
 		// mainRepoPath is "" (the repo-less sentinel); tabOrder = max+1 so it
 		// shows in the rail. Agents are added to it via workspaces.createAgent.
@@ -1192,7 +1464,8 @@ export const createProjectsRouter = (getWindow: () => BrowserWindow | null) => {
 			.mutation(({ input }) => {
 				const allProjects = localDb.select().from(projects).all();
 				const maxTabOrder = allProjects.reduce(
-					(max, p) => (p.tabOrder != null && p.tabOrder > max ? p.tabOrder : max),
+					(max, p) =>
+						p.tabOrder != null && p.tabOrder > max ? p.tabOrder : max,
 					-1,
 				);
 

@@ -5,9 +5,9 @@ import {
 	FALLBACK_SHELL,
 	getLocale,
 	removeAppEnvVars,
-	setOpenRouterKeyResolver,
 	SHELL_CRASH_THRESHOLD_MS,
 	sanitizeEnv,
+	setWorkflowEnvResolver,
 } from "./env";
 
 describe("env", () => {
@@ -736,6 +736,53 @@ describe("env", () => {
 			});
 		});
 
+		describe("multi-model workflow", () => {
+			afterEach(() => setWorkflowEnvResolver(null));
+
+			it("adds the project's workflow and keeps it through the terminal-host filter", () => {
+				const seen: Array<{
+					rootPath?: string;
+					workspacePath?: string;
+					workspaceId?: string;
+				}> = [];
+				setWorkflowEnvResolver((project) => {
+					seen.push(project);
+					return {
+						SUPERSET_PROJECT_KEY: "shop-0123456789",
+						SUPERSET_WORKFLOW_AGENTS:
+							"/home/pat/.ade/workflow/projects/shop/agents.json",
+						SUPERSET_WORKFLOW_TASKS_DIR:
+							"/home/pat/.ade/workflow/projects/shop/tasks",
+					};
+				});
+				const result = buildTerminalEnv({
+					...baseParams,
+					rootPath: "/repos/shop",
+					workspacePath: "/repos/shop-feature",
+				});
+				expect(seen).toEqual([
+					{
+						rootPath: "/repos/shop",
+						workspacePath: "/repos/shop-feature",
+						workspaceId: "ws-1",
+					},
+				]);
+				const filtered = buildSafeEnv(result);
+				expect(filtered.SUPERSET_PROJECT_KEY).toBe("shop-0123456789");
+				expect(filtered.SUPERSET_WORKFLOW_AGENTS).toContain("agents.json");
+				expect(filtered.SUPERSET_WORKFLOW_TASKS_DIR).toContain("tasks");
+			});
+
+			it("still creates the terminal when the workflow setup fails", () => {
+				setWorkflowEnvResolver(() => {
+					throw new Error("disk full");
+				});
+				const result = buildTerminalEnv(baseParams);
+				expect(result.SUPERSET_PANE_ID).toBe(baseParams.paneId);
+				expect(result.SUPERSET_PROJECT_KEY).toBeUndefined();
+			});
+		});
+
 		describe("CODEX_HOME for codex runtime", () => {
 			it("sets CODEX_HOME to the agent .codex home and it survives the terminal-host buildSafeEnv re-filter", async () => {
 				const { getAgentCodexHome } = await import("../agent-home");
@@ -751,37 +798,6 @@ describe("env", () => {
 			it("does not set CODEX_HOME for a claude runtime", () => {
 				const result = buildTerminalEnv({ ...baseParams, runtime: "claude" });
 				expect(result.CODEX_HOME).toBeUndefined();
-			});
-		});
-
-		describe("OPENROUTER_API_KEY injection", () => {
-			afterEach(() => {
-				// Reset the module-level resolver so it does not leak into other tests.
-				setOpenRouterKeyResolver(null);
-			});
-
-			it("injects the resolved key and it survives the buildSafeEnv re-filter", () => {
-				setOpenRouterKeyResolver(() => "sk-or-live-abc");
-				const result = buildTerminalEnv(baseParams);
-				expect(result.OPENROUTER_API_KEY).toBe("sk-or-live-abc");
-				// terminal-host re-applies buildSafeEnv before the pty spawn; the key
-				// must survive it to reach the OpenRouter-routed CLI.
-				expect(buildSafeEnv(result).OPENROUTER_API_KEY).toBe("sk-or-live-abc");
-			});
-
-			it("leaves OPENROUTER_API_KEY unset when no key is stored", () => {
-				setOpenRouterKeyResolver(() => null);
-				const result = buildTerminalEnv(baseParams);
-				expect(result.OPENROUTER_API_KEY).toBeUndefined();
-			});
-
-			it("does not block terminal creation when the resolver throws", () => {
-				setOpenRouterKeyResolver(() => {
-					throw new Error("keychain locked");
-				});
-				const result = buildTerminalEnv(baseParams);
-				expect(result.OPENROUTER_API_KEY).toBeUndefined();
-				expect(result.SUPERSET_PANE_ID).toBe(baseParams.paneId);
 			});
 		});
 	});

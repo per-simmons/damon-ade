@@ -1,0 +1,108 @@
+# M4: measuring the multi-model workflow
+
+Goal: find out, with real numbers, whether the workflow lowers the **cost per successfully completed task** without lowering the success rate.
+
+Usage is now recorded automatically. You run the tasks and judge them; ADE records the rest. The results section at the end of this file is generated. Do not edit it by hand.
+
+All commands below run from `apps/desktop` and spend no tokens. Only the task runs themselves (section 3) use your plan or API usage.
+
+## 1. What is recorded automatically
+
+Every time a Claude Code session in an ADE terminal stops, ADE reads that session's transcript and its subagents' transcripts. It stores one summary per session in `<ADE home>/metrics/sessions/`.
+
+| Measured | From |
+|---|---|
+| Model actually used, per response and per role (main, planner, implementer, quick, reviewer, architect) | transcript `message.model` and the subagent's `meta.json` |
+| Input, output, cache-read, 5-minute and 1-hour cache-write tokens | transcript `message.usage` |
+| Estimated API-equivalent cost | list prices from the Anthropic pricing page (read 2026-11-17) |
+| Active time (prompt to last response, summed over turns) and wall time | transcript timestamps |
+| Escalations (architect calls), review rounds, step retries | Agent tool calls; `.ade/tasks/<slug>/progress.md` counters |
+| Workflow status (planned / in progress / blocked / done) | `progress.md` |
+| API errors | transcript error entries |
+
+Each response is counted once by its API message id, so repeated Stops and resumed or forked sessions are never double-counted.
+
+Sessions started outside ADE terminals can be added afterwards with `bun run workflow import --cwd <folder>`.
+
+## 2. Before the first run
+
+1. Update Claude Code if you want (`claude update`). The installed 2.1.193 already supports everything the workflow uses; `bun run workflow doctor` confirms this.
+2. Choose 5–10 real tasks with a mix of sizes:
+   - **S:** a one-file fix
+   - **M:** a feature touching 2–5 files
+   - **L:** a change across packages
+
+   Name them T1, T2, ….
+3. For each task, write the exact prompt and the acceptance-check commands **before** any run. The checks decide success for every arm, so they must not depend on tests a run writes: use existing tests, typecheck, lint, or a script you write now.
+4. For each project you will use, run `bun run workflow doctor <project folder>`. Every role should show its model (planner opus, architect fable, implementer sonnet, quick haiku, reviewer sonnet) and no `!!` problems.
+
+## 3. Running a task
+
+Run every task once per arm, each from the **same starting commit** on its own branch, for example `git switch -c m4-T1-B <start>`.
+
+**Before** starting the session, label the folder so its sessions are grouped:
+
+```bash
+bun run workflow label T1/B --cwd <project folder>
+```
+
+The arms:
+
+| Arm | What it is | How to run it |
+|---|---|---|
+| **A** | Current baseline | In the project's terminal: `SUPERSET_WORKFLOW_AGENTS= claude --model opus --dangerously-skip-permissions`, then give the prompt directly. The empty variable stops ADE from adding the workflow roles, so Claude cannot hand work to them. |
+| **A2** | Efficient single model | Same as A, but start with `SUPERSET_WORKFLOW_AGENTS= CLAUDE_CODE_EFFORT_LEVEL=medium claude --model opus --dangerously-skip-permissions`. |
+| **B** | Multi-model workflow | Model bar > **Tasks**: paste the prompt, leave the route on "Chosen by ADE" and Auto on, and click **Run task**. ADE runs plan, build, checks, review and corrections itself. Approve the project's checks first, with the same commands you use to judge the arms. |
+
+Permissions must match across arms. Arms A and A2 above skip permission prompts, while arm B's task runs default to "Edit files and run the approved checks". Either set Settings › Models & Cost › Task runs › Permissions to the bypass profile for arm B, or drop `--dangerously-skip-permissions` from A and A2.
+
+Arm B's runs are recorded twice, and the two records never add together:
+- Each run's cost and models are in the task record, shown in the Tasks panel.
+- Each run's transcript is recorded under the project, so `bun run workflow report` includes it. Role names appear as `ade-planner`, `ade-reviewer`, and so on.
+
+When the session is done, judge it with the acceptance checks. This runs the commands and records pass or fail:
+
+```bash
+bun run workflow check T1/B --cwd <project folder> -- "bun run typecheck" "bun test src/feature"
+```
+
+Or record a manual verdict:
+
+```bash
+bun run workflow result T1/B fail --note "login button missing"
+```
+
+Clear the label when you finish a series: `bun run workflow label --clear --cwd <project folder>`.
+
+## 4. Updating this report
+
+```bash
+bun run workflow report --update ../../docs/plans/multi-model-workflow/measurements.md
+```
+
+`bun run workflow sessions` lists every recorded session with its label and estimated cost.
+
+## 5. Decision rule (proposal: confirm or change before looking at results)
+
+Keep the workflow as the default if both hold:
+1. Arm B's success rate is at least the better baseline's (A or A2).
+2. Arm B's cost per success is at most **70%** of that baseline's.
+
+**Cost per success** = everything an arm spent (planning, implementation, testing, review, retries, escalations, and the failed runs) ÷ its number of passing runs.
+
+Otherwise:
+- If Fable is most of arm B's cost, check escalation counts and lower the planner's effort or turn limit.
+- If B fails more often, read the failed runs' `progress.md` and escalation reports to see which stage broke.
+- If A2 matches B, prefer A2: one model is simpler and keeps one prompt cache.
+
+## 6. Caveats
+
+- Costs are list-price estimates. On a Claude subscription they show relative usage, not charges.
+- Responses in fast mode or from models missing from the price table count as $0 and are listed as unpriced in the report.
+- With 5–10 tasks run once each, a difference under about 20% may be noise. Re-run the tasks that decide the outcome.
+
+## 7. Results
+
+<!-- m4-report:start -->
+_Not generated yet. Run `bun run workflow report --update ...` (section 4)._
+<!-- m4-report:end -->

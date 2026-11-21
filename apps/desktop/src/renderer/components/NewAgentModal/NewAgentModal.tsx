@@ -14,7 +14,6 @@ import {
 } from "@superset/ui/dialog";
 import { Input } from "@superset/ui/input";
 import { Label } from "@superset/ui/label";
-import { RadioGroup, RadioGroupItem } from "@superset/ui/radio-group";
 import {
 	Select,
 	SelectContent,
@@ -38,20 +37,14 @@ import {
 	usePreSelectedProjectId,
 } from "renderer/stores/new-workspace-modal";
 
-type RepoMode = "init" | "clone" | "local";
+/** Runtimes offered in the New Agent picker: Claude Code and Codex. */
+const RUNTIME_CHOICES = AGENT_RUNTIMES;
 
 /**
- * Runtimes offered in the New Agent picker. The full AGENT_RUNTIMES enum (and
- * the launch presets) still support the rest — they return for the later
- * models stage.
- */
-const RUNTIME_CHOICES = ["claude", "codex", "opencode"] as const;
-
-/**
- * Create an Agent inside a Category. ADE agents own a standalone repo, so this
- * asks for name + runtime + repo source (empty or clone) + optional avatar and
- * calls workspaces.createAgent (which builds the repo and scaffolds memory).
- * Reuses the new-workspace-modal store (preSelectedProjectId = the category).
+ * Create an Agent in a team: name, role, runtime and an optional avatar. One
+ * team = one repository, so there is no repository choice: the agent works
+ * in its own worktree of the team's repository (workspaces.createAgent).
+ * Reuses the new-workspace-modal store (preSelectedProjectId = the team).
  */
 export function NewAgentModal() {
 	const navigate = useNavigate();
@@ -65,26 +58,24 @@ export function NewAgentModal() {
 	const [role, setRole] = useState("");
 	const [runtime, setRuntime] =
 		useState<(typeof AGENT_RUNTIMES)[number]>("claude");
-	const [repoMode, setRepoMode] = useState<RepoMode>("init");
-	const [cloneUrl, setCloneUrl] = useState("");
-	const [localPath, setLocalPath] = useState("");
 	const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
 	const [installBinary, setInstallBinary] = useState<AgentBinary | null>(null);
 	const photoInputRef = useRef<HTMLInputElement>(null);
 	const nameInputRef = useRef<HTMLInputElement>(null);
 
+	const { data: team } = electronTrpc.projects.teamRepository.useQuery(
+		{ projectId: categoryId ?? "" },
+		{ enabled: isOpen && !!categoryId },
+	);
 	const createAgent = electronTrpc.workspaces.createAgent.useMutation();
-	const setWorkspaceIcon = electronTrpc.workspaces.setWorkspaceIcon.useMutation();
+	const setWorkspaceIcon =
+		electronTrpc.workspaces.setWorkspaceIcon.useMutation();
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: reset each open
 	useEffect(() => {
 		if (!isOpen) return;
 		setName("");
 		setRole("");
 		setRuntime("claude");
-		setRepoMode("init");
-		setCloneUrl("");
-		setLocalPath("");
 		setPhotoDataUrl(null);
 		const t = setTimeout(() => nameInputRef.current?.focus(), 50);
 		return () => clearTimeout(t);
@@ -112,9 +103,7 @@ export function NewAgentModal() {
 		!!categoryId &&
 		name.trim().length > 0 &&
 		!gitMissing &&
-		(repoMode === "init" ||
-			(repoMode === "clone" && cloneUrl.trim().length > 0) ||
-			(repoMode === "local" && localPath.trim().length > 0)) &&
+		!!team?.repoPath &&
 		!createAgent.isPending;
 
 	const handleCreate = async () => {
@@ -125,12 +114,6 @@ export function NewAgentModal() {
 				name: name.trim(),
 				role: role.trim() || undefined,
 				runtime,
-				repo:
-					repoMode === "clone"
-						? { type: "clone", url: cloneUrl.trim() }
-						: repoMode === "local"
-							? { type: "clone", url: localPath.trim() }
-							: { type: "init" },
 			});
 			if (photoDataUrl) {
 				await setWorkspaceIcon.mutateAsync({
@@ -153,11 +136,7 @@ export function NewAgentModal() {
 	};
 
 	return (
-		<Dialog
-			modal
-			open={isOpen}
-			onOpenChange={(open) => !open && closeModal()}
-		>
+		<Dialog modal open={isOpen} onOpenChange={(open) => !open && closeModal()}>
 			<DialogContent className="sm:max-w-[440px]">
 				<DialogHeader>
 					<DialogTitle>New agent</DialogTitle>
@@ -248,8 +227,8 @@ export function NewAgentModal() {
 						</Select>
 						{runtimeMissing && (
 							<p className="text-xs text-muted-foreground">
-								{AGENT_LABELS[runtime]}'s CLI isn't installed — the agent will be
-								created, but you'll need it to run sessions.{" "}
+								{AGENT_LABELS[runtime]}'s CLI isn't installed — the agent will
+								be created, but you'll need it to run sessions.{" "}
 								<button
 									type="button"
 									className="text-foreground underline underline-offset-2 hover:no-underline"
@@ -261,45 +240,28 @@ export function NewAgentModal() {
 						)}
 					</div>
 
-					<div className="flex flex-col gap-1.5">
+					<div
+						className="flex flex-col gap-1 rounded-md border px-3 py-2 text-xs"
+						data-agent-repo
+					>
 						<Label>Repository</Label>
-						<RadioGroup
-							value={repoMode}
-							onValueChange={(v) => setRepoMode(v as RepoMode)}
-							className="flex flex-col gap-2"
-						>
-							<div className="flex items-center gap-2">
-								<RadioGroupItem value="init" id="repo-init" />
-								<Label htmlFor="repo-init" className="font-normal">
-									New empty repo
-								</Label>
-							</div>
-							<div className="flex items-center gap-2">
-								<RadioGroupItem value="clone" id="repo-clone" />
-								<Label htmlFor="repo-clone" className="font-normal">
-									Clone from URL
-								</Label>
-							</div>
-							<div className="flex items-center gap-2">
-								<RadioGroupItem value="local" id="repo-local" />
-								<Label htmlFor="repo-local" className="font-normal">
-									Clone from local path
-								</Label>
-							</div>
-						</RadioGroup>
-						{repoMode === "clone" && (
-							<Input
-								value={cloneUrl}
-								onChange={(e) => setCloneUrl(e.target.value)}
-								placeholder="https://github.com/owner/repo.git"
-							/>
-						)}
-						{repoMode === "local" && (
-							<Input
-								value={localPath}
-								onChange={(e) => setLocalPath(e.target.value)}
-								placeholder="/Users/you/code/my-repo"
-							/>
+						{team?.repoPath ? (
+							<>
+								<p className="break-all text-muted-foreground">
+									{team.name}: {team.repoPath}
+									{team.remote ? ` (${team.remote})` : ""}
+								</p>
+								<p className="text-muted-foreground">
+									The agent works in its own worktree of this repository, on its
+									own branch, so it never edits the team's checkout or another
+									agent's files.
+								</p>
+							</>
+						) : (
+							<p className="text-amber-600">
+								This team has no repository yet. Choose the team's repository
+								(in the team's header) before adding agents.
+							</p>
 						)}
 					</div>
 				</div>
@@ -308,8 +270,8 @@ export function NewAgentModal() {
 					<div className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-xs">
 						<p className="font-medium text-foreground">Git is required</p>
 						<p className="text-muted-foreground">
-							Creating an agent sets up a git repository, and Git isn't installed.
-							Install Apple's Command Line Tools, then re-check:
+							Creating an agent sets up a git repository, and Git isn't
+							installed. Install Apple's Command Line Tools, then re-check:
 						</p>
 						<code className="select-all rounded bg-background/60 px-2 py-1 font-mono">
 							xcode-select --install

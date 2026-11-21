@@ -8,7 +8,9 @@ import express from "express";
  * the Chromium debug port (which collides between dev/prod ADE instances).
  */
 
-export const TEST_SERVER_PORT = 41732;
+// ADE_TEST_SERVER_PORT lets a second dev instance run alongside another.
+export const TEST_SERVER_PORT =
+	Number(process.env.ADE_TEST_SERVER_PORT) || 41732;
 
 let getMainWindow: (() => BrowserWindow | null) | null = null;
 

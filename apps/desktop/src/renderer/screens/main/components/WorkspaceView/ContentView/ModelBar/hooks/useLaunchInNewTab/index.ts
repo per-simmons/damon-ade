@@ -1,0 +1,1 @@
+export { useLaunchInNewTab } from "./useLaunchInNewTab";

@@ -280,6 +280,12 @@ export function BehaviorSettings({ visibleItems }: BehaviorSettingsProps) {
 				? "username"
 				: null);
 
+	const { data: projectsFolder } =
+		electronTrpc.projects.getProjectsFolder.useQuery();
+	const setProjectsFolder = electronTrpc.projects.setProjectsFolder.useMutation(
+		{ onSuccess: () => utils.projects.getProjectsFolder.invalidate() },
+	);
+
 	return (
 		<div className="p-6 max-w-4xl w-full">
 			<div className="mb-8">
@@ -302,7 +308,7 @@ export function BehaviorSettings({ visibleItems }: BehaviorSettingsProps) {
 						</div>
 						<Switch
 							id="confirm-on-quit"
-							checked={confirmOnQuit ?? true}
+							checked={confirmOnQuit ?? false}
 							onCheckedChange={handleConfirmToggle}
 							disabled={isConfirmLoading || setConfirmOnQuit.isPending}
 						/>
@@ -319,8 +325,7 @@ export function BehaviorSettings({ visibleItems }: BehaviorSettingsProps) {
 								Delete local branch on agent removal
 							</Label>
 							<p className="text-xs text-muted-foreground">
-								Also delete the local git branch when deleting a worktree
-								agent
+								Also delete the local git branch when deleting a worktree agent
 							</p>
 						</div>
 						<Switch
@@ -453,6 +458,29 @@ export function BehaviorSettings({ visibleItems }: BehaviorSettingsProps) {
 								setOpenLinksInApp.mutate({ enabled })
 							}
 							disabled={isOpenLinksInAppLoading || setOpenLinksInApp.isPending}
+						/>
+					</div>
+				)}
+
+				{showWorktreeLocation && (
+					<div className="space-y-0.5" data-setting="projects-folder">
+						<Label className="text-sm font-medium">Projects folder</Label>
+						<p className="text-xs text-muted-foreground">
+							Where New team creates blank projects and clones GitHub
+							repositories. You can still choose another folder for each
+							project.
+						</p>
+						<WorktreeLocationPicker
+							currentPath={
+								projectsFolder && !projectsFolder.isDefault
+									? projectsFolder.path
+									: null
+							}
+							defaultPathLabel={`Default (${projectsFolder?.path ?? "~/Projects"})`}
+							defaultBrowsePath={projectsFolder?.path ?? null}
+							disabled={!projectsFolder || setProjectsFolder.isPending}
+							onSelect={(path) => setProjectsFolder.mutate({ path })}
+							onReset={() => setProjectsFolder.mutate({ path: null })}
 						/>
 					</div>
 				)}

@@ -3,7 +3,9 @@ import { useNavigate } from "@tanstack/react-router";
 import { AnimatePresence, motion } from "framer-motion";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { LuFolderPlus, LuLoader, LuX } from "react-icons/lu";
+import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useOpenProject } from "renderer/react-query/projects";
+import { navigateToWorkspace } from "renderer/routes/_authenticated/_dashboard/utils/workspace-navigation";
 
 interface SidebarDropZoneProps {
 	children: ReactNode;
@@ -16,6 +18,7 @@ export function SidebarDropZone({ children, className }: SidebarDropZoneProps) {
 	const [error, setError] = useState<string | null>(null);
 
 	const { openFromPath, isPending } = useOpenProject();
+	const utils = electronTrpc.useUtils();
 
 	useEffect(() => {
 		if (!error) return;
@@ -97,16 +100,18 @@ export function SidebarDropZone({ children, className }: SidebarDropZoneProps) {
 			try {
 				const project = await openFromPath(filePath);
 				if (project) {
-					navigate({
-						to: "/project/$projectId",
-						params: { projectId: project.id },
-					});
+					// Open the project's main workspace (there is no project page).
+					await utils.workspaces.getAllGrouped.invalidate();
+					const groups = await utils.workspaces.getAllGrouped.fetch();
+					const workspace = groups.find((g) => g.project.id === project.id)
+						?.workspaces[0];
+					if (workspace) navigateToWorkspace(workspace.id, navigate);
 				}
 			} catch (err) {
 				setError(err instanceof Error ? err.message : "Failed to open team");
 			}
 		},
-		[openFromPath, isPending, navigate],
+		[openFromPath, isPending, navigate, utils],
 	);
 
 	return (

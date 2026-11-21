@@ -133,9 +133,10 @@ export const workspaces = sqliteTable(
 		// laptop/folder glyph when null. Used by the agent-fleet "Space" model
 		// where each workspace is an agent.
 		iconUrl: text("icon_url"),
-		// ADE: which CLI drives this agent (claude/codex/opencode/...). Maps to
+		// ADE: which CLI drives this agent (claude or codex). Maps to
 		// AGENT_PRESET_COMMANDS in @superset/shared. Defaults to "claude" at the
-		// insert site; null on pre-ADE rows.
+		// insert site; null on pre-ADE rows. Older rows may still hold a dropped
+		// runtime (gemini, opencode, kimi, ...); read it through toAgentType().
 		runtime: text("runtime").$type<AgentRuntime>(),
 	},
 	(table) => [
@@ -194,9 +195,9 @@ export const settings = sqliteTable("settings", {
 	worktreeBaseDir: text("worktree_base_dir"),
 	openLinksInApp: integer("open_links_in_app", { mode: "boolean" }),
 	defaultEditor: text("default_editor").$type<ExternalApp>(),
-	// Provider API keys, each encrypted with electron safeStorage and stored as a
-	// base64 blob keyed by provider id (e.g. "openrouter"). Never plaintext; the
-	// decrypted value is only ever read in the main process, never sent to the renderer.
+	// Unused since ADE dropped the OpenRouter-routed runtimes (kimi/minimax/glm).
+	// Held encrypted provider API keys keyed by provider id. Kept so existing
+	// databases need no migration; nothing reads or writes it anymore.
 	providerApiKeys: text("provider_api_keys", { mode: "json" }).$type<
 		Record<string, string>
 	>(),

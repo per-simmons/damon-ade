@@ -3,6 +3,7 @@ import type { Terminal as XTerm } from "@xterm/xterm";
 import { useCallback, useRef, useState } from "react";
 import { electronTrpcClient as trpcClient } from "renderer/lib/trpc-client";
 import { consumeSyncedPane } from "renderer/stores/tabs/syncedPaneRegistry";
+import { claudeResumeCommand } from "shared/utils/agent-invoke-command";
 import { coldRestoreState } from "../state";
 import type {
 	CreateOrAttachMutate,
@@ -241,7 +242,7 @@ export function useTerminalColdRestore({
 							trpcClient.terminal.write
 								.mutate({
 									paneId,
-									data: `claude --resume ${claudeSessionId} --dangerously-skip-permissions${stagedNewline}`,
+									data: `${claudeResumeCommand(claudeSessionId)}${stagedNewline}`,
 								})
 								.catch((err) => {
 									console.warn(

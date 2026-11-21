@@ -6,33 +6,38 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@superset/ui/tooltip";
 import { useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { HiOutlinePlus } from "react-icons/hi2";
+import {
+	LuClipboardList,
+	LuHistory,
+	LuListTodo,
+	LuMessagesSquare,
+	LuUserCog,
+} from "react-icons/lu";
 import {
 	getPresetIcon,
 	useIsDarkTheme,
 } from "renderer/assets/app-icons/preset-icons";
 import { BinaryInstallDialog } from "renderer/components/BinaryInstallDialog/BinaryInstallDialog";
 import { electronTrpc } from "renderer/lib/electron-trpc";
-import { useProviderKeys } from "renderer/stores/model-bar/useProviderKeys";
 import { useRuntimeAvailability } from "renderer/stores/model-bar/useRuntimeAvailability";
 import { useAgentSession } from "renderer/stores/tabs/useAgentSession";
-import { type ModelDescriptor, MODEL_BAR_MODELS } from "./models";
-import {
-	ProviderKeyDialog,
-	type ProviderKeyDialogMode,
-} from "./ProviderKeyDialog";
+import { GitHubSync } from "./components/GitHubSync";
+import { HistorySheet } from "./components/HistorySheet";
+import { SpecialistsSheet } from "./components/SpecialistsSheet";
+import { TasksSheet } from "./components/TasksSheet";
+import { TeamChatSheet } from "./components/TeamChatSheet";
+import { useTeamChatTab } from "./hooks/useTeamChatTab";
+import { MODEL_BAR_MODELS, type ModelDescriptor } from "./models";
 
 /**
  * A quiet row of model logos below the session tab strip. Clicking a logo opens
- * a new session in the current agent's worktree running that model's CLI. The
- * OpenRouter-proxied models (Kimi / MiniMax / GLM) first gate on a stored
- * OpenRouter key; the trailing "+" manages that key.
+ * a new session in the current agent's worktree running that model's CLI
+ * (Claude Code or Codex).
  */
 export function ModelBar() {
 	const { workspaceId } = useParams({ strict: false });
 	const isDark = useIsDarkTheme();
 	const { spawnAgentSession } = useAgentSession();
-	const { openrouterConfigured } = useProviderKeys();
 	const { isAvailable, recheck, isFetching } = useRuntimeAvailability();
 
 	const { data: workspace } = electronTrpc.workspaces.get.useQuery(
@@ -40,11 +45,13 @@ export function ModelBar() {
 		{ enabled: !!workspaceId },
 	);
 
-	const [dialog, setDialog] = useState<{
-		mode: ProviderKeyDialogMode;
-		model?: ModelDescriptor;
-	} | null>(null);
 	const [installBinary, setInstallBinary] = useState<AgentBinary | null>(null);
+	const [tasksOpen, setTasksOpen] = useState(false);
+	const [chatOpen, setChatOpen] = useState(false);
+	// The team's Coordinator: a Claude Code tab that starts by itself.
+	const teamChat = useTeamChatTab(workspaceId);
+	const [historyOpen, setHistoryOpen] = useState(false);
+	const [specialistsOpen, setSpecialistsOpen] = useState(false);
 
 	// Close the install dialog once a re-check confirms the tool is now present.
 	useEffect(() => {
@@ -68,16 +75,10 @@ export function ModelBar() {
 
 	const handleModelClick = (model: ModelDescriptor) => {
 		if (!ready) return;
-		// Availability gate comes first: every runtime (including the OpenRouter
-		// ones, which drive the claude CLI) needs its binary present before we
-		// bother prompting for a key or spawning.
+		// The runtime's CLI must be installed before we spawn it.
 		const binary = RUNTIME_BINARY[model.runtime];
 		if (!isAvailable(binary as CheckedBinary)) {
 			setInstallBinary(binary);
-			return;
-		}
-		if (model.needsOpenRouterKey && openrouterConfigured !== true) {
-			setDialog({ mode: "launch", model });
 			return;
 		}
 		spawn(model);
@@ -102,7 +103,7 @@ export function ModelBar() {
 									aria-label={
 										missing
 											? `${model.label} — not detected, click to install`
-											: `New session — ${model.label}`
+											: `New interactive ${model.label} session (not a managed task)`
 									}
 									disabled={!ready}
 									onClick={() => handleModelClick(model)}
@@ -136,39 +137,128 @@ export function ModelBar() {
 							<TooltipContent side="bottom" showArrow={false}>
 								{missing
 									? `${model.label} not detected — click to install`
-									: `${model.label}${model.isDefault ? " · default" : ""}`}
+									: `New interactive ${model.label} session${model.isDefault ? " · default" : ""}. For Auto, use Tasks.`}
 							</TooltipContent>
 						</Tooltip>
 					);
 				})}
 			</div>
 
-			<div className="mx-1 h-4 w-px bg-border" />
+			<div className="ml-auto flex items-center gap-0.5">
+				{ready && <GitHubSync workspaceId={workspaceId} />}
+				<div className="mx-1 h-4 w-px bg-border" aria-hidden />
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<button
+							type="button"
+							disabled={!ready}
+							onClick={() => setSpecialistsOpen(true)}
+							className="flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+						>
+							<LuUserCog className="size-3.5" aria-hidden />
+							Specialists
+						</button>
+					</TooltipTrigger>
+					<TooltipContent side="bottom" showArrow={false}>
+						Optional specialists (UI, Backend, your own…) with their own
+						instructions and their own Roles
+					</TooltipContent>
+				</Tooltip>
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<button
+							type="button"
+							disabled={!ready}
+							onClick={() => setHistoryOpen(true)}
+							className="flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+						>
+							<LuHistory className="size-3.5" aria-hidden />
+							History
+						</button>
+					</TooltipTrigger>
+					<TooltipContent side="bottom" showArrow={false}>
+						Link earlier Claude Code sessions and Claude app chats to this
+						project; tasks use the relevant parts as history
+					</TooltipContent>
+				</Tooltip>
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<button
+							type="button"
+							disabled={!ready}
+							onClick={() => setTasksOpen(true)}
+							className="flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+						>
+							<LuListTodo className="size-3.5" aria-hidden />
+							Tasks
+						</button>
+					</TooltipTrigger>
+					<TooltipContent side="bottom" showArrow={false}>
+						Auto: describe a task; ADE runs it through checks and review to a
+						verified finish
+					</TooltipContent>
+				</Tooltip>
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<button
+							type="button"
+							disabled={!ready}
+							onClick={() => setChatOpen(true)}
+							className="flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+						>
+							<LuClipboardList className="size-3.5" aria-hidden />
+							Team plans
+						</button>
+					</TooltipTrigger>
+					<TooltipContent side="bottom" showArrow={false}>
+						Every team plan and how far it got; you can also plan one here
+					</TooltipContent>
+				</Tooltip>
+				{teamChat.available && (
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<button
+								type="button"
+								onClick={teamChat.open}
+								className="ml-1 flex h-7 items-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground shadow-xs transition-colors hover:bg-primary/90"
+							>
+								<LuMessagesSquare className="size-3.5" aria-hidden />
+								Team chat
+							</button>
+						</TooltipTrigger>
+						<TooltipContent side="bottom" showArrow={false}>
+							Claude Code as your team's Coordinator: plan the work together,
+							say go, and it hands each part to the right agent
+						</TooltipContent>
+					</Tooltip>
+				)}
+			</div>
 
-			<Tooltip>
-				<TooltipTrigger asChild>
-					<button
-						type="button"
-						aria-label="Add provider"
-						onClick={() => setDialog({ mode: "manage" })}
-						className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
-					>
-						<HiOutlinePlus className="h-4 w-4" />
-					</button>
-				</TooltipTrigger>
-				<TooltipContent side="bottom" showArrow={false}>
-					Add provider
-				</TooltipContent>
-			</Tooltip>
+			<TasksSheet
+				workspaceId={workspaceId}
+				open={tasksOpen}
+				onOpenChange={setTasksOpen}
+			/>
 
-			<ProviderKeyDialog
-				open={dialog !== null}
-				onOpenChange={(open) => !open && setDialog(null)}
-				mode={dialog?.mode ?? "manage"}
-				modelLabel={dialog?.model?.label}
-				onSaved={() => {
-					if (dialog?.model) spawn(dialog.model);
-					setDialog(null);
+			<TeamChatSheet
+				workspaceId={workspaceId}
+				open={chatOpen}
+				onOpenChange={setChatOpen}
+			/>
+
+			<SpecialistsSheet
+				workspaceId={workspaceId}
+				open={specialistsOpen}
+				onOpenChange={setSpecialistsOpen}
+			/>
+
+			<HistorySheet
+				workspaceId={workspaceId}
+				open={historyOpen}
+				onOpenChange={setHistoryOpen}
+				onStartTask={() => {
+					setHistoryOpen(false);
+					setTasksOpen(true);
 				}}
 			/>
 

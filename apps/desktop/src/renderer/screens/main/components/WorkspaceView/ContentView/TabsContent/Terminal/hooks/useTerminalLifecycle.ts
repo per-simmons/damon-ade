@@ -5,8 +5,9 @@ import type { MutableRefObject, RefObject } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { electronTrpcClient as trpcClient } from "renderer/lib/trpc-client";
 import { useTabsStore } from "renderer/stores/tabs/store";
-import { killTerminalForPane } from "renderer/stores/tabs/utils/terminal-cleanup";
 import { consumeSyncedPane } from "renderer/stores/tabs/syncedPaneRegistry";
+import { killTerminalForPane } from "renderer/stores/tabs/utils/terminal-cleanup";
+import { claudeResumeCommand } from "shared/utils/agent-invoke-command";
 import { scheduleTerminalAttach } from "../attach-scheduler";
 import { sanitizeForTitle } from "../commandBuffer";
 import { DEBUG_TERMINAL, FIRST_RENDER_RESTORE_FALLBACK_MS } from "../config";
@@ -310,13 +311,13 @@ export function useTerminalLifecycle({
 						// Auto-resume Claude Code session if detected from meta.json
 						if (result.claudeSessionId) {
 							const sessionId = result.claudeSessionId;
-								// Synced-from-peer panes stage the command without pressing Enter.
-								const stagedNewline = consumeSyncedPane(paneId) ? "" : "\n";
+							// Synced-from-peer panes stage the command without pressing Enter.
+							const stagedNewline = consumeSyncedPane(paneId) ? "" : "\n";
 							setTimeout(() => {
 								trpcClient.terminal.write
 									.mutate({
 										paneId,
-										data: `claude --resume ${sessionId} --dangerously-skip-permissions${stagedNewline}`,
+										data: `${claudeResumeCommand(sessionId)}${stagedNewline}`,
 									})
 									.catch((err) => {
 										console.warn(
@@ -488,13 +489,13 @@ export function useTerminalLifecycle({
 								//   - It's a new shell (isNew) — avoids typing into warm-attached sessions
 								if (result.isNew && result.claudeSessionId) {
 									const sessionId = result.claudeSessionId;
-								// Synced-from-peer panes stage the command without pressing Enter.
-								const stagedNewline = consumeSyncedPane(paneId) ? "" : "\n";
+									// Synced-from-peer panes stage the command without pressing Enter.
+									const stagedNewline = consumeSyncedPane(paneId) ? "" : "\n";
 									setTimeout(() => {
 										trpcClient.terminal.write
 											.mutate({
 												paneId,
-												data: `claude --resume ${sessionId} --dangerously-skip-permissions${stagedNewline}`,
+												data: `${claudeResumeCommand(sessionId)}${stagedNewline}`,
 											})
 											.catch((err) => {
 												console.warn(
@@ -534,7 +535,8 @@ export function useTerminalLifecycle({
 
 		const inputDisposable = xterm.onData(handleTerminalInput);
 		const keyDisposable = xterm.onKey(handleKeyPress);
-		const titleDisposable = xterm.onTitleChange((title) => {
+		const titleDisposable = xterm.onTitleChange((rawTitle) => {
+			const title = shortenWindowsExeTitle(rawTitle);
 			if (title) {
 				setPaneNameRef.current(paneId, title);
 				renameUnnamedWorkspaceRef.current(title);
@@ -757,4 +759,14 @@ export function useTerminalLifecycle({
 	]);
 
 	return { xtermInstance, restartTerminal };
+}
+
+/**
+ * On Windows, ConPTY reports a console's title as the full path of the program
+ * running in it (C:\Program Files\Git\bin\bash.exe). Show just the name, "bash",
+ * the way a macOS pane shows "zsh". Any other title passes through unchanged.
+ */
+function shortenWindowsExeTitle(title: string): string {
+	const match = /^[A-Za-z]:\\(?:[^\\]*\\)*([^\\]+?)\.exe$/i.exec(title.trim());
+	return match ? match[1] : title;
 }

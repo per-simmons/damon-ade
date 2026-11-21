@@ -12,6 +12,10 @@ fi
 # Extract Mastra session ID when available (mastracode hooks)
 SESSION_ID=$(echo "$INPUT" | grep -oE '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -oE '"[^"]*"$' | tr -d '"')
 
+# Claude Code's transcript path, still JSON-escaped (ADE decodes it). On Stop,
+# ADE reads the transcript to record token usage (main/lib/usage-metrics).
+TRANSCRIPT_PATH=$(echo "$INPUT" | grep -oE '"transcript_path"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"' | head -n 1 | sed -E 's/^"transcript_path"[[:space:]]*:[[:space:]]*"//; s/"$//')
+
 # Skip if this isn't a Superset terminal hook and no Mastra session context exists
 [ -z "$SUPERSET_TAB_ID" ] && [ -z "$SESSION_ID" ] && exit 0
 
@@ -60,10 +64,13 @@ fi
 if [ "$DEBUG_HOOKS_ENABLED" = "1" ]; then
   STATUS_CODE=$(curl -sG "http://127.0.0.1:${SUPERSET_PORT:-{{DEFAULT_PORT}}}/hook/complete" \
     --connect-timeout 1 --max-time 2 \
+    -H "Authorization: Bearer ${SUPERSET_HOOK_TOKEN:-}" \
     --data-urlencode "paneId=$SUPERSET_PANE_ID" \
     --data-urlencode "tabId=$SUPERSET_TAB_ID" \
     --data-urlencode "workspaceId=$SUPERSET_WORKSPACE_ID" \
     --data-urlencode "sessionId=$SESSION_ID" \
+    --data-urlencode "transcriptPath=$TRANSCRIPT_PATH" \
+    --data-urlencode "projectKey=$SUPERSET_PROJECT_KEY" \
     --data-urlencode "eventType=$EVENT_TYPE" \
     --data-urlencode "env=$SUPERSET_ENV" \
     --data-urlencode "version=$SUPERSET_HOOK_VERSION" \
@@ -72,10 +79,13 @@ if [ "$DEBUG_HOOKS_ENABLED" = "1" ]; then
 else
   curl -sG "http://127.0.0.1:${SUPERSET_PORT:-{{DEFAULT_PORT}}}/hook/complete" \
     --connect-timeout 1 --max-time 2 \
+    -H "Authorization: Bearer ${SUPERSET_HOOK_TOKEN:-}" \
     --data-urlencode "paneId=$SUPERSET_PANE_ID" \
     --data-urlencode "tabId=$SUPERSET_TAB_ID" \
     --data-urlencode "workspaceId=$SUPERSET_WORKSPACE_ID" \
     --data-urlencode "sessionId=$SESSION_ID" \
+    --data-urlencode "transcriptPath=$TRANSCRIPT_PATH" \
+    --data-urlencode "projectKey=$SUPERSET_PROJECT_KEY" \
     --data-urlencode "eventType=$EVENT_TYPE" \
     --data-urlencode "env=$SUPERSET_ENV" \
     --data-urlencode "version=$SUPERSET_HOOK_VERSION" \

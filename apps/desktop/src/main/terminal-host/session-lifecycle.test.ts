@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { terminalHostSocketPath } from "../lib/terminal-host/socket-path";
 import {
 	type CreateOrAttachRequest,
 	type CreateOrAttachResponse,
@@ -28,7 +29,8 @@ import {
 // Test uses a dedicated workspace name for isolation
 const SUPERSET_DIR_NAME = ".superset-test";
 const SUPERSET_HOME_DIR = join(homedir(), SUPERSET_DIR_NAME);
-const SOCKET_PATH = join(SUPERSET_HOME_DIR, "terminal-host.sock");
+// A Unix socket file on macOS/Linux, a named pipe on Windows.
+const SOCKET_PATH = terminalHostSocketPath(SUPERSET_HOME_DIR);
 const TOKEN_PATH = join(SUPERSET_HOME_DIR, "terminal-host.token");
 const PID_PATH = join(SUPERSET_HOME_DIR, "terminal-host.pid");
 

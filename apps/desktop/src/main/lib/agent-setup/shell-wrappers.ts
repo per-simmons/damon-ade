@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { BASH_DIR, BIN_DIR, ZSH_DIR } from "./paths";
+import { bashPath, forwardSlashPath } from "./shell-path";
 
 export interface ShellWrapperPaths {
 	BIN_DIR: string;
@@ -16,7 +17,9 @@ const DEFAULT_PATHS: ShellWrapperPaths = {
 };
 
 function getShellName(shell: string): string {
-	return shell.split("/").pop() || shell;
+	// Windows shells come as C:\Program Files\Git\bin\bash.exe.
+	const base = shell.split(/[\\/]/).pop() || shell;
+	return base.replace(/\.exe$/i, "").toLowerCase();
 }
 
 function writeFileIfChanged(
@@ -46,14 +49,7 @@ function writeFileIfChanged(
 }
 
 /** Agent binaries that get wrapper shims to guarantee resolution. */
-const SHIMMED_BINARIES = [
-	"claude",
-	"codex",
-	"opencode",
-	"gemini",
-	"copilot",
-	"mastracode",
-];
+const SHIMMED_BINARIES = ["claude", "codex", "mastracode"];
 
 /**
  * Shell function shims that override PATH-based lookup.
@@ -63,11 +59,12 @@ const SHIMMED_BINARIES = [
  */
 function buildShimFunctions(binDir: string): string {
 	return SHIMMED_BINARIES.map(
-		(name) => `${name}() { "${binDir}/${name}" "$@"; }`,
+		(name) => `${name}() { "${bashPath(binDir)}/${name}" "$@"; }`,
 	).join("\n");
 }
 
-function buildPathPrependFunction(binDir: string): string {
+function buildPathPrependFunction(rawBinDir: string): string {
+	const binDir = bashPath(rawBinDir);
 	return `_superset_prepend_bin() {
   case ":$PATH:" in
     *:"${binDir}":*) ;;
@@ -199,7 +196,7 @@ export function getShellArgs(
 ): string[] {
 	const shellName = getShellName(shell);
 	if (shellName === "bash") {
-		return ["--rcfile", path.join(paths.BASH_DIR, "rcfile")];
+		return ["--rcfile", forwardSlashPath(path.join(paths.BASH_DIR, "rcfile"))];
 	}
 	if (shellName === "fish") {
 		// Use --init-command to prepend BIN_DIR to PATH after config is loaded.
@@ -233,7 +230,7 @@ export function getCommandShellArgs(
 ): string[] {
 	const shellName = getShellName(shell);
 	const zshRc = path.join(paths.ZSH_DIR, ".zshrc");
-	const bashRcfile = path.join(paths.BASH_DIR, "rcfile");
+	const bashRcfile = forwardSlashPath(path.join(paths.BASH_DIR, "rcfile"));
 	if (shellName === "zsh" && fs.existsSync(zshRc)) {
 		return ["-lc", `source "${zshRc}" && ${command}`];
 	}

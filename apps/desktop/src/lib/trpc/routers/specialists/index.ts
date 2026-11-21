@@ -1,0 +1,1 @@
+export { createSpecialistsRouter } from "./specialists";

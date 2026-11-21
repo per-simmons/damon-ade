@@ -1,7 +1,8 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { workspaces } from "@superset/local-db";
-import { isNotNull } from "drizzle-orm";
+import { projects, workspaces } from "@superset/local-db";
+import { toAgentType } from "@superset/shared/agent-command";
+import { eq, isNotNull } from "drizzle-orm";
 import { getAgentMemoryDir } from "./agent-home";
 import { scaffoldAgentMemory } from "./agent-scaffold";
 import { resolveAgentWorktreePath } from "./agent-worktree";
@@ -54,22 +55,27 @@ export function backfillAgentMemory(): void {
 			// worktrees row — using the derived path would skip it (no .git there)
 			// and, worse, drop bridges into a non-existent dir. Fall back to the
 			// derived path when the row has none.
-			const worktreePath = resolveAgentWorktreePath(
-				agent.id,
-				agent.worktreeId,
-			);
+			const worktreePath = resolveAgentWorktreePath(agent.id, agent.worktreeId);
 			// Repo must already exist and be a git repo; this guard also filters
 			// out any non-ADE workspace that happens to carry a runtime value.
 			if (!existsSync(join(worktreePath, ".git"))) continue;
 
 			if (!memoryDirIsEmpty(getAgentMemoryDir(agent.id))) continue;
 
+			// An agent in a worktree of its team's repository gets no ADE files
+			// in that repository (one team = one repository).
+			const team = localDb
+				.select({ mainRepoPath: projects.mainRepoPath })
+				.from(projects)
+				.where(eq(projects.id, agent.projectId))
+				.get();
 			scaffoldAgentMemory({
 				agentId: agent.id,
 				agentName: agent.name || "Agent",
-				runtime: agent.runtime,
+				runtime: toAgentType(agent.runtime),
 				userName,
 				worktreePath,
+				writeBridges: !team?.mainRepoPath || agent.type === "branch",
 			});
 			scaffolded++;
 		} catch (error) {
@@ -78,7 +84,9 @@ export function backfillAgentMemory(): void {
 	}
 
 	if (scaffolded > 0) {
-		console.log(`[memory-backfill] Scaffolded memory for ${scaffolded} agent(s).`);
+		console.log(
+			`[memory-backfill] Scaffolded memory for ${scaffolded} agent(s).`,
+		);
 	}
 }
 

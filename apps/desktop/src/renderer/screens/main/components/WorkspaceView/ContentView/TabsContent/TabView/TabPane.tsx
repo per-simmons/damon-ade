@@ -12,6 +12,10 @@ import type { Tab } from "renderer/stores/tabs/types";
 import { TabContentContextMenu } from "../TabContentContextMenu";
 import { Terminal } from "../Terminal";
 import { BasePaneWindow, PaneToolbarActions } from "./components";
+import { TerminalComposer } from "./components/TerminalComposer";
+
+/** Claude Code tabs get a message box under the terminal. */
+const CLAUDE_TABS = new Set(["Team chat", "Claude Code"]);
 
 interface TabPaneProps {
 	paneId: string;
@@ -56,6 +60,12 @@ export function TabPane({
 	onMoveToNewTab,
 }: TabPaneProps) {
 	const paneName = useTabsStore((s) => s.panes[paneId]?.name);
+	const tabTitle = useTabsStore((s) => {
+		const tab = s.tabs.find((t) => t.id === tabId);
+		return tab?.userTitle ?? tab?.name;
+	});
+	const showComposer =
+		CLAUDE_TABS.has(tabTitle ?? "") || /claude/i.test(paneName ?? "");
 	const paneUserTitle = useTabsStore((s) => s.panes[paneId]?.userTitle);
 	const paneStatus = useTabsStore((s) => s.panes[paneId]?.status);
 	const setPaneUserTitle = useTabsStore((s) => s.setPaneUserTitle);
@@ -173,8 +183,20 @@ export function TabPane({
 				onMoveToNewTab={onMoveToNewTab}
 				closeLabel="Close Terminal"
 			>
-				<div ref={terminalContainerRef} className="w-full h-full">
-					<Terminal paneId={paneId} tabId={tabId} workspaceId={workspaceId} />
+				<div ref={terminalContainerRef} className="flex h-full w-full flex-col">
+					<div className="min-h-0 w-full flex-1">
+						<Terminal paneId={paneId} tabId={tabId} workspaceId={workspaceId} />
+					</div>
+					{showComposer && (
+						<TerminalComposer
+							paneId={paneId}
+							placeholder={
+								tabTitle === "Team chat"
+									? "Message the Coordinator… (Enter sends, Shift+Enter for a new line)"
+									: undefined
+							}
+						/>
+					)}
 				</div>
 			</TabContentContextMenu>
 		</BasePaneWindow>

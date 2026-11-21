@@ -1,14 +1,22 @@
-import { getProviderKey } from "main/lib/provider-keys";
+import { workflowEnvFor } from "main/lib/agent-workflow/workflow-env";
+import { getSupersetHomeDir } from "main/lib/app-environment";
+import { getLocalToken } from "main/lib/notifications/local-auth";
 import { getTerminalHostClient } from "main/lib/terminal-host/client";
 import type { ListSessionsResponse } from "main/lib/terminal-host/types";
 import { DaemonTerminalManager, getDaemonTerminalManager } from "./daemon";
-import { prewarmTerminalEnv, setOpenRouterKeyResolver } from "./env";
-import { RECONCILE_STARTUP_TIMEOUT_MS, reconcileWithTimeout } from "./reconcile";
+import { prewarmTerminalEnv, setWorkflowEnvResolver } from "./env";
+import {
+	RECONCILE_STARTUP_TIMEOUT_MS,
+	reconcileWithTimeout,
+} from "./reconcile";
 
-// Wire the encrypted key store into buildTerminalEnv from the main process. This
-// import lives here (main-only) rather than in env.ts, which is also loaded by
-// the terminal-host subprocess and must stay free of localDb/electron.
-setOpenRouterKeyResolver(() => getProviderKey("openrouter"));
+// Every terminal's claude gets its project's workflow roles and task folder
+// (main process only; env.ts is shared with the terminal-host subprocess).
+// The hook token lets the notify hook record usage (notifications/local-auth.ts).
+setWorkflowEnvResolver((project) => ({
+	...(workflowEnvFor(getSupersetHomeDir(), project) ?? {}),
+	SUPERSET_HOOK_TOKEN: getLocalToken(getSupersetHomeDir(), "hook"),
+}));
 
 export { DaemonTerminalManager, getDaemonTerminalManager };
 export type {

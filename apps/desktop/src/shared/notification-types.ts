@@ -3,6 +3,11 @@
  * Kept in shared/ to avoid cross-boundary imports.
  */
 
+import type {
+	InvokePermissionMode,
+	InvokeShellKind,
+} from "./utils/agent-invoke-command";
+
 export interface NotificationIds {
 	paneId?: string;
 	tabId?: string;
@@ -23,6 +28,13 @@ export interface AgentInvokeEvent extends NotificationIds {
 	sessionId: string;
 	/** The task prompt to run claude with in the agent's terminal. */
 	prompt: string;
+	/**
+	 * Private file holding `prompt`. The terminal command reads the prompt from
+	 * here so prompt text never appears on the command line.
+	 */
+	promptFile: string;
+	/** Shell syntax for the command (from the terminal's default shell). */
+	shell: InvokeShellKind;
 	/** The agent's folder (cwd) where the terminal/claude runs. */
 	cwd: string;
 	/**
@@ -42,6 +54,13 @@ export interface AgentInvokeEvent extends NotificationIds {
 	claudeSessionId?: string;
 	/** true = start/pin a new session (--session-id); false = resume (--resume). */
 	fresh?: boolean;
+	/**
+	 * Claude Code model for this run (`claude --model`): the request's `model`,
+	 * else the agent's registry `model`. Omitted = the agent's own default.
+	 */
+	model?: string;
+	/** The agent's registry permission mode; "acceptEdits" when unset. */
+	permissionMode?: InvokePermissionMode;
 }
 
 /**
