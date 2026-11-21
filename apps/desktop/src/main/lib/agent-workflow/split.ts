@@ -5,7 +5,7 @@ import type { RoleName } from "./workflow-settings";
 /**
  * Team requests: one request split across the team's specialists.
  *
- * A Coordinator run (Sonnet, medium effort, read-only) reads the request and
+ * A Coordinator run (Opus, medium effort, read-only) reads the request and
  * the code it touches and splits it into a few self-contained subtasks, in
  * dependency order, each owned by one specialist and given a route and
  * models. ADE turns them into ordinary tasks and runs them one after
@@ -13,8 +13,9 @@ import type { RoleName } from "./workflow-settings";
  * limits. The request is done when every subtask is.
  */
 
+// The Coordinator plans: Opus, like the planner.
 export const SPLIT_ROUTING = {
-	model: "sonnet",
+	model: "opus",
 	effort: "medium" as EffortLevel,
 	maxTurns: 10,
 };

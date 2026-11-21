@@ -90,6 +90,15 @@ case "\${1:-}" in
       fi
       ADE_WORKFLOW_ARGS+=(--agents "$(cat "$SUPERSET_WORKFLOW_AGENTS")")
     fi
+    # An agent's session runs on its specialist's model, unless chosen here.
+    case " $* " in
+      *" --model "*|*" --model="*) ;;
+      *) if [ -n "\${SUPERSET_SESSION_MODEL:-}" ]; then ADE_WORKFLOW_ARGS+=(--model "$SUPERSET_SESSION_MODEL"); fi ;;
+    esac
+    case " $* " in
+      *" --effort "*|*" --effort="*) ;;
+      *) if [ -n "\${SUPERSET_SESSION_EFFORT:-}" ]; then ADE_WORKFLOW_ARGS+=(--effort "$SUPERSET_SESSION_EFFORT"); fi ;;
+    esac
     ;;
 esac
 exec "$REAL_BIN" --settings "${settingsPath}" "\${ADE_WORKFLOW_ARGS[@]}" "$@"`;

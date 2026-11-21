@@ -740,7 +740,11 @@ describe("env", () => {
 			afterEach(() => setWorkflowEnvResolver(null));
 
 			it("adds the project's workflow and keeps it through the terminal-host filter", () => {
-				const seen: Array<{ rootPath?: string; workspacePath?: string }> = [];
+				const seen: Array<{
+					rootPath?: string;
+					workspacePath?: string;
+					workspaceId?: string;
+				}> = [];
 				setWorkflowEnvResolver((project) => {
 					seen.push(project);
 					return {
@@ -757,7 +761,11 @@ describe("env", () => {
 					workspacePath: "/repos/shop-feature",
 				});
 				expect(seen).toEqual([
-					{ rootPath: "/repos/shop", workspacePath: "/repos/shop-feature" },
+					{
+						rootPath: "/repos/shop",
+						workspacePath: "/repos/shop-feature",
+						workspaceId: "ws-1",
+					},
 				]);
 				const filtered = buildSafeEnv(result);
 				expect(filtered.SUPERSET_PROJECT_KEY).toBe("shop-0123456789");

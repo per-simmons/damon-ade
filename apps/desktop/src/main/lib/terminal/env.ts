@@ -401,6 +401,7 @@ function linkSharedCodexAuth(codexHome: string): void {
 export type WorkflowEnvResolver = (project: {
 	rootPath?: string;
 	workspacePath?: string;
+	workspaceId?: string;
 }) => Record<string, string> | null;
 
 /**
@@ -483,7 +484,7 @@ export function buildTerminalEnv(params: {
 		try {
 			Object.assign(
 				terminalEnv,
-				workflowEnvResolver({ rootPath, workspacePath }) ?? {},
+				workflowEnvResolver({ rootPath, workspacePath, workspaceId }) ?? {},
 			);
 		} catch (error) {
 			// Never block terminal creation on the workflow.

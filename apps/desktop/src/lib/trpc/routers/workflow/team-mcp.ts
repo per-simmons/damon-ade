@@ -1,5 +1,7 @@
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { getClaudeSettingsContent } from "main/lib/agent-setup/agent-wrappers-claude-codex";
+import { getNotifyScriptPath } from "main/lib/agent-setup/notify-hook";
 import {
 	createTask,
 	getTask,
@@ -166,6 +168,9 @@ export function writeTeamMcpConfig(
 	};
 	writePrivate(path, config);
 	writePrivate(settingsPathFor(path), {
+		// ADE's own hooks (notifications, usage), as in the claude wrapper's
+		// --settings: kept whether Claude Code merges both files or keeps one.
+		...JSON.parse(getClaudeSettingsContent(getNotifyScriptPath())),
 		permissions: {
 			allow: [
 				`mcp__${TEAM_MCP_NAME}__team_overview`,
@@ -186,6 +191,8 @@ export function teamChatCommand(configPath: string): string {
 	return [
 		"claude",
 		`-n "${TEAM_CHAT_TAB}"`,
+		// The Coordinator plans: Opus, like the planner.
+		"--model opus --effort high",
 		`--mcp-config "${config}"`,
 		`--settings "${settingsPathFor(config)}"`,
 		`--append-system-prompt "You are this ADE team's Coordinator: follow the ${TEAM_MCP_NAME} instructions."`,

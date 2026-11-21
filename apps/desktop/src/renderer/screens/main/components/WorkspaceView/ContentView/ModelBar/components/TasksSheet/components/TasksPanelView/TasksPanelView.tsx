@@ -88,8 +88,8 @@ export function TasksPanelView({
 				/>
 				{split && (
 					<p className="text-xs text-muted-foreground" data-team-request>
-						A Coordinator (Sonnet, read-only) splits it into up to 6 subtasks
-						for your specialists' agents. Independent ones run at the same time;
+						A Coordinator (Opus, read-only) splits it into up to 6 subtasks for
+						your specialists' agents. Independent ones run at the same time;
 						each gets its own checks and review.
 					</p>
 				)}

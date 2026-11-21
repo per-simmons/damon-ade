@@ -74,21 +74,22 @@ function task(
 
 const EXPECTED: Record<string, string> = {
 	// planner, architect, implementer, reviewer, quick
-	ui: "sonnet/medium sonnet/high sonnet/medium sonnet/high haiku/medium",
-	ux: "sonnet/high opus/medium sonnet/medium sonnet/high haiku/medium",
-	frontend: "sonnet/medium sonnet/high sonnet/medium sonnet/high haiku/medium",
-	backend: "sonnet/high opus/medium sonnet/medium sonnet/high haiku/medium",
-	api: "sonnet/high opus/medium sonnet/medium sonnet/high haiku/medium",
-	database: "opus/medium opus/high sonnet/high opus/high haiku/medium",
-	qa: "sonnet/high sonnet/high sonnet/medium sonnet/high haiku/medium",
-	security: "opus/high opus/high sonnet/high opus/high haiku/medium",
-	devops: "sonnet/high opus/medium sonnet/high sonnet/high haiku/medium",
-	performance: "sonnet/high opus/high sonnet/high sonnet/high haiku/medium",
-	documentation:
-		"sonnet/medium sonnet/medium sonnet/medium sonnet/medium haiku/medium",
-	mobile: "sonnet/medium opus/medium sonnet/medium sonnet/high haiku/medium",
-	desktop: "sonnet/high opus/medium sonnet/medium sonnet/high haiku/medium",
-	gamedev: "sonnet/high opus/medium sonnet/medium sonnet/high haiku/medium",
+	// Opus plans and reviews, Sonnet implements, Haiku for quick work, Fable
+	// as the architect (escalation and the Exceptional route only).
+	ui: "opus/medium fable/high sonnet/medium opus/medium haiku/medium",
+	ux: "opus/medium fable/high sonnet/medium opus/medium haiku/medium",
+	frontend: "opus/medium fable/high sonnet/medium opus/medium haiku/medium",
+	backend: "opus/high fable/high sonnet/medium opus/high haiku/medium",
+	api: "opus/high fable/high sonnet/medium opus/high haiku/medium",
+	database: "opus/high fable/high sonnet/high opus/high haiku/medium",
+	qa: "opus/medium fable/high sonnet/medium opus/medium haiku/medium",
+	security: "opus/high fable/high sonnet/high opus/high haiku/medium",
+	devops: "opus/high fable/high sonnet/high opus/high haiku/medium",
+	performance: "opus/high fable/high sonnet/high opus/high haiku/medium",
+	documentation: "opus/low opus/medium sonnet/medium sonnet/high haiku/medium",
+	mobile: "opus/medium fable/high sonnet/medium opus/medium haiku/medium",
+	desktop: "opus/high fable/high sonnet/medium opus/medium haiku/medium",
+	gamedev: "opus/high fable/high sonnet/medium opus/medium haiku/medium",
 };
 
 describe("built-in templates", () => {
@@ -302,7 +303,7 @@ describe("built-in templates", () => {
 		}
 	});
 
-	it("16. the Exceptional route escalates to the global Architect, not the template's Opus preset", () => {
+	it("16. the Exceptional route plans with the Architect on Fable, and a user's choice wins", () => {
 		const resolved = resolveSpecialist(specialist("backend"), settings, home);
 		const specialists = { primary: resolved, supporting: [] };
 		expect(
@@ -313,13 +314,13 @@ describe("built-in templates", () => {
 			model: "fable",
 			effort: "high",
 		});
-		// The ordinary escalation stage uses the template's Architect.
+		// The ordinary escalation stage uses the template's Architect: Fable.
 		expect(
 			stageRouting(specialists, task("x", "plan"), settings, "escalate")
 				.routing,
 		).toMatchObject({
-			model: "opus",
-			effort: "medium",
+			model: "fable",
+			effort: "high",
 		});
 		// A user's explicit Architect choice is honoured on the Exceptional route.
 		const chosen = resolveSpecialist(

@@ -281,7 +281,7 @@ export function TeamChatSheet({
 						<span className="text-xs text-muted-foreground">
 							{chat
 								? `Coordinator replies: $${chat.spend.usd.toFixed(2)} (API-equivalent estimate; subtasks are in Tasks)`
-								: "Each reply is a short read-only Sonnet run."}
+								: "Each reply is a short read-only Opus run."}
 						</span>
 						<Button
 							size="sm"

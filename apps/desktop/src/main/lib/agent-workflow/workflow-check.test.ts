@@ -41,7 +41,7 @@ describe("checkAgentsFile", () => {
 			architect: "fable",
 			implementer: "sonnet",
 			quick: "haiku",
-			reviewer: "sonnet",
+			reviewer: "opus",
 		});
 	});
 

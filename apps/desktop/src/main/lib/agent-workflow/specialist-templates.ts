@@ -13,10 +13,13 @@ import type { RoleName } from "./workflow-settings";
  * roles and specializes each role's instructions; maximum turns inherit the
  * global defaults. Additional roles are conditional: they run only when their
  * trigger applies (task wording or the files the task changed), never on
- * every task. Principles: Sonnet is the working model, Haiku only for small
- * low-risk work, Opus for difficult or high-risk reasoning and review, Fable
- * only for exceptional escalation (the "Exceptional" route). Effort is low,
- * medium or high; xhigh and max are never preset.
+ * every task. Principles (2026-11): Opus plans and reviews (judgment-heavy,
+ * costly to get wrong; an independent review by a stronger model than the
+ * one that wrote the code), Sonnet implements (the everyday coder, about
+ * half Opus's price), Haiku only for small low-risk work, Fable only as the
+ * architect, which runs on the Exceptional route and on escalation, never on
+ * every task. Effort scales with risk: low, medium or high; xhigh and max
+ * are never preset.
  *
  * Templates are read live; user edits live on the specialist (or a personal
  * template), so updating these never overwrites a user's changes. Role ids
@@ -87,12 +90,12 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 - Keep keyboard operation and visible focus working for everything interactive.`,
 		roles: roles({
 			planner: [
-				"sonnet",
+				"opus",
 				"medium",
 				"List the affected components, every state they need (loading, empty, error, success, disabled), the breakpoints involved, and which existing primitives to reuse.",
 			],
 			architect: [
-				"sonnet",
+				"fable",
 				"high",
 				"Decide component boundaries and any design-system change (new token, variant or primitive); prefer extending what exists, and record why.",
 			],
@@ -102,8 +105,8 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 				"Build the interface with the project's existing components, tokens and conventions; implement every state the plan lists.",
 			],
 			reviewer: [
-				"sonnet",
-				"high",
+				"opus",
+				"medium",
 				"Check visual consistency with the design system, interactions, responsive behaviour, keyboard operation and every missing state. Point to the exact component.",
 			],
 			quick: [
@@ -193,13 +196,13 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 - Keep keyboard use and accessibility working across the whole journey.`,
 		roles: roles({
 			planner: [
-				"sonnet",
-				"high",
+				"opus",
+				"medium",
 				"Describe the current journey and the proposed one step by step (entry point, prerequisites, main path, failure path, completion feedback), and the wording that changes.",
 			],
 			architect: [
-				"opus",
-				"medium",
+				"fable",
+				"high",
 				"Decide significant navigation or product-structure changes (where a feature lives, what is merged or split) and their effect on existing paths.",
 			],
 			implementer: [
@@ -208,8 +211,8 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 				"Make the flow, interaction and wording changes; keep existing entry points working or redirect them.",
 			],
 			reviewer: [
-				"sonnet",
-				"high",
+				"opus",
+				"medium",
 				"Check that a user can discover the feature, complete the task, understand each label, and recover from errors; flag dead ends and repeated input.",
 			],
 			quick: [
@@ -272,12 +275,12 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 - Add or update component and integration tests where the project has them.`,
 		roles: roles({
 			planner: [
-				"sonnet",
+				"opus",
 				"medium",
 				"Identify state ownership, data flow, async calls and their failure handling, routing changes, and the tests to add.",
 			],
 			architect: [
-				"sonnet",
+				"fable",
 				"high",
 				"Decide state ownership and boundaries between components, stores and the server when they change.",
 			],
@@ -287,8 +290,8 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 				"Implement with the project's state and data patterns; handle loading, error and cancellation.",
 			],
 			reviewer: [
-				"sonnet",
-				"high",
+				"opus",
+				"medium",
 				"Check state ownership, async correctness, error handling, framework boundaries and test coverage.",
 			],
 			quick: [
@@ -353,13 +356,13 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 - Add or update API and integration tests for changed behaviour.`,
 		roles: roles({
 			planner: [
-				"sonnet",
+				"opus",
 				"high",
 				"Cover validation, authorization, transactions, failure handling, idempotency and concurrency for the change, and the tests that prove them.",
 			],
 			architect: [
-				"opus",
-				"medium",
+				"fable",
+				"high",
 				"Decide service boundaries, data ownership and consistency strategy when the change crosses services or needs a new pattern.",
 			],
 			implementer: [
@@ -368,7 +371,7 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 				"Implement in the existing service style; validate input, check authorization, and keep writes consistent.",
 			],
 			reviewer: [
-				"sonnet",
+				"opus",
 				"high",
 				"Check validation, authorization, transactions and consistency, partial failure, idempotency, retries, concurrency and missing tests.",
 			],
@@ -442,13 +445,13 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 - Update documentation and consumers affected by the change.`,
 		roles: roles({
 			planner: [
-				"sonnet",
+				"opus",
 				"high",
 				"Specify the contract change, compatibility for existing consumers, validation, auth, pagination or rate behaviour, and docs to update.",
 			],
 			architect: [
-				"opus",
-				"medium",
+				"fable",
+				"high",
 				"Decide versioning, deprecation and contract shape when a change would break or fork existing consumers.",
 			],
 			implementer: [
@@ -457,7 +460,7 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 				"Implement the contract exactly as specified, with schema validation and auth; update docs and examples.",
 			],
 			reviewer: [
-				"sonnet",
+				"opus",
 				"high",
 				"Check the contract against the plan: compatibility, validation, auth, error semantics, pagination and documentation.",
 			],
@@ -522,11 +525,11 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 		roles: roles({
 			planner: [
 				"opus",
-				"medium",
+				"high",
 				"Plan schema and migration steps, the effect on existing rows, backfills, indexes, rollout compatibility and the repository's migration rules.",
 			],
 			architect: [
-				"opus",
+				"fable",
 				"high",
 				"Decide data modelling and migration strategy for risky changes: destructive steps, large backfills, transaction boundaries.",
 			],
@@ -599,12 +602,12 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 - Never write tests only to raise a count. Report which commands actually ran.`,
 		roles: roles({
 			planner: [
-				"sonnet",
-				"high",
+				"opus",
+				"medium",
 				"Write observable acceptance criteria and the test or command that proves each; plan reproduction first for bugs.",
 			],
 			architect: [
-				"sonnet",
+				"fable",
 				"high",
 				"Decide test infrastructure changes (fixtures, fakes, isolation) when existing tooling cannot support the needed tests.",
 			],
@@ -614,8 +617,8 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 				"Write focused, deterministic tests with meaningful assertions, then the fix; keep mocks scoped.",
 			],
 			reviewer: [
-				"sonnet",
-				"high",
+				"opus",
+				"medium",
 				"Check that each criterion is proved by a test that actually ran, and that the tests would fail without the change.",
 			],
 			quick: [
@@ -684,7 +687,7 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 				"Identify assets, trust boundaries and abuse cases for the change, and the mitigations the plan must include.",
 			],
 			architect: [
-				"opus",
+				"fable",
 				"high",
 				"Decide trust-boundary and authorization design for the change; prefer established mechanisms over custom crypto or auth.",
 			],
@@ -764,13 +767,13 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 - Prepare configuration only: never publish, deploy, install or change infrastructure as part of a task.`,
 		roles: roles({
 			planner: [
-				"sonnet",
+				"opus",
 				"high",
 				"Identify affected pipelines, environments, secrets, artifacts and the rollback path.",
 			],
 			architect: [
-				"opus",
-				"medium",
+				"fable",
+				"high",
 				"Decide pipeline or infrastructure structure when environments, permissions or release flow change.",
 			],
 			implementer: [
@@ -779,7 +782,7 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 				"Change configuration in the project's conventions; keep steps reproducible and secrets in the secret store.",
 			],
 			reviewer: [
-				"sonnet",
+				"opus",
 				"high",
 				"Check reproducibility, environment targeting, secret handling, failure visibility and rollback.",
 			],
@@ -848,12 +851,12 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 - Repeat measurements and check other paths for regressions. Never invent numbers.`,
 		roles: roles({
 			planner: [
-				"sonnet",
+				"opus",
 				"high",
 				"Define the metric, workload, baseline method, success threshold and how correctness is preserved.",
 			],
 			architect: [
-				"opus",
+				"fable",
 				"high",
 				"Decide structural changes (caching layers, data structures, concurrency) when measurements show the design is the bottleneck.",
 			],
@@ -863,7 +866,7 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 				"Make the change the measurements justify; keep it minimal and keep behaviour identical.",
 			],
 			reviewer: [
-				"sonnet",
+				"opus",
 				"high",
 				"Check correctness and that the claimed improvement is backed by before/after measurements.",
 			],
@@ -925,12 +928,12 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 - Never claim support for something the code does not do.`,
 		roles: roles({
 			planner: [
-				"sonnet",
-				"medium",
+				"opus",
+				"low",
 				"Identify the pages, sections and examples to change and the code they describe.",
 			],
 			architect: [
-				"sonnet",
+				"opus",
 				"medium",
 				"Decide documentation structure (new pages, reorganization) when content no longer fits the existing layout.",
 			],
@@ -941,7 +944,7 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 			],
 			reviewer: [
 				"sonnet",
-				"medium",
+				"high",
 				"Check accuracy against the code, clarity of steps, terminology and unsupported claims.",
 			],
 			quick: [
@@ -1000,13 +1003,13 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 - Use the project's framework conventions (Expo, React Native, native modules) instead of new libraries.`,
 		roles: roles({
 			planner: [
-				"sonnet",
+				"opus",
 				"medium",
 				"Cover navigation, lifecycle, permissions, offline behaviour and platform differences for the change.",
 			],
 			architect: [
-				"opus",
-				"medium",
+				"fable",
+				"high",
 				"Decide navigation structure, persistence and background-work strategy when they change across platforms.",
 			],
 			implementer: [
@@ -1015,8 +1018,8 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 				"Implement in the project's framework conventions; handle lifecycle, permissions and offline states.",
 			],
 			reviewer: [
-				"sonnet",
-				"high",
+				"opus",
+				"medium",
 				"Check lifecycle handling, permissions, offline and error states, platform conventions and accessibility.",
 			],
 			quick: [
@@ -1075,13 +1078,13 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 - Follow the project's Electron and IPC conventions.`,
 		roles: roles({
 			planner: [
-				"sonnet",
+				"opus",
 				"high",
 				"Map the process boundaries, IPC calls, filesystem access, lifecycle effects and packaging impact of the change.",
 			],
 			architect: [
-				"opus",
-				"medium",
+				"fable",
+				"high",
 				"Decide process and privilege boundaries when new capabilities cross renderer and main.",
 			],
 			implementer: [
@@ -1090,8 +1093,8 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 				"Implement with validated IPC and the project's conventions; handle paths cross-platform.",
 			],
 			reviewer: [
-				"sonnet",
-				"high",
+				"opus",
+				"medium",
 				"Check IPC validation, privilege boundaries, lifecycle, cross-platform paths and packaging.",
 			],
 			quick: [
@@ -1161,13 +1164,13 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 - Describe concrete play-test steps for every gameplay change.`,
 		roles: roles({
 			planner: [
-				"sonnet",
+				"opus",
 				"high",
 				"Identify the engine-specific approach, gameplay state, input, timing, performance budget, networking authority and play-test steps.",
 			],
 			architect: [
-				"opus",
-				"medium",
+				"fable",
+				"high",
 				"Decide gameplay system structure and authority model when systems interact or replicate.",
 			],
 			implementer: [
@@ -1176,8 +1179,8 @@ export const BUILT_IN_TEMPLATES: SpecialistTemplate[] = [
 				"Implement in the engine's conventions; keep logic frame-rate independent.",
 			],
 			reviewer: [
-				"sonnet",
-				"high",
+				"opus",
+				"medium",
 				"Check frame-rate independence, per-frame cost, engine conventions and play-test steps.",
 			],
 			quick: [

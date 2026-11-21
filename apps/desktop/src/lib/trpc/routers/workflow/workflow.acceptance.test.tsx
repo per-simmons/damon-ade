@@ -258,7 +258,7 @@ describe.if(bash !== null && git !== null)("Auto mode, end to end", () => {
 			["plan", "succeeded", "claude-opus-5-5"],
 			["build", "succeeded", "claude-sonnet-5-5"],
 			["checks", "succeeded", null],
-			["review", "succeeded", "claude-sonnet-5-5"],
+			["review", "succeeded", "claude-opus-5-5"],
 		]);
 		expect(task.runs[3].verdict).toBe("PASS");
 		expect(fake.remainingSteps()).toBe(0);

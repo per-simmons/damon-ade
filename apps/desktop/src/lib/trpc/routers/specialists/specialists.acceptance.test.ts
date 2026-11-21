@@ -762,8 +762,8 @@ describe.if(bash !== null && git !== null)("specialists and roles", () => {
 		expect(request?.stateReason).toContain("all 2 subtask(s) are done");
 
 		const calls = fake.calls().slice(before);
-		// The Coordinator is short, read-only and on Sonnet at medium effort.
-		expect(flag(calls[0].args, "--model")).toBe("claude-sonnet-5-5");
+		// The Coordinator is short, read-only and on Opus at medium effort.
+		expect(flag(calls[0].args, "--model")).toBe("claude-opus-5-5");
 		expect(flag(calls[0].args, "--effort")).toBe("medium");
 		expect(flag(calls[0].args, "--max-turns")).toBe("10");
 		expect(calls[0].args).toContain("--disallowedTools");

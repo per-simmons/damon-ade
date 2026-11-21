@@ -18,7 +18,7 @@ describe("workflow roles", () => {
 			architect: "fable",
 			implementer: "sonnet",
 			quick: "haiku",
-			reviewer: "sonnet",
+			reviewer: "opus",
 		});
 	});
 

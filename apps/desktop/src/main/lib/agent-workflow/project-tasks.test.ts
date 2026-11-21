@@ -282,7 +282,7 @@ describe("stage models", () => {
 		expect(stageModel("plan", plain, settings)).toBe("opus");
 		expect(stageModel("build", plain, settings)).toBe("sonnet");
 		expect(stageModel("fix", plain, settings)).toBe("sonnet");
-		expect(stageModel("review", plain, settings)).toBe("sonnet");
+		expect(stageModel("review", plain, settings)).toBe("opus");
 		expect(stageModel("quick", plain, settings)).toBe("haiku");
 		expect(stageModel("escalate", plain, settings)).toBe("fable");
 		expect(stageModel("plan", { route: "exceptional" }, settings)).toBe(

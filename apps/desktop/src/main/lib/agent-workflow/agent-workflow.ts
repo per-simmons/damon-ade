@@ -203,7 +203,7 @@ At most 5 lines: what changed, and the check result.`,
 		name: "reviewer",
 		description:
 			"Independently reviews finished work against the acceptance criteria in the task's plan.md (or the task description when there is no plan): reads the diff, runs typecheck, lint and tests, and reports pass or fail per criterion. Read-only.",
-		model: "sonnet",
+		model: "opus",
 		effort: "medium",
 		maxTurns: 25,
 		tools: ["Read", "Grep", "Glob", "Bash"],
