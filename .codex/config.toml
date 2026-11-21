@@ -1,3 +1,5 @@
+notify = ['C:\Program Files\WindowsApps\OpenAI.Codex_26.1111.2228.0_x64__2p2nqsd0c76g0\app\resources\cua_node\bin\node_modules\@oai\sky\bin\windows\codex-computer-use.exe', "turn-ended"]
+
 [mcp_servers.superset]
 url = "https://api.superset.sh/api/agent/mcp"
 
