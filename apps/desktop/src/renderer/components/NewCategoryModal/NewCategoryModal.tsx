@@ -7,6 +7,13 @@ import {
 } from "@superset/ui/dialog";
 import { Input } from "@superset/ui/input";
 import { Label } from "@superset/ui/label";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@superset/ui/select";
 import { toast } from "@superset/ui/sonner";
 import { Tabs, TabsList, TabsTrigger } from "@superset/ui/tabs";
 import { useNavigate } from "@tanstack/react-router";
@@ -59,6 +66,13 @@ export function NewCategoryModal() {
 	const photoInputRef = useRef<HTMLInputElement>(null);
 
 	const [blankDir, setBlankDir] = useState("");
+	// Default setup: agents with their specialties, added once the team exists.
+	const [preset, setPreset] = useState("none");
+	const { data: presets = [] } = electronTrpc.specialists.presets.useQuery(
+		undefined,
+		{ enabled: isOpen },
+	);
+	const applyPreset = electronTrpc.specialists.applyPreset.useMutation();
 	const { data: projectsFolder } =
 		electronTrpc.projects.getProjectsFolder.useQuery(undefined, {
 			enabled: isOpen,
@@ -120,6 +134,22 @@ export function NewCategoryModal() {
 	};
 
 	const openTeam = async (projectId: string, workspaceId: string | null) => {
+		if (preset !== "none") {
+			try {
+				const result = await applyPreset.mutateAsync({
+					projectId,
+					presetId: preset,
+				});
+				toast.success(
+					`${result.preset}: added ${result.agentsAdded.length} agent(s) with their specialties`,
+				);
+			} catch (err) {
+				toast.error(
+					`The team was created, but its agents were not added: ${err instanceof Error ? err.message : String(err)}. Right-click the team › Default setup to try again.`,
+				);
+			}
+			void utils.specialists.invalidate();
+		}
 		await utils.workspaces.getAllGrouped.invalidate();
 		await utils.projects.getRecents.invalidate();
 		let target = workspaceId;
@@ -428,6 +458,30 @@ export function NewCategoryModal() {
 					className="hidden"
 					onChange={handlePhoto}
 				/>
+
+				<div className="flex flex-col gap-1.5" data-new-team-preset>
+					<Label>Start with agents</Label>
+					<Select value={preset} onValueChange={setPreset}>
+						<SelectTrigger aria-label="Start with agents">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="none">No agents yet</SelectItem>
+							{presets.map((p) => (
+								<SelectItem key={p.id} value={p.id}>
+									{p.name} · {p.agents.length} agents
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+					<p className="text-xs text-muted-foreground">
+						{preset === "none"
+							? "You can add a group later: right-click the team › Default setup."
+							: (presets.find((p) => p.id === preset)?.agents ?? [])
+									.map((a) => a.name)
+									.join(", ")}
+					</p>
+				</div>
 
 				<div className="flex justify-end gap-2">
 					<Button variant="ghost" onClick={() => closeModal()}>

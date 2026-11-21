@@ -8,17 +8,20 @@ import {
 	type SelectProject,
 	settings,
 	workspaces,
+	worktrees,
 } from "@superset/local-db";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, inArray, isNull, not } from "drizzle-orm";
 import type { BrowserWindow } from "electron";
 import { dialog } from "electron";
 import { track } from "main/lib/analytics";
+import { getSupersetHomeDir } from "main/lib/app-environment";
 import { localDb } from "main/lib/local-db";
 import {
 	deleteProjectIcon,
 	saveProjectIconFromDataUrl,
 } from "main/lib/project-icons";
+import { moveWorkflowRecord, relocateRepository } from "main/lib/team-relocate";
 import { getWorkspaceRuntimeRegistry } from "main/lib/workspace-runtime";
 import { PROJECT_COLOR_VALUES } from "shared/constants/project-colors";
 import simpleGit from "simple-git";
@@ -1293,6 +1296,76 @@ export const createProjectsRouter = (getWindow: () => BrowserWindow | null) => {
 		 * Give a team created before teams had a repository its repository.
 		 * Its agents keep their own folders until the user migrates them.
 		 */
+		/**
+		 * Change a team's folder: move its repository into another folder, or
+		 * point the team at where it was already moved. Agents come along
+		 * (their worktrees are re-linked), and so do the team's tasks and
+		 * specialists. Nothing is deleted.
+		 */
+		relocateTeam: publicProcedure
+			.input(
+				z.object({
+					projectId: z.string(),
+					target: z.string().min(1),
+					mode: z.enum(["move", "relink"]),
+				}),
+			)
+			.mutation(async ({ input }) => {
+				const project = localDb
+					.select()
+					.from(projects)
+					.where(eq(projects.id, input.projectId))
+					.get();
+				if (!project)
+					throw new TRPCError({ code: "NOT_FOUND", message: "Team not found" });
+				if (!project.mainRepoPath) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "This team has no repository yet. Choose one first.",
+					});
+				}
+				const agentWorktrees = localDb
+					.select()
+					.from(worktrees)
+					.where(eq(worktrees.projectId, project.id))
+					.all()
+					.map((w) => w.path);
+				let to: string;
+				try {
+					to = relocateRepository({
+						from: project.mainRepoPath,
+						target: input.target,
+						mode: input.mode,
+						agentWorktrees,
+					});
+				} catch (error) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: error instanceof Error ? error.message : String(error),
+					});
+				}
+				const other = teamForRepository(to);
+				if (other && other.id !== project.id) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: `Another team (${other.name}) already uses ${to}.`,
+					});
+				}
+				moveWorkflowRecord(getSupersetHomeDir(), project.mainRepoPath, to);
+				localDb
+					.update(projects)
+					.set({ mainRepoPath: to, lastOpenedAt: Date.now() })
+					.where(eq(projects.id, project.id))
+					.run();
+				const fresh = localDb
+					.select()
+					.from(projects)
+					.where(eq(projects.id, project.id))
+					.get() as Project;
+				await ensureMainWorkspace(fresh);
+				return { path: to, agentsRelinked: agentWorktrees.length };
+			}),
+
 		setTeamRepository: publicProcedure
 			.input(z.object({ projectId: z.string(), path: z.string().min(1) }))
 			.mutation(async ({ input }) => {

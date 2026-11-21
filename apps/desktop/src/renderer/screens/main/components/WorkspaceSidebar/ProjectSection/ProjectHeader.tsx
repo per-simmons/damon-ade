@@ -15,12 +15,14 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import { HiChevronRight, HiMiniPlus } from "react-icons/hi2";
 import {
+	LuFolderInput,
 	LuFolderOpen,
 	LuImage,
 	LuImageOff,
 	LuPalette,
 	LuPencil,
 	LuSettings,
+	LuUsers,
 	LuX,
 } from "react-icons/lu";
 import { electronTrpc } from "renderer/lib/electron-trpc";
@@ -33,7 +35,9 @@ import {
 } from "shared/constants/project-colors";
 import { STROKE_WIDTH } from "../constants";
 import { RenameInput } from "../RenameInput";
+import { ChangeFolderDialog } from "./ChangeFolderDialog";
 import { CloseProjectDialog } from "./CloseProjectDialog";
+import { DefaultSetupDialog } from "./DefaultSetupDialog";
 import { ProjectThumbnail } from "./ProjectThumbnail";
 import { TeamRepoLine } from "./TeamRepoLine";
 
@@ -72,6 +76,8 @@ export function ProjectHeader({
 	const navigate = useNavigate();
 	const params = useParams({ strict: false }) as { workspaceId?: string };
 	const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
+	const [isSetupOpen, setIsSetupOpen] = useState(false);
+	const [isFolderOpen, setIsFolderOpen] = useState(false);
 	const rename = useProjectRename(projectId, projectName);
 
 	const closeProject = electronTrpc.projects.close.useMutation({
@@ -237,6 +243,20 @@ export function ProjectHeader({
 							<LuSettings className="size-4 mr-2" strokeWidth={STROKE_WIDTH} />
 							Team Settings
 						</ContextMenuItem>
+						<ContextMenuItem onSelect={() => setIsSetupOpen(true)}>
+							<LuUsers className="size-4 mr-2" strokeWidth={STROKE_WIDTH} />
+							Default setup…
+						</ContextMenuItem>
+						<ContextMenuItem
+							onSelect={() => setIsFolderOpen(true)}
+							disabled={!mainRepoPath}
+						>
+							<LuFolderInput
+								className="size-4 mr-2"
+								strokeWidth={STROKE_WIDTH}
+							/>
+							Change folder…
+						</ContextMenuItem>
 						{colorPickerSubmenu}
 						<ContextMenuSeparator />
 						<ContextMenuItem
@@ -259,6 +279,19 @@ export function ProjectHeader({
 					open={isCloseDialogOpen}
 					onOpenChange={setIsCloseDialogOpen}
 					onConfirm={handleConfirmClose}
+				/>
+				<DefaultSetupDialog
+					projectId={projectId}
+					teamName={projectName}
+					open={isSetupOpen}
+					onOpenChange={setIsSetupOpen}
+				/>
+				<ChangeFolderDialog
+					projectId={projectId}
+					teamName={projectName}
+					currentPath={mainRepoPath}
+					open={isFolderOpen}
+					onOpenChange={setIsFolderOpen}
 				/>
 			</>
 		);
@@ -366,6 +399,17 @@ export function ProjectHeader({
 						<LuSettings className="size-4 mr-2" strokeWidth={STROKE_WIDTH} />
 						Team Settings
 					</ContextMenuItem>
+					<ContextMenuItem onSelect={() => setIsSetupOpen(true)}>
+						<LuUsers className="size-4 mr-2" strokeWidth={STROKE_WIDTH} />
+						Default setup…
+					</ContextMenuItem>
+					<ContextMenuItem
+						onSelect={() => setIsFolderOpen(true)}
+						disabled={!mainRepoPath}
+					>
+						<LuFolderInput className="size-4 mr-2" strokeWidth={STROKE_WIDTH} />
+						Change folder…
+					</ContextMenuItem>
 					{colorPickerSubmenu}
 					<ContextMenuItem onSelect={handleToggleImage}>
 						{hideImage ? (
@@ -398,6 +442,19 @@ export function ProjectHeader({
 				open={isCloseDialogOpen}
 				onOpenChange={setIsCloseDialogOpen}
 				onConfirm={handleConfirmClose}
+			/>
+			<DefaultSetupDialog
+				projectId={projectId}
+				teamName={projectName}
+				open={isSetupOpen}
+				onOpenChange={setIsSetupOpen}
+			/>
+			<ChangeFolderDialog
+				projectId={projectId}
+				teamName={projectName}
+				currentPath={mainRepoPath}
+				open={isFolderOpen}
+				onOpenChange={setIsFolderOpen}
 			/>
 		</>
 	);

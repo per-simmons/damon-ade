@@ -23,6 +23,7 @@ import {
 	defaultWorkflowRouterDeps,
 	type WorkspaceContext,
 } from "../workflow/workflow";
+import { teamPresetProcedures } from "./team-presets";
 
 /**
  * Specialists of a team (one repository), their roles and templates.
@@ -169,6 +170,8 @@ export const createSpecialistsRouter = (
 		),
 
 		models: publicProcedure.query(() => modelCatalog()),
+
+		...teamPresetProcedures(deps),
 
 		/** The team's agents, each with the specialties it does. */
 		agents: publicProcedure
